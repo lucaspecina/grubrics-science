@@ -56,7 +56,7 @@ async def evaluate_rubric(
             return 0.0
             
     except Exception as e:
-        print(f"⚠️  Error evaluating rubric: {e}")
+        print(f"Warning: Error evaluating rubric: {e}")
         return 0.0
 
 

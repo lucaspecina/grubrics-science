@@ -111,24 +111,48 @@ Generate only the most impactful, non-redundant rubrics revealing meaningful qua
 def get_adaptive_rubrics_prompt(
     question: str,
     responses: list,
-    existing_rubrics: list = None
+    existing_rubrics: list = None,
+    good_responses: list = None,
+    bad_responses: list = None
 ) -> str:
     """
     Build the complete prompt for generating adaptive rubrics.
     
+    This follows DR-Tulu: responses are first evaluated with current rubrics (Judge),
+    then adaptive rubrics are generated based on what distinguishes good from bad.
+    
     Args:
         question: The original question
-        responses: List of model responses to analyze
+        responses: List of all model responses to analyze
         existing_rubrics: Optional existing rubrics to avoid duplicating
+        good_responses: List of responses identified as "good" (high scores from Judge)
+        bad_responses: List of responses identified as "bad" (low scores from Judge)
     
     Returns:
         Complete prompt string
     """
     import json
     
-    prompt_suffix = f"Question: {question}\n\nResponses:\n"
-    for i, response in enumerate(responses, 1):
-        prompt_suffix += f"Response {i}:\n{response}\n\n"
+    prompt_suffix = f"Question: {question}\n\n"
+    
+    # Include information about good vs bad responses if available
+    if good_responses and bad_responses:
+        prompt_suffix += "=== HIGH-QUALITY RESPONSES (Good examples) ===\n"
+        for i, response in enumerate(good_responses, 1):
+            prompt_suffix += f"Good Response {i}:\n{response}\n\n"
+        
+        prompt_suffix += "\n=== LOW-QUALITY RESPONSES (Bad examples) ===\n"
+        for i, response in enumerate(bad_responses, 1):
+            prompt_suffix += f"Bad Response {i}:\n{response}\n\n"
+        
+        prompt_suffix += "\n=== ALL RESPONSES (for context) ===\n"
+        for i, response in enumerate(responses, 1):
+            prompt_suffix += f"Response {i}:\n{response}\n\n"
+    else:
+        # Fallback: show all responses without labels
+        prompt_suffix += "Responses:\n"
+        for i, response in enumerate(responses, 1):
+            prompt_suffix += f"Response {i}:\n{response}\n\n"
     
     if existing_rubrics:
         prompt_suffix += f"\n\nExisting Rubrics:\n{json.dumps(existing_rubrics, indent=2)}"

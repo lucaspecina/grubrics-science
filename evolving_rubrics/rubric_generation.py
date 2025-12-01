@@ -47,7 +47,7 @@ async def generate_original_rubrics(
         if rubrics and "rubrics" in rubrics:
             return rubrics
         else:
-            print(f"⚠️  Could not extract valid rubrics")
+            print(f"Warning: Could not extract valid rubrics")
             print(f"Response received: {llm_response[:300]}...")
             # Return basic structure if extraction fails
             return {
@@ -61,7 +61,7 @@ async def generate_original_rubrics(
                 ]
             }
     except Exception as e:
-        print(f"❌ Error generating original rubrics: {e}")
+        print(f"Error generating original rubrics: {e}")
         return {
             "query": question,
             "rubrics": [
@@ -78,23 +78,36 @@ async def generate_adaptive_rubrics(
     question: str,
     responses: List[str],
     existing_rubrics: Optional[List[Dict[str, Any]]] = None,
+    good_responses: Optional[List[str]] = None,
+    bad_responses: Optional[List[str]] = None,
     model: Optional[str] = None,
     client: Optional[Any] = None
 ) -> Optional[Dict[str, Any]]:
     """
-    Generate adaptive rubrics based on differences between model responses.
+    Generate adaptive rubrics based on differences between good and bad responses.
+    
+    This follows the DR-Tulu approach: first responses are evaluated with current rubrics
+    (Judge), then adaptive rubrics are generated based on what distinguishes good from bad.
     
     Args:
         question: The original question
-        responses: List of model responses to analyze
+        responses: List of all model responses to analyze
         existing_rubrics: Optional existing rubrics to avoid duplicating
+        good_responses: List of responses identified as "good" (high scores)
+        bad_responses: List of responses identified as "bad" (low scores)
         model: Optional model name override
         client: Optional client instance
     
     Returns:
         Dictionary with 'positive_rubrics' and 'negative_rubrics' keys, or None if failed
     """
-    full_prompt = get_adaptive_rubrics_prompt(question, responses, existing_rubrics)
+    full_prompt = get_adaptive_rubrics_prompt(
+        question, 
+        responses, 
+        existing_rubrics,
+        good_responses=good_responses,
+        bad_responses=bad_responses
+    )
     
     try:
         # Call the LLM
@@ -110,12 +123,12 @@ async def generate_adaptive_rubrics(
         if rubrics:
             return rubrics
         else:
-            print(f"⚠️  Could not extract JSON from LLM response")
+            print(f"Warning: Could not extract JSON from LLM response")
             print(f"Response received: {llm_response[:200]}...")
             return None
             
     except Exception as e:
-        print(f"❌ Error generating adaptive rubrics: {e}")
+        print(f"Error generating adaptive rubrics: {e}")
         return None
 
 

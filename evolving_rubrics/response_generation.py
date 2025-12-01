@@ -49,7 +49,7 @@ async def generate_model_responses(
             )
             responses.append(response.strip())
         except Exception as e:
-            print(f"⚠️  Error generating response {i+1}: {e}")
+            print(f"Warning: Error generating response {i+1}: {e}")
             responses.append(f"Error generating response {i+1}")
     
     return responses

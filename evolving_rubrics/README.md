@@ -13,7 +13,8 @@ evolving_rubrics/
 ├── rubric_generation.py # Rubric generation functions (original & adaptive)
 ├── response_generation.py # Model response generation functions
 ├── evaluation.py        # Response evaluation functions
-└── evolution.py         # Main evolution workflow
+├── evolution.py         # Main evolution workflow
+└── output.py            # Output and history management
 ```
 
 ## Installation
@@ -94,6 +95,42 @@ evaluation = await evaluate_complete_response(
     initial_rubrics
 )
 ```
+
+## Output and History
+
+The evolution process automatically saves a complete history to a JSON file in the `outputs/` directory. This file contains:
+
+- **Initial rubrics**: Starting rubrics for the question
+- **Each iteration**:
+  - All responses generated
+  - Scores from Judge evaluation
+  - Good vs bad response classification
+  - Adaptive rubrics generated
+  - Rubrics before and after the iteration
+- **Final rubrics**: Complete rubric set after all iterations
+- **Rubrics evolution**: Easy-to-compare rubric sets across iterations
+
+### Loading and Analyzing Output
+
+```python
+from evolving_rubrics import load_evolution_history, compare_rubrics_across_iterations
+
+# Load a saved history file
+history = load_evolution_history("outputs/evolution_history_20250112_101530.json")
+
+# Compare rubrics across iterations
+comparison = compare_rubrics_across_iterations(history)
+
+# Access specific data
+print(f"Initial rubrics: {history['initial_rubrics']['total_count']}")
+print(f"Final rubrics: {history['final_rubrics']['total_count']}")
+
+# See rubrics evolution
+for iter_key, iter_data in history['rubrics_evolution'].items():
+    print(f"{iter_key}: {iter_data['rubrics']['total_count']} rubrics")
+```
+
+See `example_analyze_output.py` for a complete example of analyzing evolution history files.
 
 ## Module Descriptions
 

@@ -25,6 +25,11 @@ from .config import (
     RUBRIC_GENERATION_MODEL,
     RUBRIC_JUDGE_MODEL
 )
+from .output import (
+    save_evolution_history,
+    load_evolution_history,
+    compare_rubrics_across_iterations
+)
 
 __all__ = [
     # Main evolution function
@@ -49,6 +54,11 @@ __all__ = [
     'USE_AZURE',
     'RUBRIC_GENERATION_MODEL',
     'RUBRIC_JUDGE_MODEL',
+    
+    # Output
+    'save_evolution_history',
+    'load_evolution_history',
+    'compare_rubrics_across_iterations',
 ]
 
 __version__ = '1.0.0'
