@@ -1,0 +1,18 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Evolving Rubrics",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/test_evolve.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}",
+            "python": "${command:python.interpreterPath}"
+        }
+    ]
+}
