@@ -8,21 +8,25 @@ Contains all prompt templates used throughout the package.
 # ORIGINAL RUBRIC GENERATION PROMPT
 # ============================================================================
 
-def get_original_rubrics_prompt(question: str) -> str:
+def get_original_rubrics_prompt(question, golden_answer):
     """
     Generate prompt for creating initial rubrics from a question.
     
+    If a golden answer is provided, the model will use it as reference but must
+    generalize the rubrics so they work for other well-formed hypotheses too.
+    
     Args:
         question: The question to generate rubrics for
+        golden_answer: Optional golden answer string (formatted GoldenAnswer) to use as reference
     
     Returns:
         Formatted prompt string
     """
-    return f"""You are an expert in educational evaluation. Generate evaluation rubrics for the following question.
+    base_prompt = """You are an expert in educational evaluation. Generate evaluation rubrics for the following question.
 
 Question: {question}
 
-Generate 2-4 rubrics that cover the essential aspects for evaluating a response to this question.
+Generate 5-6 rubrics that cover the essential aspects for evaluating a response to this question.
 Each rubric must have:
 - title: A short and descriptive title
 - description: A detailed description of what is being evaluated
@@ -39,6 +43,35 @@ Respond ONLY with valid JSON in this format:
     }}
   ]
 }}"""
+    
+    if golden_answer:
+        golden_section = f"""
+
+=== IMPORTANT: GOLDEN ANSWER REFERENCE ===
+Below is a reference answer (golden answer) that addresses this question. Use it as guidance to understand what makes a good response, but CRITICALLY IMPORTANT: you must create GENERAL rubrics that work for ANY well-formed hypothesis addressing this question, not just this specific one.
+
+{golden_answer}
+
+=== INSTRUCTIONS FOR GENERALIZATION ===
+- Use the golden answer to understand what makes a GOOD response structure and content
+- Extract GENERAL principles and quality criteria that apply broadly
+- DO NOT create rubrics that are specific to the exact hypothesis, experiments, or reasoning in the golden answer
+- Create rubrics that would evaluate ANY well-formed scientific hypothesis, experimental design, and reasoning process
+- Focus on: clarity, logical structure, scientific rigor, completeness, coherence
+- The rubrics should help distinguish good scientific thinking from poor, regardless of the specific hypothesis
+
+Example of what NOT to do:
+- BAD: "The response must mention guanidine sulfate integration" (too specific)
+- GOOD: "The response must propose a clear material or design intervention with justification" (general principle)
+
+Example of what TO do:
+- GOOD: "The response must present a testable hypothesis with clear independent and dependent variables"
+- GOOD: "The response must describe experimental methods that can verify the hypothesis"
+- GOOD: "The response must show logical reasoning connecting background knowledge to the proposed solution"
+"""
+        return base_prompt.format(question=question) + golden_section
+    else:
+        return base_prompt.format(question=question)
 
 
 # ============================================================================

@@ -22,6 +22,7 @@ async def evolve_rubrics_for_example(
     num_iterations: int = 1,
     num_responses_per_iteration: int = 4,
     initial_rubrics: Optional[Dict[str, Any]] = None,
+    golden_answer: Optional[str] = None,
     client: Optional[Any] = None,
     save_output: bool = True,
     output_path: Optional[str] = None
@@ -44,6 +45,7 @@ async def evolve_rubrics_for_example(
         num_iterations: Number of evolution iterations to perform
         num_responses_per_iteration: Number of responses to generate per iteration
         initial_rubrics: Optional initial rubrics (if None, will be generated)
+        golden_answer: Optional text (golden answer) to guide initial rubric generation (will be generalized)
         client: Optional client instance
         save_output: Whether to save evolution history to a file (default: True)
         output_path: Optional custom path for output file. If None, auto-generates
@@ -65,8 +67,14 @@ async def evolve_rubrics_for_example(
     # Step 1: Generate or use initial rubrics
     if initial_rubrics is None:
         print("\nStep 1: Generating initial rubrics with LLM...")
+        if golden_answer:
+            print("Using golden answer as reference (will be generalized)...")
         print("-" * 70)
-        initial_ground_truth = await generate_original_rubrics(question, client=client)
+        initial_ground_truth = await generate_original_rubrics(
+            question, 
+            golden_answer=golden_answer,
+            client=client
+        )
         print(f"Generated rubrics: {len(initial_ground_truth['rubrics'])}")
         for i, rubric in enumerate(initial_ground_truth["rubrics"], 1):
             print(f"  {i}. [{rubric['title']}] {rubric['description'][:80]}...")

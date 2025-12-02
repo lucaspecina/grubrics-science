@@ -16,14 +16,20 @@ from .prompts import (
 
 async def generate_original_rubrics(
     question: str,
+    golden_answer: Optional[str] = None,
     model: Optional[str] = None,
     client: Optional[Any] = None
 ) -> Dict[str, Any]:
     """
     Generate initial rubrics for a question using an LLM.
     
+    If a golden_answer is provided, it will be used as reference to create
+    more informed rubrics, but the rubrics will be generalized to work for
+    any well-formed hypothesis, not just the specific one in the golden answer.
+    
     Args:
         question: The question to generate rubrics for
+        golden_answer: Optional text to use as reference for rubric generation
         model: Optional model name override
         client: Optional client instance
     
@@ -33,7 +39,7 @@ async def generate_original_rubrics(
     if model is None:
         model = RUBRIC_GENERATION_MODEL
     
-    prompt = get_original_rubrics_prompt(question)
+    prompt = get_original_rubrics_prompt(question, golden_answer=golden_answer)
 
     try:
         llm_response = await call_llm(

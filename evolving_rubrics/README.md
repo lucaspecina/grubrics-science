@@ -64,6 +64,31 @@ print(result['iterations'])  # List with results from each iteration
 print(result['final_ground_truth'])
 ```
 
+### Using Golden Answer (Optional)
+
+You can provide a golden answer (as plain text) to guide initial rubric generation. The rubrics will be generalized to work for any well-formed hypothesis, not just the specific one:
+
+```python
+from evolving_rubrics import evolve_rubrics_for_example
+
+# Create golden answer as text (any format you want)
+golden_answer = """
+Main Hypothesis: The hypothesis is that integrating guanidine sulfate...
+Experiments: The experiments include thermoelectric performance tests...
+Reasoning Process: bkg + insp1 + insp2 = hyp
+Note: Additional context...
+"""
+
+# Use golden answer to guide initial rubric generation
+result = await evolve_rubrics_for_example(
+    question="Your question here...",
+    num_iterations=3,
+    golden_answer=golden_answer  # Optional: will be used to create better initial rubrics
+)
+```
+
+The golden answer can be any text format you want - it's just passed as a string to help the model understand what makes a good response.
+
 ### Advanced Usage
 
 You can also use individual functions:
@@ -165,6 +190,7 @@ Functions for:
 
 ### `evolution.py`
 Main workflow function that orchestrates the entire evolution process through multiple iterations.
+
 
 ## Example Workflow
 
