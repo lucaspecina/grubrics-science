@@ -9,6 +9,14 @@ import yaml
 from pathlib import Path
 import tempfile
 import shutil
+import os
+
+# Load environment variables from .env
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 from grubrics_science.tasks.frontierscience import FrontierScienceTask
 from grubrics_science.llm.client import AzureOpenAIClient
@@ -23,9 +31,9 @@ from grubrics_science.rl.model_wrap import GRubricsModelWrapper
 # ============================================================================
 
 # Precompute settings
-NUM_QUESTIONS = 2  # Número de preguntas a procesar
+NUM_QUESTIONS = 5  # Número de preguntas a procesar
 K_ANSWERS = 2  # Número de respuestas por pregunta
-USE_TEMP_CACHE = True  # Si True, usa cache temporal (se borra después). Si False, usa cache real.
+USE_TEMP_CACHE = True  # Si True, usa cache temporal (se borra después). Si False, usa cache real. -> todas las respuestas generadas, scores calculados, etc.
 
 # Train settings (solo si RUN_TRAIN = True)
 RUN_TRAIN = False  # Si True, ejecuta también el train completo (requiere Qwen cargado)
@@ -39,9 +47,22 @@ DEVICE = "cuda"  # "cuda" o "cpu"
 DTYPE = "bfloat16"  # "bfloat16" o "float32"
 
 # Judge/Answer Policy settings
-JUDGE_MODEL = "gpt-4o-mini"
-ANSWER_POLICY_MODEL = "gpt-4o-mini"
-USE_AZURE = True
+# These will use environment variables from .env if not specified
+# IMPORTANT: In Azure OpenAI, use the DEPLOYMENT NAME, not the model name
+# Example: If your deployment is named "gpt-5-chat", use that
+# You can override here or set in .env:
+#   RUBRIC_JUDGE_MODEL=gpt-5-chat (your Azure deployment name)
+#   RUBRIC_GENERATION_MODEL=gpt-5-chat (your Azure deployment name)
+JUDGE_MODEL = os.environ.get("RUBRIC_JUDGE_MODEL", "gpt-4o-mini")
+ANSWER_POLICY_MODEL = os.environ.get("RUBRIC_GENERATION_MODEL", "gpt-4o-mini")
+USE_AZURE = os.environ.get("USE_AZURE_OPENAI", "true").lower() == "true"
+
+# Print configuration for debugging
+print(f"Loaded config from .env:")
+print(f"  JUDGE_MODEL: {JUDGE_MODEL}")
+print(f"  ANSWER_POLICY_MODEL: {ANSWER_POLICY_MODEL}")
+print(f"  USE_AZURE: {USE_AZURE}")
+print(f"  AZURE_API_BASE: {os.environ.get('AZURE_API_BASE', 'not set')}")
 
 # ============================================================================
 
@@ -53,6 +74,13 @@ async def test_precompute_smoke():
     print("=" * 70)
     print(f"Configuration: {NUM_QUESTIONS} questions, K={K_ANSWERS} answers per question")
     print(f"Using {'temporary' if USE_TEMP_CACHE else 'persistent'} cache")
+    print(f"\nAzure OpenAI Configuration:")
+    print(f"  JUDGE_MODEL: {JUDGE_MODEL}")
+    print(f"  ANSWER_POLICY_MODEL: {ANSWER_POLICY_MODEL}")
+    print(f"  USE_AZURE: {USE_AZURE}")
+    print(f"  AZURE_API_BASE: {os.environ.get('AZURE_API_BASE', 'not set')}")
+    if USE_AZURE and not os.environ.get('AZURE_API_KEY'):
+        print("  ⚠️  WARNING: AZURE_API_KEY not found in environment!")
     
     # Setup cache directory
     if USE_TEMP_CACHE:
@@ -105,7 +133,7 @@ async def test_precompute_smoke():
                 prompt = get_answer_policy_prompt(question, "normal")
                 answer = await answer_policy_client.generate(
                     prompt=prompt,
-                    max_tokens=512,
+                    max_tokens=2048,
                     temperature=0.8
                 )
                 answers.append(answer.strip())

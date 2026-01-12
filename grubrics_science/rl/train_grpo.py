@@ -14,6 +14,14 @@ import random
 import numpy as np
 import torch
 import sys
+import os
+
+# Load environment variables from .env
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 from ..tasks.frontierscience import FrontierScienceTask
 from ..llm.client import AzureOpenAIClient, QwenClient
@@ -197,10 +205,13 @@ async def train_mode(config: Dict[str, Any], logger):
         dtype=config['model']['dtype']
     )
     
-    # Initialize Judge
+    # Initialize Judge (use env vars if available)
+    judge_model = os.environ.get("RUBRIC_JUDGE_MODEL", config['judge']['model'])
+    use_azure = os.environ.get("USE_AZURE_OPENAI", str(config['judge']['use_azure'])).lower() == "true"
+    
     judge = Judge(
-        model=config['judge']['model'],
-        use_azure=config['judge']['use_azure']
+        model=judge_model,
+        use_azure=use_azure
     )
     
     # Training config

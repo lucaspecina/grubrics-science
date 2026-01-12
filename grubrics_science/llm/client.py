@@ -9,6 +9,13 @@ from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any
 import os
 
+# Load environment variables from .env if available
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 try:
     from openai import AsyncOpenAI, AsyncAzureOpenAI
 except ImportError:
@@ -74,7 +81,7 @@ class AzureOpenAIClient(LLMClient):
         if use_azure:
             api_key = api_key or os.environ.get("AZURE_API_KEY", "")
             api_base = api_base or os.environ.get("AZURE_API_BASE", "")
-            api_version = api_version or os.environ.get("AZURE_API_VERSION", "2024-02-15-preview")
+            api_version = api_version or os.environ.get("AZURE_API_VERSION", "2024-12-01-preview")
             
             if not api_key:
                 raise ValueError("AZURE_API_KEY not set")
