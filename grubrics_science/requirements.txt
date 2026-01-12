@@ -1,0 +1,12 @@
+# Core dependencies
+torch>=2.0.0
+transformers>=4.51.0
+numpy>=1.24.0
+scipy>=1.10.0
+pyyaml>=6.0
+openai>=1.0.0
+
+# Optional
+wandb>=0.15.0  # For experiment tracking
+accelerate>=0.20.0  # For model loading
+
