@@ -84,16 +84,28 @@ class FrontierScienceTask:
         question: str,
         answers: List[str],
         gold_scores: List[float],
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        gold_details: Optional[List[Dict[str, Any]]] = None
     ):
-        """Save a cache entry."""
+        """
+        Save a cache entry.
+        
+        Args:
+            question_id: Unique identifier for the question
+            question: The question text
+            answers: List of generated answers
+            gold_scores: List of gold scores (one per answer)
+            metadata: Optional metadata dict
+            gold_details: Optional list of detailed evaluations (one per answer) with item-by-item breakdowns
+        """
         save_cache_entry(
             question_id=question_id,
             question=question,
             answers=answers,
             gold_scores=gold_scores,
             cache_path=self.cache_path,
-            metadata=metadata
+            metadata=metadata,
+            gold_details=gold_details
         )
     
     def get_cached_data(self, question_id: str) -> Optional[Dict[str, Any]]:

@@ -80,6 +80,7 @@ async def precompute_mode(config: Dict[str, Any], logger):
     
     K = config['precompute']['K']
     seed = config['precompute']['seed']
+    max_answer_tokens = config['answer_policy'].get('max_tokens', 512)
     set_seed(seed)
     
     logger.info(f"Dataset: {len(task)} questions")
@@ -124,6 +125,8 @@ async def precompute_mode(config: Dict[str, Any], logger):
         # Shuffle for randomness
         random.shuffle(instruction_types)
         
+        # Generate K answers in parallel
+        answer_tasks = []
         for i, inst_type in enumerate(instruction_types[:K]):
             prompt = get_answer_policy_prompt(question, inst_type)
             
@@ -132,37 +135,57 @@ async def precompute_mode(config: Dict[str, Any], logger):
             # Note: Azure OpenAI doesn't support seed directly, but we can vary temperature slightly
             temp = 0.3 if inst_type == "low_temp" else (1.2 if inst_type == "high_temp" else 0.8)
             
-            answer = await answer_policy_client.generate(
-                prompt=prompt,
-                max_tokens=1024,
-                temperature=temp
+            answer_tasks.append(
+                answer_policy_client.generate(
+                    prompt=prompt,
+                    max_tokens=max_answer_tokens,
+                    temperature=temp
+                )
             )
-            answers.append(answer.strip())
+        
+        # Execute all generation tasks in parallel
+        answer_texts = await asyncio.gather(*answer_tasks)
+        answers = [answer.strip() for answer in answer_texts]
         
         logger.info(f"  Generated {len(answers)} answers")
         
-        # Compute gold scores using golden rubric
-        logger.info(f"  Computing gold scores with golden rubric...")
-        gold_scores = []
+        # Compute gold scores using golden rubric (in parallel)
+        logger.info(f"  Computing gold scores with golden rubric (parallel)...")
+        score_matrix, details_matrix = await judge.evaluate_multiple_answers(
+            question=question,
+            answers=answers,
+            rubrics=[golden_rubric],
+            return_details=True
+        )
+        gold_scores = [score_matrix[i][0] for i in range(len(answers))]  # Single rubric
         
-        for i, answer in enumerate(answers):
-            scores = await judge.evaluate_batch(
-                question=question,
-                answer=answer,
-                rubrics=[golden_rubric],
-                answer_id=f"a{i+1}"
-            )
-            gold_scores.append(scores[0])  # Single rubric
+        # Extract gold details (item-by-item breakdowns) for each answer
+        gold_details = []
+        for i, detail_list in enumerate(details_matrix):
+            # Each detail_list contains evaluations for all rubrics
+            # For gold scores, we only have one rubric (the golden one)
+            gold_detail = detail_list[0] if detail_list else {}
+            gold_details.append(gold_detail)
+        
+        # Log detailed explanations for debugging
+        for i, (score, detail) in enumerate(zip(gold_scores, gold_details)):
+            item_scores = detail.get('item_scores', [])
+            if item_scores:
+                logger.debug(f"    Answer {i+1} score: {score:.3f} ({len(item_scores)} items)")
+            else:
+                notes = detail.get('notes', 'No explanation')[:100]
+                logger.debug(f"    Answer {i+1} score: {score:.3f} - {notes}...")
         
         logger.info(f"  Gold scores: {[f'{s:.3f}' for s in gold_scores]}")
         
-        # Save to cache
+        # Save to cache (including item-by-item details)
         task.save_cache_entry(
             question_id=q_id,
             question=question,
             answers=answers,
             gold_scores=gold_scores,
-            metadata={'subject': example.subject}
+            metadata={'subject': example.subject},
+            gold_details=gold_details
         )
         
         logger.info(f"  Saved to cache")
@@ -321,11 +344,30 @@ async def train_mode(config: Dict[str, Any], logger):
                     rubrics.append(rubric_text.strip())
                 
                 # Evaluate rubrics with Judge (batched)
-                score_matrix = await judge.evaluate_multiple_answers(
+                score_matrix, details_matrix = await judge.evaluate_multiple_answers(
                     question=question,
                     answers=selected_answers,
-                    rubrics=rubrics
+                    rubrics=rubrics,
+                    return_details=True
                 )
+                
+                # Log detailed evaluations for debugging
+                logger.debug(f"  Judge evaluations:")
+                for j, rubric in enumerate(rubrics):
+                    logger.debug(f"    Rubric {j+1}: {rubric[:80]}...")
+                    for i, answer_details in enumerate(details_matrix):
+                        detail = answer_details[j]
+                        total_score = detail.get('total_score', detail.get('score', 0.0))
+                        item_scores = detail.get('item_scores', [])
+                        if item_scores:
+                            logger.debug(f"      Answer {i+1}: total_score={total_score:.3f}")
+                            for item in item_scores[:2]:  # Show first 2 items
+                                item_desc = item.get('item_description', 'Unknown')[:30]
+                                item_score = item.get('score', 0.0)
+                                logger.debug(f"        - {item_desc}: {item_score:.3f}")
+                        else:
+                            notes = detail.get('notes', 'No explanation')[:80]
+                            logger.debug(f"      Answer {i+1}: score={total_score:.3f} - {notes}...")
                 
                 # Compute rewards for each rubric
                 rubric_rewards = []

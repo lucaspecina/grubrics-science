@@ -46,6 +46,7 @@ judge:
 answer_policy:
   model: "gpt-4o-mini"
   use_azure: true
+  max_tokens: 512  # Max tokens for answer generation (reduce if answers get cut off)
   
 # Logging
 logging:

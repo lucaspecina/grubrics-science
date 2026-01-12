@@ -33,7 +33,8 @@ from grubrics_science.rl.model_wrap import GRubricsModelWrapper
 # Precompute settings
 NUM_QUESTIONS = 5  # Número de preguntas a procesar
 K_ANSWERS = 2  # Número de respuestas por pregunta
-USE_TEMP_CACHE = True  # Si True, usa cache temporal (se borra después). Si False, usa cache real. -> todas las respuestas generadas, scores calculados, etc.
+USE_TEMP_CACHE = False  # Si True, usa cache temporal (se borra después). Si False, usa cache real. -> todas las respuestas generadas, scores calculados, etc.
+MAX_ANSWER_TOKENS = 512  # Máximo de tokens para respuestas generadas (reducir si se cortan mucho)
 
 # Train settings (solo si RUN_TRAIN = True)
 RUN_TRAIN = False  # Si True, ejecuta también el train completo (requiere Qwen cargado)
@@ -127,36 +128,62 @@ async def test_precompute_smoke():
             question = example.problem
             golden_rubric = example.golden_rubric
             
-            # Generate K answers
-            answers = []
-            for i in range(K_ANSWERS):
-                prompt = get_answer_policy_prompt(question, "normal")
-                answer = await answer_policy_client.generate(
-                    prompt=prompt,
-                    max_tokens=2048,
+            # Generate K answers in parallel
+            print(f"  Generating {K_ANSWERS} answers in parallel...")
+            answer_tasks = [
+                answer_policy_client.generate(
+                    prompt=get_answer_policy_prompt(question, "normal"),
+                    max_tokens=MAX_ANSWER_TOKENS,
                     temperature=0.8
                 )
-                answers.append(answer.strip())
+                for _ in range(K_ANSWERS)
+            ]
+            answer_texts = await asyncio.gather(*answer_tasks)
+            answers = [answer.strip() for answer in answer_texts]
+            for i, answer in enumerate(answers):
                 print(f"  Generated answer {i+1}/{K_ANSWERS}: {len(answer)} chars")
             
-            # Compute gold scores
-            gold_scores = []
-            for i, answer in enumerate(answers):
-                scores = await judge.evaluate_batch(
-                    question=question,
-                    answer=answer,
-                    rubrics=[golden_rubric],
-                    answer_id=f"a{i+1}"
-                )
-                gold_scores.append(scores[0])
-                print(f"  Gold score {i+1}: {scores[0]:.3f}")
+            # Compute gold scores in parallel
+            print(f"  Evaluating {K_ANSWERS} answers with Judge in parallel...")
+            score_matrix, details_matrix = await judge.evaluate_multiple_answers(
+                question=question,
+                answers=answers,
+                rubrics=[golden_rubric],
+                return_details=True
+            )
+            gold_scores = [score_matrix[i][0] for i in range(len(answers))]
             
-            # Save to cache
+            # Extract gold details (item-by-item breakdowns) for each answer
+            gold_details = []
+            for i, detail_list in enumerate(details_matrix):
+                # Each detail_list contains evaluations for all rubrics
+                # For gold scores, we only have one rubric (the golden one)
+                gold_detail = detail_list[0] if detail_list else {}
+                gold_details.append(gold_detail)
+            
+            for i, (score, detail) in enumerate(zip(gold_scores, gold_details)):
+                print(f"  Gold score {i+1}: {score:.3f}")
+                item_scores = detail.get('item_scores', [])
+                if item_scores:
+                    print(f"    Item-by-item breakdown:")
+                    for item in item_scores[:3]:  # Show first 3 items
+                        item_desc = item.get('item_description', 'Unknown item')
+                        item_score = item.get('score', 0.0)
+                        item_notes = item.get('notes', '')[:100]
+                        print(f"      - {item_desc}: {item_score:.3f} - {item_notes}...")
+                    if len(item_scores) > 3:
+                        print(f"      ... ({len(item_scores) - 3} more items)")
+                else:
+                    notes = detail.get('notes', 'No explanation')[:150]
+                    print(f"    Explanation: {notes}...")
+            
+            # Save to cache (including item-by-item details)
             task.save_cache_entry(
                 question_id=example.question_id,
                 question=question,
                 answers=answers,
-                gold_scores=gold_scores
+                gold_scores=gold_scores,
+                gold_details=gold_details
             )
             print(f"  Saved to cache")
         
@@ -281,11 +308,34 @@ async def test_train_smoke(cache_dir: str):
         
         # Evaluate rubrics with Judge
         print(f"  Evaluating rubrics with Judge...")
-        score_matrix = await judge.evaluate_multiple_answers(
+        score_matrix, details_matrix = await judge.evaluate_multiple_answers(
             question=question,
             answers=selected_answers,
-            rubrics=rubrics
+            rubrics=rubrics,
+            return_details=True
         )
+        
+        # Print detailed evaluations
+        print(f"  Judge evaluation details:")
+        for j, rubric in enumerate(rubrics):
+            print(f"    Rubric {j+1}:")
+            for i, answer_details in enumerate(details_matrix):
+                detail = answer_details[j]
+                total_score = detail.get('total_score', detail.get('score', 0.0))
+                print(f"      Answer {i+1}: total_score={total_score:.3f}")
+                item_scores = detail.get('item_scores', [])
+                if item_scores:
+                    print(f"        Item-by-item breakdown:")
+                    for item in item_scores[:2]:  # Show first 2 items per answer
+                        item_desc = item.get('item_description', 'Unknown item')
+                        item_score = item.get('score', 0.0)
+                        item_notes = item.get('notes', '')[:80]
+                        print(f"          - {item_desc}: {item_score:.3f} - {item_notes}...")
+                    if len(item_scores) > 2:
+                        print(f"          ... ({len(item_scores) - 2} more items)")
+                else:
+                    notes = detail.get('notes', 'No explanation')
+                    print(f"        Explanation: {notes[:150]}...")
         
         # Compute rewards
         rubric_rewards = []

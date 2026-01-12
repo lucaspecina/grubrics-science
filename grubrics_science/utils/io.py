@@ -35,9 +35,21 @@ def save_cache_entry(
     answers: List[str],
     gold_scores: List[float],
     cache_path: Path,
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None,
+    gold_details: Optional[List[Dict[str, Any]]] = None
 ):
-    """Save a single cache entry."""
+    """
+    Save a single cache entry.
+    
+    Args:
+        question_id: Unique identifier for the question
+        question: The question text
+        answers: List of generated answers
+        gold_scores: List of gold scores (one per answer)
+        cache_path: Path to cache file
+        metadata: Optional metadata dict
+        gold_details: Optional list of detailed evaluations (one per answer) with item-by-item breakdowns
+    """
     entry = {
         'question_id': question_id,
         'question': question,
@@ -46,6 +58,8 @@ def save_cache_entry(
     }
     if metadata:
         entry['metadata'] = metadata
+    if gold_details is not None:
+        entry['gold_details'] = gold_details
     
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     with open(cache_path, 'a', encoding='utf-8') as f:
