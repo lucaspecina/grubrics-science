@@ -1,6 +1,7 @@
 """Smoke test for GRubrics Science.
 
 Tests precompute and train modes with minimal settings.
+You can modify the parameters at the top of this file to customize the test.
 """
 
 import asyncio
@@ -15,17 +16,53 @@ from grubrics_science.llm.prompts import get_answer_policy_prompt, get_grubrics_
 from grubrics_science.judge.judge import Judge
 from grubrics_science.rewards.alignment import compute_reward, compute_alignment
 from grubrics_science.utils.seeding import set_seed
+from grubrics_science.rl.model_wrap import GRubricsModelWrapper
+
+# ============================================================================
+# CONFIGURACIÓN - Modifica estos parámetros según necesites
+# ============================================================================
+
+# Precompute settings
+NUM_QUESTIONS = 2  # Número de preguntas a procesar
+K_ANSWERS = 2  # Número de respuestas por pregunta
+USE_TEMP_CACHE = True  # Si True, usa cache temporal (se borra después). Si False, usa cache real.
+
+# Train settings (solo si RUN_TRAIN = True)
+RUN_TRAIN = False  # Si True, ejecuta también el train completo (requiere Qwen cargado)
+K_TRAIN = 2  # Subset de respuestas para entrenar
+M_RUBRICS = 2  # Número de rúbricas a generar
+NUM_STEPS = 2  # Número de steps de entrenamiento
+
+# Model settings (para train)
+QWEN_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"  # Modelo Qwen a usar
+DEVICE = "cuda"  # "cuda" o "cpu"
+DTYPE = "bfloat16"  # "bfloat16" o "float32"
+
+# Judge/Answer Policy settings
+JUDGE_MODEL = "gpt-4o-mini"
+ANSWER_POLICY_MODEL = "gpt-4o-mini"
+USE_AZURE = True
+
+# ============================================================================
 
 
 async def test_precompute_smoke():
-    """Test precompute mode with 2 questions, K=2."""
+    """Test precompute mode with configurable parameters."""
     print("=" * 70)
     print("SMOKE TEST: PRECOMPUTE MODE")
     print("=" * 70)
+    print(f"Configuration: {NUM_QUESTIONS} questions, K={K_ANSWERS} answers per question")
+    print(f"Using {'temporary' if USE_TEMP_CACHE else 'persistent'} cache")
     
-    # Create temp cache dir
-    temp_dir = Path(tempfile.mkdtemp())
-    cache_dir = temp_dir / "cache"
+    # Setup cache directory
+    if USE_TEMP_CACHE:
+        temp_dir = Path(tempfile.mkdtemp())
+        cache_dir = temp_dir / "cache"
+        cleanup_cache = True
+    else:
+        cache_dir = Path("grubrics_science/data/cache")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cleanup_cache = False
     
     try:
         # Load dataset
@@ -38,33 +75,33 @@ async def test_precompute_smoke():
             cache_dir=str(cache_dir)
         )
         
-        print(f"Loaded {len(task)} questions")
+        print(f"Loaded {len(task)} questions from dataset")
         
-        # Limit to 2 questions for smoke test
-        test_questions = task.examples[:2]
+        # Limit to configured number of questions
+        test_questions = task.examples[:NUM_QUESTIONS]
         
         # Initialize clients
         answer_policy_client = AzureOpenAIClient(
-            model="gpt-4o-mini",
-            use_azure=True
+            model=ANSWER_POLICY_MODEL,
+            use_azure=USE_AZURE
         )
         
         judge = Judge(
-            model="gpt-4o-mini",
-            use_azure=True
+            model=JUDGE_MODEL,
+            use_azure=USE_AZURE
         )
         
         set_seed(42)
         
-        # Process 2 questions with K=2 answers each
+        # Process questions with K answers each
         for idx, example in enumerate(test_questions):
-            print(f"\nQuestion {idx+1}/2 (ID: {example.question_id})")
+            print(f"\nQuestion {idx+1}/{len(test_questions)} (ID: {example.question_id})")
             question = example.problem
             golden_rubric = example.golden_rubric
             
-            # Generate 2 answers
+            # Generate K answers
             answers = []
-            for i in range(2):
+            for i in range(K_ANSWERS):
                 prompt = get_answer_policy_prompt(question, "normal")
                 answer = await answer_policy_client.generate(
                     prompt=prompt,
@@ -72,7 +109,7 @@ async def test_precompute_smoke():
                     temperature=0.8
                 )
                 answers.append(answer.strip())
-                print(f"  Generated answer {i+1}: {len(answer)} chars")
+                print(f"  Generated answer {i+1}/{K_ANSWERS}: {len(answer)} chars")
             
             # Compute gold scores
             gold_scores = []
@@ -98,48 +135,192 @@ async def test_precompute_smoke():
         # Verify cache
         cache = task.load_cache()
         print(f"\nCache verification: {len(cache)} entries")
-        assert len(cache) == 2, f"Expected 2 cache entries, got {len(cache)}"
+        assert len(cache) == len(test_questions), f"Expected {len(test_questions)} cache entries, got {len(cache)}"
         
         print("\n✅ PRECOMPUTE SMOKE TEST PASSED")
+        if not USE_TEMP_CACHE:
+            print(f"Cache saved to: {cache_dir}")
+        
+        return str(cache_dir)  # Return cache dir for train test
         
     finally:
-        # Cleanup
-        shutil.rmtree(temp_dir, ignore_errors=True)
+        # Cleanup temp cache if used
+        if cleanup_cache:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
-async def test_train_smoke():
-    """Test train mode with minimal settings."""
+async def test_train_smoke(cache_dir: str):
+    """Test train mode with configurable parameters."""
     print("\n" + "=" * 70)
     print("SMOKE TEST: TRAIN MODE")
     print("=" * 70)
+    print(f"Configuration: k_train={K_TRAIN}, M={M_RUBRICS}, steps={NUM_STEPS}")
     
-    # This is a simplified test that just verifies the components work
-    # Full training requires actual model loading which may be heavy
+    # Load cache
+    dataset_path = Path("frontierscience-research/test.jsonl")
+    if not dataset_path.exists():
+        dataset_path = Path(__file__).parent.parent / dataset_path
     
-    print("Testing reward computation...")
-    scores = [0.8, 0.6, 0.4, 0.2]
-    gold_scores = [0.9, 0.7, 0.5, 0.3]
-    rubric_text = "Test rubric " * 10
+    task = FrontierScienceTask(
+        dataset_path=str(dataset_path),
+        cache_dir=cache_dir
+    )
     
-    alignment = compute_alignment(scores, gold_scores, "spearman")
-    reward = compute_reward(scores, gold_scores, rubric_text, lambda_len=0.01)
+    cache = task.load_cache()
+    if len(cache) == 0:
+        print("❌ No cache found! Run precompute first.")
+        return
     
-    print(f"  Alignment (Spearman): {alignment:.3f}")
-    print(f"  Reward: {reward:.3f}")
+    print(f"Loaded cache: {len(cache)} questions")
     
-    assert alignment > 0.5, "Alignment should be positive"
-    print("✅ REWARD COMPUTATION TEST PASSED")
+    # Initialize GRubrics model
+    print(f"\nLoading Qwen model: {QWEN_MODEL}")
+    print(f"Device: {DEVICE}, Dtype: {DTYPE}")
+    try:
+        grubrics_model = GRubricsModelWrapper(
+            model_name=QWEN_MODEL,
+            device=DEVICE,
+            dtype=DTYPE
+        )
+        print("✅ Model loaded successfully")
+    except Exception as e:
+        print(f"❌ Failed to load model: {e}")
+        print("Skipping train test. Make sure Qwen model is available.")
+        return
     
-    print("\nNote: Full training test requires Qwen model loading.")
-    print("To test full training, run:")
-    print("  python -m grubrics_science.rl.train_grpo --mode=train")
+    # Initialize Judge
+    judge = Judge(
+        model=JUDGE_MODEL,
+        use_azure=USE_AZURE
+    )
+    
+    # Get optimizer
+    optimizer = grubrics_model.get_optimizer(learning_rate=1e-5)
+    
+    # Get question IDs
+    question_ids = list(cache.keys())[:NUM_STEPS]  # Limit to NUM_STEPS questions
+    
+    print(f"\nTraining on {len(question_ids)} questions...")
+    
+    import random
+    import numpy as np
+    import torch
+    from grubrics_science.rewards.alignment import compute_reward, compute_alignment, length_penalty
+    
+    for step, q_id in enumerate(question_ids):
+        print(f"\nStep {step+1}/{len(question_ids)}: Question {q_id}")
+        
+        cached_data = cache[q_id]
+        question = cached_data['question']
+        all_answers = cached_data['answers']
+        all_gold_scores = cached_data['gold_scores']
+        
+        # Sample k_train answers
+        if len(all_answers) < K_TRAIN:
+            selected_indices = list(range(len(all_answers)))
+        else:
+            selected_indices = random.sample(range(len(all_answers)), K_TRAIN)
+        
+        selected_answers = [all_answers[i] for i in selected_indices]
+        selected_gold_scores = [all_gold_scores[i] for i in selected_indices]
+        
+        # Get anchors
+        best_idx = np.argmax(selected_gold_scores)
+        worst_idx = np.argmin(selected_gold_scores)
+        best_answer_excerpt = selected_answers[best_idx][:300]
+        worst_answer_excerpt = selected_answers[worst_idx][:300]
+        
+        # Generate M rubrics
+        prompt = get_grubrics_prompt(
+            question=question,
+            best_answer_excerpt=best_answer_excerpt,
+            worst_answer_excerpt=worst_answer_excerpt
+        )
+        
+        print(f"  Generating {M_RUBRICS} rubrics...")
+        rubric_tokens_list = []
+        rubrics = []
+        for _ in range(M_RUBRICS):
+            token_ids, prompt_len, rubric_text = grubrics_model.sample_rubric_tokens(
+                prompt=prompt,
+                max_new_tokens=256,  # Shorter for smoke test
+                temperature=1.0,
+                top_k=50
+            )
+            rubric_tokens_list.append((token_ids, prompt_len))
+            rubrics.append(rubric_text.strip())
+            print(f"    Rubric {len(rubrics)}: {len(rubric_text)} chars")
+        
+        # Evaluate rubrics with Judge
+        print(f"  Evaluating rubrics with Judge...")
+        score_matrix = await judge.evaluate_multiple_answers(
+            question=question,
+            answers=selected_answers,
+            rubrics=rubrics
+        )
+        
+        # Compute rewards
+        rubric_rewards = []
+        for j, rubric in enumerate(rubrics):
+            scores = [score_matrix[i][j] for i in range(len(selected_answers))]
+            reward = compute_reward(
+                scores=scores,
+                gold_scores=selected_gold_scores,
+                rubric_text=rubric,
+                alignment_metric="spearman",
+                lambda_len=0.01,
+                length_penalty_type="characters"
+            )
+            rubric_rewards.append(reward)
+        
+        # Compute advantages
+        rewards_tensor = torch.tensor(rubric_rewards, dtype=torch.float32, device=grubrics_model.device)
+        mu = rewards_tensor.mean()
+        advantages = rewards_tensor - mu
+        
+        # Compute logprobs
+        print(f"  Computing logprobs and updating model...")
+        all_logprobs = []
+        for token_ids, prompt_len in rubric_tokens_list:
+            token_ids = token_ids.to(grubrics_model.device)
+            logprobs_per_token = grubrics_model.compute_logprobs_per_token(token_ids, prompt_len)
+            all_logprobs.append(logprobs_per_token)
+        
+        # Pad and compute loss
+        max_gen_len = max(len(lp) for lp in all_logprobs)
+        padded_logprobs = []
+        for lp in all_logprobs:
+            padding = torch.zeros(max_gen_len - len(lp), device=grubrics_model.device)
+            padded_lp = torch.cat([lp, padding])
+            padded_logprobs.append(padded_lp)
+        
+        logprobs_tensor = torch.stack(padded_logprobs)
+        pg_obj = (logprobs_tensor * advantages.unsqueeze(-1)).sum()
+        num_valid = sum(len(lp) for lp in all_logprobs)
+        pg_obj = pg_obj / max(num_valid, 1)
+        loss = -pg_obj
+        
+        # Backward and step
+        optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(grubrics_model.model.parameters(), max_norm=1.0)
+        optimizer.step()
+        
+        print(f"  Mean reward: {rewards_tensor.mean():.4f}, Loss: {loss.item():.6f}")
+    
+    print("\n✅ TRAIN SMOKE TEST PASSED")
 
 
 async def main():
     """Run all smoke tests."""
     try:
-        await test_precompute_smoke()
-        # await test_train_smoke()
+        # Run precompute
+        cache_dir = await test_precompute_smoke()
+        
+        # Run train if enabled
+        if RUN_TRAIN:
+            await test_train_smoke(cache_dir)
+        
         print("\n" + "=" * 70)
         print("ALL SMOKE TESTS PASSED")
         print("=" * 70)

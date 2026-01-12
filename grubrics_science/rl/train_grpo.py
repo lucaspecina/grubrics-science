@@ -221,6 +221,9 @@ async def train_mode(config: Dict[str, Any], logger):
     # Optimizer
     optimizer = grubrics_model.get_optimizer(learning_rate=1e-5)
     
+    # Ensure model is on correct device
+    grubrics_model.model = grubrics_model.model.to(grubrics_model.device)
+    
     # Logging
     log_every = config['logging']['log_every']
     save_every = config['logging']['save_every']
@@ -293,13 +296,18 @@ async def train_mode(config: Dict[str, Any], logger):
                     worst_answer_excerpt=worst_answer_excerpt
                 )
                 
-                rubrics = grubrics_model.generate_rubrics(
-                    prompt=prompt,
-                    num_samples=M,
-                    max_new_tokens=max_new_tokens,
-                    temperature=temperature,
-                    top_k=top_k
-                )
+                # Sample M rubrics (with no grad) - following nanochat pattern
+                rubric_tokens_list = []
+                rubrics = []
+                for _ in range(M):
+                    token_ids, prompt_len, rubric_text = grubrics_model.sample_rubric_tokens(
+                        prompt=prompt,
+                        max_new_tokens=max_new_tokens,
+                        temperature=temperature,
+                        top_k=top_k
+                    )
+                    rubric_tokens_list.append((token_ids, prompt_len))
+                    rubrics.append(rubric_text.strip())
                 
                 # Evaluate rubrics with Judge (batched)
                 score_matrix = await judge.evaluate_multiple_answers(
@@ -330,14 +338,53 @@ async def train_mode(config: Dict[str, Any], logger):
                     all_alignments.append(alignment)
                     all_lengths.append(length)
                 
-                # Compute advantages
-                rewards_tensor = torch.tensor(rubric_rewards, dtype=torch.float32)
-                advantages = rewards_tensor - rewards_tensor.mean()
+                # Compute advantages (following nanochat: simple mean subtraction)
+                rewards_tensor = torch.tensor(rubric_rewards, dtype=torch.float32, device=grubrics_model.device)
+                mu = rewards_tensor.mean()
+                advantages = rewards_tensor - mu  # (M,)
                 
-                # REINFORCE update (simplified, no actual gradient computation for now)
-                # TODO: Implement proper gradient computation with logprobs
+                # Compute logprobs per token for each rubric (with gradients)
+                # Following nanochat pattern: compute per-token logprobs, then sum
+                all_logprobs = []  # List of per-token logprobs for each rubric
+                for token_ids, prompt_len in rubric_tokens_list:
+                    # Ensure token_ids is on correct device
+                    token_ids = token_ids.to(grubrics_model.device)
+                    # Get per-token logprobs (shape: [gen_len])
+                    logprobs_per_token = grubrics_model.compute_logprobs_per_token(token_ids, prompt_len)
+                    all_logprobs.append(logprobs_per_token)
+                
+                # Pad sequences to same length for batching (following nanochat)
+                max_gen_len = max(len(lp) for lp in all_logprobs)
+                padded_logprobs = []
+                for lp in all_logprobs:
+                    # Pad with zeros (will be masked out)
+                    padding = torch.zeros(max_gen_len - len(lp), device=grubrics_model.device)
+                    padded_lp = torch.cat([lp, padding])
+                    padded_logprobs.append(padded_lp)
+                
+                logprobs_tensor = torch.stack(padded_logprobs)  # (M, max_gen_len)
+                
+                # REINFORCE objective (following nanochat pattern)
+                # pg_obj = sum(logp * advantage) per token, then normalize
+                pg_obj = (logprobs_tensor * advantages.unsqueeze(-1)).sum()  # advantages: (M,), logprobs: (M, T)
+                
+                # Normalize by number of valid tokens (following nanochat)
+                num_valid = sum(len(lp) for lp in all_logprobs)  # Total valid tokens across all rubrics
+                num_valid = max(num_valid, 1)  # Avoid division by zero
+                pg_obj = pg_obj / num_valid
+                
+                # Loss (following nanochat: minimize -pg_obj, which is equivalent to maximizing pg_obj)
+                loss = -pg_obj
+                
+                # Backward and step
+                optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(grubrics_model.model.parameters(), max_norm=1.0)
+                optimizer.step()
+                
                 logger.debug(f"  Question {q_id}: Mean reward={rewards_tensor.mean():.4f}, "
-                           f"Mean alignment={np.mean(all_alignments[-M:]):.4f}")
+                           f"Mean alignment={np.mean(all_alignments[-M:]):.4f}, "
+                           f"Loss={loss.item():.6f}")
             
             # Logging
             if step % log_every == 0:

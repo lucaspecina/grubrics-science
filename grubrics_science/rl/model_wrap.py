@@ -40,7 +40,7 @@ class GRubricsModelWrapper:
         top_k: int = 50
     ) -> List[str]:
         """
-        Generate multiple rubric samples.
+        Generate multiple rubric samples (for inference/eval).
         
         Args:
             prompt: Input prompt
@@ -65,43 +65,93 @@ class GRubricsModelWrapper:
         
         return rubrics
     
-    def compute_logprobs(
+    @torch.no_grad()
+    def sample_rubric_tokens(
         self,
         prompt: str,
-        completion: str
-    ) -> Tuple[torch.Tensor, int]:
+        max_new_tokens: int = 512,
+        temperature: float = 1.0,
+        top_k: int = 50
+    ) -> Tuple[torch.Tensor, int, str]:
         """
-        Compute log probabilities for a completion given a prompt.
-        
-        Args:
-            prompt: Input prompt
-            completion: Generated completion
+        Sample rubric tokens (for training).
         
         Returns:
-            Tuple of (logprobs tensor, prompt_length)
+            Tuple of (full_token_ids, prompt_length, generated_text)
         """
-        # Tokenize prompt + completion
-        full_text = prompt + completion
-        tokens = self.tokenizer.encode(full_text, return_tensors="pt").to(self.device)
-        prompt_tokens = self.tokenizer.encode(prompt, return_tensors="pt").to(self.device)
-        prompt_length = prompt_tokens.shape[1]
+        # Tokenize prompt
+        prompt_ids = self.tokenizer.encode(prompt, return_tensors="pt").to(self.device)
+        prompt_length = prompt_ids.shape[1]
         
-        # Forward pass
+        # Generate tokens
         self.model.eval()
         with torch.no_grad():
-            logits = self.model(tokens).logits
+            generated_ids = self.model.generate(
+                prompt_ids,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                top_k=top_k,
+                do_sample=temperature > 0,
+                pad_token_id=self.tokenizer.eos_token_id
+            )
         
-        # Compute log probs
-        log_probs = torch.log_softmax(logits, dim=-1)
+        # Extract generated part
+        generated_token_ids = generated_ids[0, prompt_length:]
+        generated_text = self.tokenizer.decode(generated_token_ids, skip_special_tokens=True)
         
-        # Extract log probs for completion tokens
-        targets = tokens[:, 1:]  # Shift by 1 for next-token prediction
-        selected_logprobs = log_probs[:, :-1].gather(2, targets.unsqueeze(-1)).squeeze(-1)
+        # Return full sequence (prompt + generated)
+        return generated_ids[0], prompt_length, generated_text
+    
+    def compute_logprobs_per_token(
+        self,
+        token_ids: torch.Tensor,
+        prompt_length: int,
+        mask: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """
+        Compute log probabilities per token (following nanochat pattern).
         
-        # Return only completion part (after prompt)
-        completion_logprobs = selected_logprobs[:, prompt_length - 1:]
+        In nanochat: logp = -model(inputs, targets, loss_reduction='none')
+        Since we use HuggingFace Qwen, we compute it manually.
         
-        return completion_logprobs.squeeze(0), prompt_length
+        Args:
+            token_ids: Full token sequence (prompt + generated), shape [seq_len]
+            prompt_length: Length of prompt (to exclude from logprob)
+            mask: Optional mask (1 for valid tokens, 0 to ignore), shape [seq_len]
+        
+        Returns:
+            Log probabilities per token for generated part, shape [gen_len]
+            (following nanochat: returns per-token logprobs, not sum)
+        """
+        # Ensure model is in train mode for gradients
+        self.model.train()
+        
+        # Prepare inputs and targets (following nanochat pattern)
+        # inputs = all tokens except last, targets = all tokens shifted by 1
+        inputs = token_ids[:-1].unsqueeze(0)  # (1, T-1)
+        targets = token_ids[1:]  # (T-1,)
+        
+        # Forward pass to get logits (WITH gradients)
+        outputs = self.model(inputs)
+        logits = outputs.logits.squeeze(0).float()  # (T-1, vocab_size)
+        
+        # Compute log probs (following nanochat: logp = -cross_entropy_loss)
+        # But we'll compute it manually: log_softmax then gather
+        log_probs = torch.log_softmax(logits, dim=-1)  # (T-1, vocab_size)
+        
+        # Select logprobs for actual target tokens
+        selected_logprobs = log_probs.gather(1, targets.unsqueeze(-1)).squeeze(-1)  # (T-1,)
+        
+        # Extract only generated part (after prompt)
+        # Note: prompt_length-1 because we shifted by 1 for targets
+        generated_logprobs = selected_logprobs[prompt_length - 1:]
+        
+        # Apply mask if provided (for ignoring certain tokens)
+        if mask is not None:
+            gen_mask = mask[prompt_length:]  # mask for generated tokens
+            generated_logprobs = generated_logprobs * gen_mask
+        
+        return generated_logprobs  # Return per-token, not sum (following nanochat)
     
     def get_optimizer(self, learning_rate: float = 1e-5):
         """Get optimizer for the model."""

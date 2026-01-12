@@ -13,6 +13,91 @@
             },
             "cwd": "${workspaceFolder}",
             "python": "${command:python.interpreterPath}"
+        },
+        {
+            "name": "GRubrics: Precompute",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "grubrics_science.rl.train_grpo",
+            "args": [
+                "--mode",
+                "precompute"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}",
+            "python": "${command:python.interpreterPath}"
+        },
+        {
+            "name": "GRubrics: Train",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "grubrics_science.rl.train_grpo",
+            "args": [
+                "--mode",
+                "train"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}",
+            "python": "${command:python.interpreterPath}"
+        },
+        {
+            "name": "GRubrics: Precompute (custom config)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "grubrics_science.rl.train_grpo",
+            "args": [
+                "--mode",
+                "precompute",
+                "--config",
+                "grubrics_science/configs/default.yaml"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}",
+            "python": "${command:python.interpreterPath}"
+        },
+        {
+            "name": "GRubrics: Train (custom config)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "grubrics_science.rl.train_grpo",
+            "args": [
+                "--mode",
+                "train",
+                "--config",
+                "grubrics_science/configs/default.yaml"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}",
+            "python": "${command:python.interpreterPath}"
+        },
+        {
+            "name": "GRubrics: Smoke Test",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/grubrics_science/test_smoke.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}",
+            "python": "${command:python.interpreterPath}"
         }
     ]
 }
