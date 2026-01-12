@@ -30,14 +30,17 @@ from grubrics_science.rl.model_wrap import GRubricsModelWrapper
 # CONFIGURACIÓN - Modifica estos parámetros según necesites
 # ============================================================================
 
+# Execution mode flags
+RUN_PRECOMPUTE = False  # Si True, ejecuta precompute (genera respuestas y gold scores)
+RUN_TRAIN = True  # Si True, ejecuta train (requiere Qwen cargado y cache existente)
+
 # Precompute settings
 NUM_QUESTIONS = 5  # Número de preguntas a procesar
 K_ANSWERS = 2  # Número de respuestas por pregunta
 USE_TEMP_CACHE = False  # Si True, usa cache temporal (se borra después). Si False, usa cache real. -> todas las respuestas generadas, scores calculados, etc.
 MAX_ANSWER_TOKENS = 512  # Máximo de tokens para respuestas generadas (reducir si se cortan mucho)
 
-# Train settings (solo si RUN_TRAIN = True)
-RUN_TRAIN = False  # Si True, ejecuta también el train completo (requiere Qwen cargado)
+# Train settings
 K_TRAIN = 2  # Subset de respuestas para entrenar
 M_RUBRICS = 2  # Número de rúbricas a generar
 NUM_STEPS = 2  # Número de steps de entrenamiento
@@ -68,13 +71,18 @@ print(f"  AZURE_API_BASE: {os.environ.get('AZURE_API_BASE', 'not set')}")
 # ============================================================================
 
 
-async def test_precompute_smoke():
-    """Test precompute mode with configurable parameters."""
+async def test_precompute_smoke(cache_dir: str):
+    """
+    Test precompute mode with configurable parameters.
+    
+    Args:
+        cache_dir: Path to cache directory (as string)
+    """
     print("=" * 70)
     print("SMOKE TEST: PRECOMPUTE MODE")
     print("=" * 70)
     print(f"Configuration: {NUM_QUESTIONS} questions, K={K_ANSWERS} answers per question")
-    print(f"Using {'temporary' if USE_TEMP_CACHE else 'persistent'} cache")
+    print(f"Cache directory: {cache_dir}")
     print(f"\nAzure OpenAI Configuration:")
     print(f"  JUDGE_MODEL: {JUDGE_MODEL}")
     print(f"  ANSWER_POLICY_MODEL: {ANSWER_POLICY_MODEL}")
@@ -82,16 +90,6 @@ async def test_precompute_smoke():
     print(f"  AZURE_API_BASE: {os.environ.get('AZURE_API_BASE', 'not set')}")
     if USE_AZURE and not os.environ.get('AZURE_API_KEY'):
         print("  ⚠️  WARNING: AZURE_API_KEY not found in environment!")
-    
-    # Setup cache directory
-    if USE_TEMP_CACHE:
-        temp_dir = Path(tempfile.mkdtemp())
-        cache_dir = temp_dir / "cache"
-        cleanup_cache = True
-    else:
-        cache_dir = Path("grubrics_science/data/cache")
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        cleanup_cache = False
     
     try:
         # Load dataset
@@ -193,15 +191,13 @@ async def test_precompute_smoke():
         assert len(cache) == len(test_questions), f"Expected {len(test_questions)} cache entries, got {len(cache)}"
         
         print("\n✅ PRECOMPUTE SMOKE TEST PASSED")
-        if not USE_TEMP_CACHE:
-            print(f"Cache saved to: {cache_dir}")
+        print(f"Cache saved to: {cache_dir}")
         
-        return str(cache_dir)  # Return cache dir for train test
-        
-    finally:
-        # Cleanup temp cache if used
-        if cleanup_cache:
-            shutil.rmtree(temp_dir, ignore_errors=True)
+    except Exception as e:
+        print(f"\n❌ PRECOMPUTE FAILED: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
 
 async def test_train_smoke(cache_dir: str):
@@ -390,23 +386,50 @@ async def test_train_smoke(cache_dir: str):
 
 
 async def main():
-    """Run all smoke tests."""
+    """Run smoke tests based on configuration flags."""
+    # Setup cache directory (centralized in main)
+    if USE_TEMP_CACHE:
+        temp_dir = Path(tempfile.mkdtemp())
+        cache_dir = str(temp_dir / "cache")
+        cleanup_cache = True
+    else:
+        cache_dir = "grubrics_science/data/cache"
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+        cleanup_cache = False
+    
     try:
-        # Run precompute
-        cache_dir = await test_precompute_smoke()
+        # Run precompute if enabled
+        if RUN_PRECOMPUTE:
+            await test_precompute_smoke(cache_dir)
+        else:
+            print("Skipping precompute (RUN_PRECOMPUTE=False)")
+            # Check if cache exists for train
+            cache_path = Path(cache_dir) / "precompute_cache.jsonl"
+            if not cache_path.exists() and RUN_TRAIN:
+                print(f"⚠️  WARNING: Cache not found at {cache_path}")
+                print("   Set RUN_PRECOMPUTE=True to generate cache, or ensure cache exists.")
         
         # Run train if enabled
         if RUN_TRAIN:
             await test_train_smoke(cache_dir)
+        else:
+            print("Skipping train (RUN_TRAIN=False)")
         
         print("\n" + "=" * 70)
-        print("ALL SMOKE TESTS PASSED")
+        print("SMOKE TESTS COMPLETED")
         print("=" * 70)
+        if not USE_TEMP_CACHE:
+            print(f"Cache location: {cache_dir}")
+        
     except Exception as e:
         print(f"\n❌ SMOKE TEST FAILED: {e}")
         import traceback
         traceback.print_exc()
         raise
+    finally:
+        # Cleanup temp cache if used
+        if cleanup_cache:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
