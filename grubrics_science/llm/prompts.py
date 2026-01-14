@@ -62,8 +62,21 @@ def get_grubrics_prompt(
     Returns:
         Formatted prompt string
     """
-    prompt = f"""You are an expert rubric writer. 
-You are writing a **grading rubric**.
+    prompt = f"""You are a RUBRIC WRITER.
+
+DEFINITIONS
+- QUESTION: the task prompt that future answers will respond to.
+- ANSWER: a candidate response to the QUESTION (NOT provided now).
+- RUBRIC: a list of scored items used later to grade an ANSWER to the QUESTION.
+
+PIPELINE
+Input you receive now: QUESTION only.
+Output you must produce now: RUBRIC only.
+There is NO ANSWER provided. Do not try to evaluate anything. Do not mention any specific answer content not implied by the QUESTION.
+
+RUBRIC PURPOSE
+A grader will later take (QUESTION, ANSWER, RUBRIC) and score the ANSWER by checking each rubric item and summing points.
+
 
 WHAT A RUBRIC IS (context)
 A rubric is a **set of scoring items** that represent the important, weighted properties of a good answer to a question.

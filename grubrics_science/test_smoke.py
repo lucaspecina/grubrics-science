@@ -46,7 +46,9 @@ M_RUBRICS = 2  # Número de rúbricas a generar
 NUM_STEPS = 2  # Número de steps de entrenamiento
 
 # Model settings (para train)
-QWEN_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"  # Modelo Qwen a usar
+QWEN_MODEL = "Qwen/Qwen3-4B-Instruct-2507"  # Modelo Qwen a usar
+QWEN_MODEL = "Qwen/Qwen3-8B"  # Modelo Qwen a usar
+
 DEVICE = "cuda"  # "cuda" o "cpu"
 DTYPE = "bfloat16"  # "bfloat16" o "float32"
 
@@ -57,8 +59,8 @@ DTYPE = "bfloat16"  # "bfloat16" o "float32"
 # You can override here or set in .env:
 #   RUBRIC_JUDGE_MODEL=gpt-5-chat (your Azure deployment name)
 #   RUBRIC_GENERATION_MODEL=gpt-5-chat (your Azure deployment name)
-JUDGE_MODEL = os.environ.get("RUBRIC_JUDGE_MODEL", "gpt-4o-mini")
-ANSWER_POLICY_MODEL = os.environ.get("RUBRIC_GENERATION_MODEL", "gpt-4o-mini")
+JUDGE_MODEL = os.environ.get("RUBRIC_JUDGE_MODEL", "gpt-5-chat")
+ANSWER_POLICY_MODEL = os.environ.get("RUBRIC_GENERATION_MODEL", "gpt-5-chat")
 USE_AZURE = os.environ.get("USE_AZURE_OPENAI", "true").lower() == "true"
 
 # Print configuration for debugging
