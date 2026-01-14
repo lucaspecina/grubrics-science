@@ -97,7 +97,7 @@ async def test_precompute_smoke(cache_dir: str):
         # Load dataset
         dataset_path = Path("frontierscience-research/test.jsonl")
         if not dataset_path.exists():
-            dataset_path = Path(__file__).parent.parent / dataset_path
+            dataset_path = Path(__file__).parent / dataset_path
         
         task = FrontierScienceTask(
             dataset_path=str(dataset_path),
@@ -212,7 +212,7 @@ async def test_train_smoke(cache_dir: str):
     # Load cache
     dataset_path = Path("frontierscience-research/test.jsonl")
     if not dataset_path.exists():
-        dataset_path = Path(__file__).parent.parent / dataset_path
+        dataset_path = Path(__file__).parent / dataset_path
     
     task = FrontierScienceTask(
         dataset_path=str(dataset_path),

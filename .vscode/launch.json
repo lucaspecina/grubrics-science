@@ -90,7 +90,7 @@
             "name": "GRubrics: Smoke Test",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/grubrics_science/test_smoke.py",
+            "program": "${workspaceFolder}/test_grubrics.py",
             "console": "integratedTerminal",
             "justMyCode": false,
             "env": {

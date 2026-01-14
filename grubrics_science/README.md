@@ -120,7 +120,7 @@ This will:
 Run a quick smoke test:
 
 ```bash
-python -m grubrics_science.test_smoke
+python test_grubrics.py
 ```
 
 ## Configuration
