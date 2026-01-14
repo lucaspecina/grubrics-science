@@ -69,7 +69,7 @@ class GRubricsModelWrapper:
     def sample_rubric_tokens(
         self,
         prompt: str,
-        max_new_tokens: int = 512,
+        max_new_tokens: int = 2048,
         temperature: float = 1.0,
         top_k: int = 50
     ) -> Tuple[torch.Tensor, int, str]:

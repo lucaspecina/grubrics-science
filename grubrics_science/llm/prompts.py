@@ -62,32 +62,90 @@ def get_grubrics_prompt(
     Returns:
         Formatted prompt string
     """
-    prompt = f"""You are an expert evaluator. Generate a scoring rubric for evaluating answers to the following research question.
+    prompt = f"""You are an expert rubric writer. 
+You are writing a **grading rubric**.
 
-Question: {question}
+WHAT A RUBRIC IS (context)
+A rubric is a **set of scoring items** that represent the important, weighted properties of a good answer to a question.
+Later, a human or model grader will:
+1) read an answer,
+2) go item-by-item through the rubric,
+3) decide whether each item is satisfied (fully/partially/not),
+4) sum the points to obtain a final score.
 
-The rubric should:
-- Be structured as a bullet list with clear criteria
-- Include point allocations or scoring guidelines for each criterion
-- Be discriminative: able to distinguish between high-quality and low-quality answers
-- Focus on scientific rigor, clarity, completeness, and logical reasoning
-- NOT reference or copy any existing rubrics you may have seen
+So your rubric must be:
+- **actionable** (each item can be judged from the answer text),
+- **weighted** (points reflect importance),
+- **discriminative** (separates great vs mediocre vs wrong),
+- and allow **partial credit** where appropriate.
+
+---
+
+PRIMARY REQUIREMENT (match dataset format)
+- Output ONLY rubric lines.
+- Each line must start exactly with:
+  `Points: <number>, Item: <text>`
+- The sum of all Points must be exactly **10.0**.
+- Points may be fractional (e.g., 0.25, 0.5, 0.75, 1.0, 1.5, 2.0).
+- Keep each Item short and checkable.
+
+OPTIONAL (allowed) structure used in the dataset
+- If an item needs internal splits, you may add: `Assign points as follows:` and then sub-bullets with point splits.
+- If the question has multiple subquestions, include “Question 1: … / Question 2: …” inside the Item text.
+
+CONTENT GUIDANCE (soft, not strict)
+- Prefer grading **invariants** (key results, key intermediate quantities/claims, key constraints).
+- Do NOT require a single solution path: accept alternative valid methods if they reach the same essential conclusions.
+- Include at least one item for: core correctness, key reasoning, handling constraints/units (if relevant), and clarity/coherence.
+
+---
+
+ONE-SHOT FORMAT EXAMPLE (style only; not this topic) -> pair (QUESTION, RUBRIC)
+QUESTION (EXAMPLE):
+Context: A sodium adduct of the unknown compound displayed a precursor mass of 846.56 and two major product ions of 363.27 and 337.27 in positive mode.
+Question: It was later found that this compound produces a color with LipidTox stain in a concentration-dependent manner. Surprisingly, none of the products corresponded to a diacylglycerol or diacylglycerol derivative of any composition.
+What is the exact name (either common or IUPAC) of this compound, and shows steps of how you derive an answer. Additionally, identify which specific sub lipid class this belongs to and derive which exact diacylglycerol (or its derivative) the researcher would have looked for, including its mass. Be sure to identify what the product ions are specifically.
+Think step by step and solve the problem below. In your answer, you should include all intermediate derivations, formulas, important steps, and justifications for how you arrived at your answer. Be as detailed as possible in your response.
+
+RUBRIC (EXAMPLE):
+Points: 1.0, Item: The answer clearly classified this unknown lipid as a type of phospholipid
+Points: 1.0, Item: The answer clearly derives the mass of DAG as a number between 620-630
+Points: 1.0, Item: The answer clearly identifies the 337.3 as MAG 18:2 derivative
+Points: 1.0, Item: The answer clearly identifies the 363.3 as MAG 20:3 derivative
+Points: 1.0, Item: The answer clearly identifies the DAG as a DAG with 18:2 and 20:3 fatty acid chains
+Points: 1.0, Item: The answer clearly notes that the mass of sodium will be about 23 Da
+Points: 1.0, Item: The answer clearly states that lipidtox stains both neutral lipids and phospholipids
+Points: 1.0, Item: The answer clearly states that the neutral mass of the unknown compound is about 823.6 Da
+Points: 2.0, Item: The answer specifically states that the lipid is BMP 18:2\/20:3
+
+[END OF ONE-SHOT FORMAT EXAMPLE]
+
+---
 
 """
-    
+    # TODO: revisar si esto va o no...
     if best_answer_excerpt or worst_answer_excerpt:
         prompt += "\n=== CONTEXT FOR DISCRIMINATIVE CRITERIA ===\n"
-        prompt += "Below are excerpts from answers to help you understand what distinguishes good from poor responses.\n"
-        prompt += "Use these to create criteria that can effectively separate quality levels.\n\n"
+        prompt += "Below are excerpts from answers (to the question) to help you understand what distinguishes good from poor answers.\n"
+        prompt += "Use these to create rubrics that can effectively separate quality levels of answers.\n\n"
         
         if best_answer_excerpt:
-            prompt += f"High-quality answer excerpt:\n{best_answer_excerpt[:300]}...\n\n"
+            prompt += f"High-quality answer excerpt:\n{best_answer_excerpt}...\n\n"
         if worst_answer_excerpt:
-            prompt += f"Low-quality answer excerpt:\n{worst_answer_excerpt[:300]}...\n\n"
+            prompt += f"Low-quality answer excerpt:\n{worst_answer_excerpt}...\n\n"
         
-        prompt += "Generate a rubric that can distinguish between answers like these.\n"
+        prompt += "Create a rubric that can distinguish between answers like these.\n"
     
-    prompt += "\nRubric:\n"
+    prompt += f"""\nNow produce the rubric for the QUESTION below, strictly in the required format. Do not include any other text.
+
+QUESTION:
+{question}
+
+[END OF QUESTION] 
+---
+
+YOUR RUBRIC:
+"""
     
     return prompt
 

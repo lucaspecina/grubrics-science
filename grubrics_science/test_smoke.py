@@ -278,14 +278,14 @@ async def test_train_smoke(cache_dir: str):
         # Get anchors
         best_idx = np.argmax(selected_gold_scores)
         worst_idx = np.argmin(selected_gold_scores)
-        best_answer_excerpt = selected_answers[best_idx][:300]
-        worst_answer_excerpt = selected_answers[worst_idx][:300]
+        best_answer_excerpt = selected_answers[best_idx]
+        worst_answer_excerpt = selected_answers[worst_idx]
         
         # Generate M rubrics
         prompt = get_grubrics_prompt(
             question=question,
-            best_answer_excerpt=best_answer_excerpt,
-            worst_answer_excerpt=worst_answer_excerpt
+            # best_answer_excerpt=best_answer_excerpt, # TODO: revisar si esto va o no...
+            # worst_answer_excerpt=worst_answer_excerpt
         )
         
         print(f"  Generating {M_RUBRICS} rubrics...")
@@ -294,7 +294,7 @@ async def test_train_smoke(cache_dir: str):
         for _ in range(M_RUBRICS):
             token_ids, prompt_len, rubric_text = grubrics_model.sample_rubric_tokens(
                 prompt=prompt,
-                max_new_tokens=256,  # Shorter for smoke test
+                max_new_tokens=2048,
                 temperature=1.0,
                 top_k=50
             )

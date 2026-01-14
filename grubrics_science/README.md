@@ -56,9 +56,37 @@ Each record has:
 
 ## Installation
 
+**Step 1: Install PyTorch with CUDA support**
+
+**IMPORTANT**: PyTorch with CUDA must be installed separately before installing other dependencies.
+
+For CUDA 12.4 (recommended, works with CUDA 12.x and 13.x):
+```bash
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+```
+
+For CUDA 11.8:
+```bash
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+```
+
+For CPU-only (not recommended for training):
+```bash
+pip install torch torchvision torchaudio
+```
+
+Verify CUDA is available:
+```bash
+python -c "import torch; print('CUDA available:', torch.cuda.is_available())"
+```
+
+**Step 2: Install other dependencies**
+
 ```bash
 pip install -r grubrics_science/requirements.txt
 ```
+
+**Note**: The requirements.txt will skip PyTorch if it's already installed, so you can safely run it after installing PyTorch with CUDA.
 
 ## Quick Start
 

@@ -1,12 +1,21 @@
 # Core dependencies
-torch>=2.0.0
+# IMPORTANT: PyTorch with CUDA must be installed separately using the PyTorch index
+# Do NOT install torch from this file if you need CUDA support!
+# 
+# To install PyTorch with CUDA 12.4 support (recommended):
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+#
+# After installing PyTorch with CUDA, install the rest of the dependencies:
+#   pip install -r requirements.txt --no-deps torch torchvision torchaudio
+# Or simply: pip install -r requirements.txt (it will skip torch if already installed)
+
 transformers>=4.51.0
 numpy>=1.24.0
 scipy>=1.10.0
 pyyaml>=6.0
 openai>=1.0.0
+python-dotenv>=1.0.0  # For loading .env files
 
 # Optional
 wandb>=0.15.0  # For experiment tracking
 accelerate>=0.20.0  # For model loading
-
