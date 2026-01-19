@@ -1,0 +1,502 @@
+"""Main training script for GRubrics Science.
+
+Supports two modes:
+- precompute: Generate and cache answers + gold scores
+- train: Train GRubrics model with RL
+"""
+
+import argparse
+import asyncio
+import yaml
+from pathlib import Path
+from typing import Dict, List, Any, Optional
+import random
+import numpy as np
+import torch
+import sys
+import os
+
+# Load environment variables from .env
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+from ..tasks.frontierscience import FrontierScienceTask
+from ..llm.client import AzureOpenAIClient, QwenClient
+from ..llm.prompts import (
+    get_answer_policy_prompt,
+    get_grubrics_prompt
+)
+from ..judge.judge import Judge
+from ..rewards.alignment import compute_reward
+from ..rl.model_wrap import GRubricsModelWrapper
+from ..utils.io import load_cache
+from ..utils.logging import setup_logging, get_logger, log_metrics, DummyWandb
+from ..utils.seeding import set_seed, get_deterministic_seed
+
+
+def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+    """Load configuration from YAML file."""
+    if config_path is None:
+        config_path = Path(__file__).parent.parent / "configs" / "default.yaml"
+    else:
+        config_path = Path(config_path)
+    
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    
+    return config
+
+
+async def precompute_mode(config: Dict[str, Any], logger):
+    """Precompute answers and gold scores for all questions."""
+    logger.info("=" * 70)
+    logger.info("PRECOMPUTE MODE")
+    logger.info("=" * 70)
+    
+    # Setup
+    dataset_path = config['dataset_path']
+    # Handle relative paths
+    if not Path(dataset_path).is_absolute():
+        repo_root = Path(__file__).parent.parent.parent
+        dataset_path = str(repo_root / dataset_path)
+    
+    task = FrontierScienceTask(
+        dataset_path=dataset_path,
+        cache_dir=config['cache_dir']
+    )
+    
+    answer_policy_client = AzureOpenAIClient(
+        model=config['answer_policy']['model'],
+        use_azure=config['answer_policy']['use_azure']
+    )
+    
+    judge = Judge(
+        model=config['judge']['model'],
+        use_azure=config['judge']['use_azure']
+    )
+    
+    K = config['precompute']['K']
+    seed = config['precompute']['seed']
+    max_answer_tokens = config['answer_policy'].get('max_tokens', 512)
+    set_seed(seed)
+    
+    logger.info(f"Dataset: {len(task)} questions")
+    logger.info(f"K (answers per question): {K}")
+    logger.info(f"Seed: {seed}")
+    
+    # Load existing cache
+    cache = task.load_cache()
+    logger.info(f"Existing cache entries: {len(cache)}")
+    
+    # Process each question
+    for idx, example in enumerate(task):
+        q_id = example.question_id
+        
+        # Skip if already cached
+        if q_id in cache:
+            logger.info(f"Question {idx+1}/{len(task)} (ID: {q_id}): Already cached, skipping")
+            continue
+        
+        logger.info(f"Question {idx+1}/{len(task)} (ID: {q_id}): Generating {K} answers...")
+        
+        question = example.problem
+        golden_rubric = example.golden_rubric
+        
+        # Generate K answers with diversity
+        answers = []
+        instruction_types = []
+        
+        # 2 low temp
+        for _ in range(2):
+            instruction_types.append("low_temp")
+        # 2 high temp
+        for _ in range(2):
+            instruction_types.append("high_temp")
+        # 2 failure modes
+        instruction_types.append("failure_mode_1")
+        instruction_types.append("failure_mode_2")
+        # 2 medium
+        for _ in range(2):
+            instruction_types.append("normal")
+        
+        # Shuffle for randomness
+        random.shuffle(instruction_types)
+        
+        # Generate K answers in parallel
+        answer_tasks = []
+        for i, inst_type in enumerate(instruction_types[:K]):
+            prompt = get_answer_policy_prompt(question, inst_type)
+            
+            # Use deterministic seed for reproducibility
+            answer_seed = get_deterministic_seed(seed, q_id, i)
+            # Note: Azure OpenAI doesn't support seed directly, but we can vary temperature slightly
+            temp = 0.3 if inst_type == "low_temp" else (1.2 if inst_type == "high_temp" else 0.8)
+            
+            answer_tasks.append(
+                answer_policy_client.generate(
+                    prompt=prompt,
+                    max_tokens=max_answer_tokens,
+                    temperature=temp
+                )
+            )
+        
+        # Execute all generation tasks in parallel
+        answer_texts = await asyncio.gather(*answer_tasks)
+        answers = [answer.strip() for answer in answer_texts]
+        
+        logger.info(f"  Generated {len(answers)} answers")
+        
+        # Compute gold scores using golden rubric (in parallel)
+        logger.info(f"  Computing gold scores with golden rubric (parallel)...")
+        score_matrix, details_matrix = await judge.evaluate_multiple_answers(
+            question=question,
+            answers=answers,
+            rubrics=[golden_rubric],
+            return_details=True
+        )
+        gold_scores = [score_matrix[i][0] for i in range(len(answers))]  # Single rubric
+        
+        # Extract gold details (item-by-item breakdowns) for each answer
+        gold_details = []
+        for i, detail_list in enumerate(details_matrix):
+            # Each detail_list contains evaluations for all rubrics
+            # For gold scores, we only have one rubric (the golden one)
+            gold_detail = detail_list[0] if detail_list else {}
+            gold_details.append(gold_detail)
+        
+        # Log detailed explanations for debugging
+        for i, (score, detail) in enumerate(zip(gold_scores, gold_details)):
+            item_scores = detail.get('item_scores', [])
+            if item_scores:
+                logger.debug(f"    Answer {i+1} score: {score:.3f} ({len(item_scores)} items)")
+            else:
+                notes = detail.get('notes', 'No explanation')[:100]
+                logger.debug(f"    Answer {i+1} score: {score:.3f} - {notes}...")
+        
+        logger.info(f"  Gold scores: {[f'{s:.3f}' for s in gold_scores]}")
+        
+        # Save to cache (including item-by-item details)
+        task.save_cache_entry(
+            question_id=q_id,
+            question=question,
+            answers=answers,
+            gold_scores=gold_scores,
+            metadata={'subject': example.subject},
+            gold_details=gold_details
+        )
+        
+        logger.info(f"  Saved to cache")
+    
+    logger.info("=" * 70)
+    logger.info("PRECOMPUTE COMPLETE")
+    logger.info("=" * 70)
+
+
+async def train_mode(config: Dict[str, Any], logger):
+    """Train GRubrics model with RL."""
+    logger.info("=" * 70)
+    logger.info("TRAIN MODE")
+    logger.info("=" * 70)
+    
+    # Setup
+    dataset_path = config['dataset_path']
+    # Handle relative paths
+    if not Path(dataset_path).is_absolute():
+        repo_root = Path(__file__).parent.parent.parent
+        dataset_path = str(repo_root / dataset_path)
+    
+    task = FrontierScienceTask(
+        dataset_path=dataset_path,
+        cache_dir=config['cache_dir']
+    )
+    
+    # Load cache
+    cache = task.load_cache()
+    if len(cache) == 0:
+        raise ValueError("Cache is empty! Run precompute mode first.")
+    
+    logger.info(f"Loaded cache: {len(cache)} questions")
+    
+    # Initialize GRubrics model
+    logger.info("Initializing GRubrics model...")
+    grubrics_model = GRubricsModelWrapper(
+        model_name=config['model']['qwen_model_name'],
+        device=config['model']['device'],
+        dtype=config['model']['dtype']
+    )
+    
+    # Initialize Judge (use env vars if available)
+    judge_model = os.environ.get("RUBRIC_JUDGE_MODEL", config['judge']['model'])
+    use_azure = os.environ.get("USE_AZURE_OPENAI", str(config['judge']['use_azure'])).lower() == "true"
+    
+    judge = Judge(
+        model=judge_model,
+        use_azure=use_azure
+    )
+    
+    # Training config
+    k_train = config['training']['k_train']
+    M = config['training']['M']
+    num_epochs = config['training']['num_epochs']
+    examples_per_step = config['training']['examples_per_step']
+    device_batch_size = config['training']['device_batch_size']
+    
+    max_new_tokens = config['generation']['max_new_tokens']
+    temperature = config['generation']['temperature']
+    top_k = config['generation']['top_k']
+    
+    alignment_metric = config['reward']['alignment_metric']
+    lambda_len = config['reward']['lambda_len']
+    length_penalty_type = config['reward']['length_penalty_type']
+    
+    # Optimizer
+    optimizer = grubrics_model.get_optimizer(learning_rate=1e-5)
+    
+    # Ensure model is on correct device
+    grubrics_model.model = grubrics_model.model.to(grubrics_model.device)
+    
+    # Logging
+    log_every = config['logging']['log_every']
+    save_every = config['logging']['save_every']
+    eval_every = config['logging']['eval_every']
+    use_wandb = config['logging']['use_wandb']
+    
+    wandb_logger = None
+    if use_wandb:
+        try:
+            import wandb
+            wandb_logger = wandb.init(
+                project=config['logging']['wandb_project'],
+                name="grubrics-train"
+            )
+        except ImportError:
+            logger.warning("wandb not available, using dummy logger")
+            wandb_logger = DummyWandb()
+    else:
+        wandb_logger = DummyWandb()
+    
+    # Training loop
+    step = 0
+    num_steps = (len(cache) // examples_per_step) * num_epochs
+    
+    logger.info(f"Training for {num_steps} steps")
+    logger.info(f"k_train={k_train}, M={M}, examples_per_step={examples_per_step}")
+    
+    # Get list of question IDs
+    question_ids = list(cache.keys())
+    
+    for epoch in range(num_epochs):
+        logger.info(f"Epoch {epoch+1}/{num_epochs}")
+        
+        # Shuffle questions
+        random.shuffle(question_ids)
+        
+        for batch_start in range(0, len(question_ids), examples_per_step):
+            batch_ids = question_ids[batch_start:batch_start + examples_per_step]
+            
+            # Process batch
+            all_rewards = []
+            all_alignments = []
+            all_lengths = []
+            
+            for q_id in batch_ids:
+                cached_data = cache[q_id]
+                question = cached_data['question']
+                all_answers = cached_data['answers']
+                all_gold_scores = cached_data['gold_scores']
+                
+                # Sample k_train answers
+                if len(all_answers) < k_train:
+                    selected_indices = list(range(len(all_answers)))
+                else:
+                    selected_indices = random.sample(range(len(all_answers)), k_train)
+                
+                selected_answers = [all_answers[i] for i in selected_indices]
+                selected_gold_scores = [all_gold_scores[i] for i in selected_indices]
+                
+                # Get anchors (best/worst)
+                best_idx = np.argmax(selected_gold_scores)
+                worst_idx = np.argmin(selected_gold_scores)
+                best_answer_excerpt = selected_answers[best_idx][:300]
+                worst_answer_excerpt = selected_answers[worst_idx][:300]
+                
+                # Generate M rubrics
+                prompt = get_grubrics_prompt(
+                    question=question,
+                    best_answer_excerpt=best_answer_excerpt,
+                    worst_answer_excerpt=worst_answer_excerpt
+                )
+                
+                # Sample M rubrics (with no grad) - following nanochat pattern
+                rubric_tokens_list = []
+                rubrics = []
+                for _ in range(M):
+                    token_ids, prompt_len, rubric_text = grubrics_model.sample_rubric_tokens(
+                        prompt=prompt,
+                        max_new_tokens=max_new_tokens,
+                        temperature=temperature,
+                        top_k=top_k
+                    )
+                    rubric_tokens_list.append((token_ids, prompt_len))
+                    rubrics.append(rubric_text.strip())
+                
+                # Evaluate rubrics with Judge (batched)
+                score_matrix, details_matrix = await judge.evaluate_multiple_answers(
+                    question=question,
+                    answers=selected_answers,
+                    rubrics=rubrics,
+                    return_details=True
+                )
+                
+                # Log detailed evaluations for debugging
+                logger.debug(f"  Judge evaluations:")
+                for j, rubric in enumerate(rubrics):
+                    logger.debug(f"    Rubric {j+1}: {rubric[:80]}...")
+                    for i, answer_details in enumerate(details_matrix):
+                        detail = answer_details[j]
+                        total_score = detail.get('total_score', detail.get('score', 0.0))
+                        item_scores = detail.get('item_scores', [])
+                        if item_scores:
+                            logger.debug(f"      Answer {i+1}: total_score={total_score:.3f}")
+                            for item in item_scores[:2]:  # Show first 2 items
+                                item_desc = item.get('item_description', 'Unknown')[:30]
+                                item_score = item.get('score', 0.0)
+                                logger.debug(f"        - {item_desc}: {item_score:.3f}")
+                        else:
+                            notes = detail.get('notes', 'No explanation')[:80]
+                            logger.debug(f"      Answer {i+1}: score={total_score:.3f} - {notes}...")
+                
+                # Compute rewards for each rubric
+                rubric_rewards = []
+                for j, rubric in enumerate(rubrics):
+                    scores = [score_matrix[i][j] for i in range(len(selected_answers))]
+                    reward = compute_reward(
+                        scores=scores,
+                        gold_scores=selected_gold_scores,
+                        rubric_text=rubric,
+                        alignment_metric=alignment_metric,
+                        lambda_len=lambda_len,
+                        length_penalty_type=length_penalty_type
+                    )
+                    rubric_rewards.append(reward)
+                    
+                    # Logging metrics
+                    from ..rewards.alignment import compute_alignment, length_penalty
+                    alignment = compute_alignment(scores, selected_gold_scores, alignment_metric)
+                    length = length_penalty(rubric, length_penalty_type)
+                    all_rewards.append(reward)
+                    all_alignments.append(alignment)
+                    all_lengths.append(length)
+                
+                # Compute advantages (following nanochat: simple mean subtraction)
+                rewards_tensor = torch.tensor(rubric_rewards, dtype=torch.float32, device=grubrics_model.device)
+                mu = rewards_tensor.mean()
+                advantages = rewards_tensor - mu  # (M,)
+                
+                # Compute logprobs per token for each rubric (with gradients)
+                # Following nanochat pattern: compute per-token logprobs, then sum
+                all_logprobs = []  # List of per-token logprobs for each rubric
+                for token_ids, prompt_len in rubric_tokens_list:
+                    # Ensure token_ids is on correct device
+                    token_ids = token_ids.to(grubrics_model.device)
+                    # Get per-token logprobs (shape: [gen_len])
+                    logprobs_per_token = grubrics_model.compute_logprobs_per_token(token_ids, prompt_len)
+                    all_logprobs.append(logprobs_per_token)
+                
+                # Pad sequences to same length for batching (following nanochat)
+                max_gen_len = max(len(lp) for lp in all_logprobs)
+                padded_logprobs = []
+                for lp in all_logprobs:
+                    # Pad with zeros (will be masked out)
+                    padding = torch.zeros(max_gen_len - len(lp), device=grubrics_model.device)
+                    padded_lp = torch.cat([lp, padding])
+                    padded_logprobs.append(padded_lp)
+                
+                logprobs_tensor = torch.stack(padded_logprobs)  # (M, max_gen_len)
+                
+                # REINFORCE objective (following nanochat pattern)
+                # pg_obj = sum(logp * advantage) per token, then normalize
+                pg_obj = (logprobs_tensor * advantages.unsqueeze(-1)).sum()  # advantages: (M,), logprobs: (M, T)
+                
+                # Normalize by number of valid tokens (following nanochat)
+                num_valid = sum(len(lp) for lp in all_logprobs)  # Total valid tokens across all rubrics
+                num_valid = max(num_valid, 1)  # Avoid division by zero
+                pg_obj = pg_obj / num_valid
+                
+                # Loss (following nanochat: minimize -pg_obj, which is equivalent to maximizing pg_obj)
+                loss = -pg_obj
+                
+                # Backward and step
+                optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(grubrics_model.model.parameters(), max_norm=1.0)
+                optimizer.step()
+                
+                logger.debug(f"  Question {q_id}: Mean reward={rewards_tensor.mean():.4f}, "
+                           f"Mean alignment={np.mean(all_alignments[-M:]):.4f}, "
+                           f"Loss={loss.item():.6f}")
+            
+            # Logging
+            if step % log_every == 0:
+                metrics = {
+                    'mean_reward': np.mean(all_rewards) if all_rewards else 0.0,
+                    'mean_alignment': np.mean(all_alignments) if all_alignments else 0.0,
+                    'mean_length': np.mean(all_lengths) if all_lengths else 0.0,
+                }
+                log_metrics(logger, step, metrics, wandb_logger)
+            
+            step += 1
+            
+            if step >= num_steps:
+                break
+        
+        if step >= num_steps:
+            break
+    
+    logger.info("=" * 70)
+    logger.info("TRAINING COMPLETE")
+    logger.info("=" * 70)
+    
+    if wandb_logger:
+        wandb_logger.finish()
+
+
+def main():
+    """Main entry point."""
+    parser = argparse.ArgumentParser(description="GRubrics Science Training")
+    parser.add_argument(
+        "--mode",
+        type=str,
+        required=True,
+        choices=["precompute", "train"],
+        help="Mode: precompute or train"
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to config YAML file (default: configs/default.yaml)"
+    )
+    
+    args = parser.parse_args()
+    
+    # Setup logging
+    setup_logging()
+    logger = get_logger(__name__)
+    
+    # Load config
+    config = load_config(args.config)
+    
+    # Run mode
+    if args.mode == "precompute":
+        asyncio.run(precompute_mode(config, logger))
+    elif args.mode == "train":
+        asyncio.run(train_mode(config, logger))
+
+
+if __name__ == "__main__":
+    main()
+

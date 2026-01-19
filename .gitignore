@@ -6,8 +6,11 @@ __pycache__/
 # C extensions
 *.so
 
-data/
+# data/
 outputs/
+tmp_*
+data/primeintellect-synthetic-2/synthetic-2-sample-10k.csv
+
 
 # Distribution / packaging
 .Python

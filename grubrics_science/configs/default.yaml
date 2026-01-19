@@ -1,0 +1,58 @@
+# Default configuration for GRubrics Science
+
+# Dataset
+dataset_path: "frontierscience-research/test.jsonl"
+cache_dir: "grubrics_science/data/cache"
+
+# Precompute settings
+precompute:
+  K: 8  # Total answers per question
+  # Distribution: 2 low temp, 2 high temp, 2 failure modes, 2 medium
+  seed: 42
+  deterministic: true
+
+# Training settings
+training:
+  k_train: 4  # Subset of cached answers to use per episode
+  M: 6  # Number of rubrics to generate per episode
+  num_epochs: 1
+  examples_per_step: 4
+  device_batch_size: 2
+  
+# Generation settings
+generation:
+  max_new_tokens: 512
+  temperature: 1.0
+  top_k: 50
+  
+# Reward settings
+reward:
+  alignment_metric: "spearman"  # Options: "spearman", "pairwise", "pearson"
+  lambda_len: 0.01  # Length penalty coefficient
+  length_penalty_type: "characters"  # Options: "characters", "tokens"
+  
+# Model settings
+model:
+  qwen_model_name: "Qwen/Qwen2.5-0.5B-Instruct"  # Small model for POC
+  device: "cuda"  # or "cpu"
+  dtype: "bfloat16"  # or "float32"
+  
+# Judge settings (Azure OpenAI)
+judge:
+  model: "gpt-4o-mini"
+  use_azure: true
+  
+# Answer Policy settings (Azure OpenAI)
+answer_policy:
+  model: "gpt-4o-mini"
+  use_azure: true
+  max_tokens: 512  # Max tokens for answer generation (reduce if answers get cut off)
+  
+# Logging
+logging:
+  log_every: 10
+  save_every: 50
+  eval_every: 20
+  use_wandb: false
+  wandb_project: "grubrics-science"
+
