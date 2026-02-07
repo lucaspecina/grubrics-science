@@ -1,0 +1,40 @@
+# =============================================================================
+# GRubrics Science - Requirements
+# =============================================================================
+#
+# IMPORTANTE: PyTorch con CUDA debe instalarse por separado usando el índice de PyTorch.
+# NO instales torch desde este archivo si necesitas soporte CUDA.
+#
+# Para instalar PyTorch con CUDA 12.4 (recomendado):
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+#
+# Luego instala el resto de dependencias:
+#   pip install -r requirements.txt
+#
+# =============================================================================
+
+# --- Core ---
+numpy>=1.24.0
+scipy>=1.10.0
+pyyaml>=6.0
+pandas>=2.0.0
+
+# --- LLM / API ---
+openai>=1.0.0
+python-dotenv>=1.0.0
+
+# --- Deep Learning ---
+torch>=2.0.0
+transformers>=4.51.0
+accelerate>=0.20.0
+
+# --- Data (HuggingFace Datasets) ---
+datasets>=2.14.0
+
+# --- Experiment Tracking (opcional) ---
+wandb>=0.15.0
+
+# --- Notebooks (opcional, solo para desarrollo) ---
+# jupyter>=1.0.0
+# ipykernel>=6.0.0
+# openpyxl>=3.1.0    # para leer archivos .xlsx en notebooks
