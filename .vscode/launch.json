@@ -2,95 +2,23 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug Evolving Rubrics",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/test_evolve.py",
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            },
-            "cwd": "${workspaceFolder}",
-            "python": "${command:python.interpreterPath}"
-        },
-        {
-            "name": "GRubrics: Precompute",
-            "type": "debugpy",
-            "request": "launch",
-            "module": "grubrics_science.rl.train_grpo",
-            "args": [
-                "--mode",
-                "precompute"
-            ],
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            },
-            "cwd": "${workspaceFolder}",
-            "python": "${command:python.interpreterPath}"
-        },
-        {
-            "name": "GRubrics: Train",
-            "type": "debugpy",
-            "request": "launch",
-            "module": "grubrics_science.rl.train_grpo",
-            "args": [
-                "--mode",
-                "train"
-            ],
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            },
-            "cwd": "${workspaceFolder}",
-            "python": "${command:python.interpreterPath}"
-        },
-        {
-            "name": "GRubrics: Precompute (custom config)",
-            "type": "debugpy",
-            "request": "launch",
-            "module": "grubrics_science.rl.train_grpo",
-            "args": [
-                "--mode",
-                "precompute",
-                "--config",
-                "grubrics_science/configs/default.yaml"
-            ],
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            },
-            "cwd": "${workspaceFolder}",
-            "python": "${command:python.interpreterPath}"
-        },
-        {
-            "name": "GRubrics: Train (custom config)",
-            "type": "debugpy",
-            "request": "launch",
-            "module": "grubrics_science.rl.train_grpo",
-            "args": [
-                "--mode",
-                "train",
-                "--config",
-                "grubrics_science/configs/default.yaml"
-            ],
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            },
-            "cwd": "${workspaceFolder}",
-            "python": "${command:python.interpreterPath}"
-        },
-        {
-            "name": "GRubrics: Smoke Test",
+            "name": "GRubrics: Test",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/test_grubrics.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}",
+            "python": "${command:python.interpreterPath}"
+        },
+        {
+            "name": "Evolving Rubrics: Test",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/test_evolve.py",
             "console": "integratedTerminal",
             "justMyCode": false,
             "env": {

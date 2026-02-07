@@ -1,147 +1,135 @@
 # GRubrics Science
 
-Train (with RL) a model called GRubrics whose ONLY job is to GENERATE scoring rubrics for open-ended science research questions.
+Entrenar (con RL) un modelo llamado **GRubrics** cuyo UNICO trabajo es **generar rúbricas de evaluación** para preguntas abiertas de investigación científica.
 
-## Overview
+## La idea central
 
-GRubrics is trained using functional alignment: a generated rubric is "good" if, when used by a fixed Judge to score multiple candidate answers for the same question, it produces scores/rankings similar to what the GOLDEN rubric produces (using the SAME fixed Judge).
+Dado un examen de ciencia con preguntas abiertas, queremos un modelo que genere automáticamente las rúbricas de corrección. ¿Cómo sabemos si una rúbrica generada es buena? Usamos **functional alignment**: una rúbrica es buena si, al usarla para evaluar múltiples respuestas, produce un **ranking similar** al que produce la rúbrica golden (la de referencia humana).
+
+En otras palabras: no comparamos el texto de la rúbrica generada vs la golden. Comparamos los **scores que producen** al aplicarlas sobre las mismas respuestas.
+
+## Arquitectura (3 actores)
+
+```
+                    ┌─────────────────┐
+                    │   GRubrics       │  <-- UNICO modelo que se entrena (Qwen)
+                    │   (genera        │
+                    │    rúbricas)     │
+                    └────────┬────────┘
+                             │ rúbrica generada
+                             ▼
+┌──────────────┐     ┌──────────────┐
+│ Answer Policy│     │    Judge     │  <-- Ambos FIJOS (Azure OpenAI, nunca se entrenan)
+│ (genera      │────>│ (evalúa      │
+│  respuestas) │     │  respuestas  │
+└──────────────┘     │  con rúbrica)│
+                     └──────┬───────┘
+                            │ scores
+                            ▼
+                     ┌──────────────┐
+                     │   Reward     │  = alignment(scores_rúbrica, scores_golden) - λ·length
+                     └──────────────┘
+```
+
+- **Answer Policy**: Modelo fijo (GPT) que genera respuestas diversas a cada pregunta.
+- **Judge**: Modelo fijo (GPT) que toma (pregunta, respuesta, rúbrica) y devuelve un score item-by-item.
+- **GRubrics**: Modelo entrenable (Qwen) que genera rúbricas. Se entrena con REINFORCE.
+
+## Las 2 fases: Precompute y Train
+
+### Precompute — "Preparar los datos"
+
+El entrenamiento necesita, para cada pregunta, un conjunto de respuestas ya evaluadas con la rúbrica golden. Como generar respuestas y evaluarlas con el Judge es caro (llamadas a API), esto se hace **una sola vez** y se cachea.
+
+**¿Qué hace?**
+1. Para cada pregunta del dataset, genera **K respuestas diversas** usando el Answer Policy (variando temperatura e instrucciones).
+2. Evalúa cada respuesta con la **rúbrica golden** usando el Judge.
+3. Guarda todo en `grubrics_science/data/cache/precompute_cache.jsonl`.
+
+**¿Por qué separarlo?** Porque es costoso y no cambia entre runs de entrenamiento. Lo corrés una vez y listo.
+
+### Train — "Entrenar GRubrics con RL"
+
+Usa los datos cacheados para entrenar el modelo con REINFORCE (policy gradient).
+
+**¿Qué hace en cada step?**
+1. Toma una pregunta y sus K respuestas+gold_scores del cache.
+2. GRubrics **genera M rúbricas** (sampling con temperatura).
+3. El Judge **evalúa las K respuestas** con cada rúbrica generada → `score_matrix[K][M]`.
+4. Para cada rúbrica, calcula el **reward**:
+   - `alignment` = correlación de Spearman entre los scores que da esta rúbrica y los gold_scores.
+   - `length_penalty` = penalización por rúbricas muy largas.
+   - `reward = alignment - λ · length_penalty`
+5. Calcula **advantages** (reward de cada rúbrica - promedio) para saber cuáles fueron mejores.
+6. **REINFORCE**: actualiza los pesos de GRubrics para que genere más rúbricas parecidas a las que tuvieron alto reward.
 
 ## Project Structure
 
 ```
 grubrics_science/
-  configs/          # Configuration files (YAML)
-  llm/              # LLM client abstractions and prompts
-  tasks/            # Dataset loaders and task definitions
-  judge/            # Fixed Judge wrapper (evaluates answers with rubrics)
-  rewards/          # Reward computation (alignment metrics, length penalty)
-  rl/               # RL training loop and model wrapper
-  utils/            # Utilities (IO, logging, seeding)
-  data/             # Cache outputs
+  configs/          # Configuración (YAML)
+  llm/              # Clientes LLM (Azure OpenAI, Qwen) y prompts
+  tasks/            # Loaders de datasets (FrontierScience)
+  judge/            # Judge wrapper (evalúa respuestas contra rúbricas)
+  rewards/          # Cálculo de reward (alignment metrics + length penalty)
+  rl/               # Training loop y model wrapper
+  utils/            # Utilidades (IO, logging, seeding)
+  data/             # Cache de precompute
 ```
-
-## Usage
-
-### Precompute Mode
-
-Generate and cache answers + gold scores:
-
-```bash
-python -m grubrics_science.rl.train_grpo --mode=precompute
-```
-
-### Train Mode
-
-Train the GRubrics model:
-
-```bash
-python -m grubrics_science.rl.train_grpo --mode=train
-```
-
-## Configuration
-
-Edit `configs/default.yaml` to adjust:
-- K: number of answers per question (default: 8)
-- k_train: subset size for training (default: 4)
-- M: number of rubrics generated per episode (default: 6)
-- lambda_len: length penalty coefficient (default: 0.01)
-
-## Dataset
-
-Uses FrontierScience-Research dataset at `data/frontierscience-research/test.jsonl`.
-
-Each record has:
-- `problem`: the full question prompt
-- `answer`: the GOLDEN rubric (target/reference)
-
-## Installation
-
-**Step 1: Install PyTorch with CUDA support**
-
-**IMPORTANT**: PyTorch with CUDA must be installed separately before installing other dependencies.
-
-For CUDA 12.4 (recommended, works with CUDA 12.x and 13.x):
-```bash
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
-```
-
-For CUDA 11.8:
-```bash
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-```
-
-For CPU-only (not recommended for training):
-```bash
-pip install torch torchvision torchaudio
-```
-
-Verify CUDA is available:
-```bash
-python -c "import torch; print('CUDA available:', torch.cuda.is_available())"
-```
-
-**Step 2: Install other dependencies**
-
-```bash
-pip install -r grubrics_science/requirements.txt
-```
-
-**Note**: The requirements.txt will skip PyTorch if it's already installed, so you can safely run it after installing PyTorch with CUDA.
 
 ## Quick Start
 
-### 1. Precompute answers and gold scores
+### 1. Instalar dependencias
 
 ```bash
-python -m grubrics_science.rl.train_grpo --mode=precompute
+# PyTorch con CUDA (primero)
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+
+# Resto de dependencias
+pip install -r requirements.txt
 ```
 
-This will:
-- Load questions from the dataset
-- Generate K=8 diverse answers per question using Answer Policy
-- Score each answer with the golden rubric using Judge
-- Cache results in `grubrics_science/data/cache/precompute_cache.jsonl`
+### 2. Configurar API keys
 
-### 2. Train GRubrics
-
-```bash
-python -m grubrics_science.rl.train_grpo --mode=train
+Crear `.env` en la raíz del repo:
+```
+USE_AZURE_OPENAI=true
+AZURE_API_KEY=tu-key
+AZURE_API_BASE=https://tu-endpoint.openai.azure.com/
+AZURE_API_VERSION=2024-12-01-preview
+RUBRIC_JUDGE_MODEL=tu-deployment-name
+RUBRIC_GENERATION_MODEL=tu-deployment-name
 ```
 
-This will:
-- Load cached answers and gold scores
-- Generate M=6 rubrics per question using GRubrics model
-- Evaluate rubrics with Judge (batched)
-- Compute rewards based on alignment with gold scores
-- Update GRubrics model with REINFORCE
+### 3. Ejecutar
 
-## Smoke Test
+La forma más simple es usar `test_grubrics.py`, donde controlás todo con flags al inicio del archivo:
 
-Run a quick smoke test:
+```python
+RUN_PRECOMPUTE = True   # Generar respuestas y gold scores
+RUN_TRAIN = True        # Entrenar GRubrics
+```
 
 ```bash
 python test_grubrics.py
 ```
 
-## Configuration
+O con debug en Cursor/VS Code: seleccionar **"GRubrics: Test"** y F5.
 
-Edit `grubrics_science/configs/default.yaml` to adjust:
-- `K`: number of answers per question (default: 8)
-- `k_train`: subset size for training (default: 4)
-- `M`: number of rubrics generated per episode (default: 6)
-- `lambda_len`: length penalty coefficient (default: 0.01)
-- `alignment_metric`: "spearman", "pairwise", or "pearson" (default: "spearman")
+## Configuración
 
-## Architecture
+Parámetros clave (editables en `test_grubrics.py` o `configs/default.yaml`):
 
-- **Answer Policy**: Fixed Azure OpenAI model that generates diverse answers
-- **Judge**: Fixed Azure OpenAI model that evaluates answers with rubrics (batched)
-- **GRubrics**: Trainable Qwen model that generates rubrics (trained with RL)
+| Parámetro | Default | Descripción |
+|-----------|---------|-------------|
+| `K` | 8 | Respuestas generadas por pregunta (precompute) |
+| `k_train` | 4 | Subset de respuestas usadas en cada step de training |
+| `M` | 6 | Rúbricas generadas por GRubrics en cada step |
+| `alignment_metric` | spearman | Métrica de alignment (spearman, pearson, pairwise) |
+| `lambda_len` | 0.01 | Coeficiente de penalización por largo de rúbrica |
 
-## Notes
+## Dataset
 
-- The Judge and Answer Policy are FIXED and never trained
-- Only GRubrics is trained using functional alignment
-- Reward is computed from multiple answers per question (not single pair)
-- Judge evaluation is batched: M rubrics evaluated in one call per answer
-
+FrontierScience-Research en `data/frontierscience-research/test.jsonl`. Cada registro tiene:
+- `problem`: pregunta de investigación científica
+- `answer`: rúbrica golden (referencia humana)

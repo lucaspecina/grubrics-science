@@ -95,7 +95,7 @@ async def test_precompute_smoke(cache_dir: str):
     
     try:
         # Load dataset
-        dataset_path = Path("frontierscience-research/test.jsonl")
+        dataset_path = Path("data/frontierscience-research/test.jsonl")
         if not dataset_path.exists():
             dataset_path = Path(__file__).parent / dataset_path
         
@@ -210,7 +210,7 @@ async def test_train_smoke(cache_dir: str):
     print(f"Configuration: k_train={K_TRAIN}, M={M_RUBRICS}, steps={NUM_STEPS}")
     
     # Load cache
-    dataset_path = Path("frontierscience-research/test.jsonl")
+    dataset_path = Path("data/frontierscience-research/test.jsonl")
     if not dataset_path.exists():
         dataset_path = Path(__file__).parent / dataset_path
     
@@ -300,6 +300,7 @@ async def test_train_smoke(cache_dir: str):
                 temperature=1.0,
                 top_k=50
             )
+            breakpoint()  # BP1: inspeccionar rubric_text, token_ids, prompt
             rubric_tokens_list.append((token_ids, prompt_len))
             rubrics.append(rubric_text.strip())
             print(f"    Rubric {len(rubrics)}: {len(rubric_text)} chars")
@@ -312,6 +313,7 @@ async def test_train_smoke(cache_dir: str):
             rubrics=rubrics,
             return_details=True
         )
+        breakpoint()  # BP2: inspeccionar score_matrix, details_matrix, rubrics
         
         # Print detailed evaluations
         print(f"  Judge evaluation details:")
@@ -349,6 +351,8 @@ async def test_train_smoke(cache_dir: str):
             )
             rubric_rewards.append(reward)
         
+        breakpoint()  # BP3: inspeccionar rubric_rewards, scores vs selected_gold_scores
+        
         # Compute advantages
         rewards_tensor = torch.tensor(rubric_rewards, dtype=torch.float32, device=grubrics_model.device)
         mu = rewards_tensor.mean()
@@ -375,6 +379,7 @@ async def test_train_smoke(cache_dir: str):
         num_valid = sum(len(lp) for lp in all_logprobs)
         pg_obj = pg_obj / max(num_valid, 1)
         loss = -pg_obj
+        breakpoint()  # BP4: inspeccionar loss, pg_obj, advantages, rewards_tensor
         
         # Backward and step
         optimizer.zero_grad()
