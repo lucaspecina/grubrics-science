@@ -2,10 +2,10 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "GRubrics: Test",
+            "name": "Test: Data Pipeline",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/test_grubrics.py",
+            "program": "${workspaceFolder}/test_phase0.py",
             "console": "integratedTerminal",
             "justMyCode": false,
             "env": {
@@ -15,10 +15,39 @@
             "python": "${command:python.interpreterPath}"
         },
         {
-            "name": "Evolving Rubrics: Test",
+            "name": "Debug Train: Smoke Test (5 steps)",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/test_evolve.py",
+            "program": "${workspaceFolder}/debug_train.py",
+            "args": [
+                "--dataset", "olympiad_math",
+                "--max_items", "10",
+                "--steps", "5",
+                "--group_size", "2",
+                "--max_new_tokens", "128",
+                "--lora_rank", "8"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}",
+            "python": "${command:python.interpreterPath}"
+        },
+        {
+            "name": "Debug Train: Full Local (20 steps)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/debug_train.py",
+            "args": [
+                "--dataset", "olympiad_math",
+                "--max_items", "50",
+                "--steps", "20",
+                "--group_size", "2",
+                "--max_new_tokens", "256",
+                "--lora_rank", "16"
+            ],
             "console": "integratedTerminal",
             "justMyCode": false,
             "env": {

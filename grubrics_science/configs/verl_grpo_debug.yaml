@@ -1,0 +1,92 @@
+# =============================================================================
+# veRL GRPO Debug Configuration (LOCAL)
+# =============================================================================
+#
+# Target: Local GPU (RTX 4000 Ada 12.9GB or similar)
+# Model: Qwen2.5-0.5B-Instruct (instead of Qwen3-8B)
+# Purpose: Test pipeline end-to-end before running on Azure H100
+#
+# Differences vs production (verl_grpo.yaml):
+#   - Model: 0.5B instead of 8B (~1GB VRAM vs ~16GB)
+#   - No vLLM (HuggingFace generate directly)
+#   - group_size: 2 instead of 6
+#   - max_new_tokens: 256 instead of 512
+#   - max_steps: 20 instead of 2000
+#   - Dataset truncated to 50 items
+#   - No wandb logging
+#
+# Estimated VRAM: ~3-4 GB (fits on any modern GPU)
+# =============================================================================
+
+# --- Model ---
+model:
+  name: "Qwen/Qwen2.5-0.5B-Instruct"
+  dtype: "float16"          # fp16 for wider compatibility
+  trust_remote_code: true
+
+# --- LoRA ---
+peft:
+  enabled: true
+  lora_rank: 16             # smaller rank for debug
+  lora_alpha: 32
+  lora_dropout: 0.05
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+
+# --- GRPO Algorithm ---
+algorithm:
+  name: "grpo"
+  group_size: 2             # minimal rollouts for debug
+  kl_coef: 0.01
+  clip_range: 0.2
+  entropy_coef: 0.01
+  max_grad_norm: 1.0
+
+# --- Rollout ---
+rollout:
+  engine: "hf"              # HuggingFace generate (no vLLM for local)
+  max_new_tokens: 256       # shorter for speed
+  temperature: 1.0
+  top_k: 50
+  top_p: 0.95
+
+# --- Training ---
+training:
+  learning_rate: 5.0e-5     # slightly higher for small model
+  weight_decay: 0.01
+  warmup_ratio: 0.1
+  lr_scheduler: "cosine"
+  gradient_checkpointing: false  # not needed for 0.5B
+  gradient_accumulation_steps: 1
+  per_device_batch_size: 1
+  max_steps: 20             # just enough to verify gradients flow
+  save_steps: 10
+  eval_steps: 10
+  logging_steps: 1
+
+# --- Data ---
+data:
+  train_files:
+    - "data/processed/test/olympiad_math_test.parquet"
+  max_prompt_length: 1024
+  max_response_length: 256
+  max_items: 50             # truncate dataset for debug
+
+# --- Reward ---
+reward:
+  reward_module: "grubrics_science.rewards.gsm8k_reward"
+  reward_function: "compute_score"
+
+# --- Logging ---
+logging:
+  project: "grubrics-transfer-debug"
+  run_name: "debug-local"
+  use_wandb: false          # no wandb for local debug
+
+# --- Checkpointing ---
+checkpoint:
+  output_dir: "checkpoints/debug"
+  save_total_limit: 2
