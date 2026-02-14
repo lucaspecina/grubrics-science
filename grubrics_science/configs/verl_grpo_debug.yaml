@@ -1,21 +1,31 @@
 # =============================================================================
-# veRL GRPO Debug Configuration (LOCAL)
+# veRL GRPO Debug Configuration — Workstation RTX 4000 Ada (12GB)
 # =============================================================================
 #
-# Target: Local GPU (RTX 4000 Ada 12.9GB or similar)
-# Model: Qwen2.5-0.5B-Instruct (instead of Qwen3-8B)
-# Purpose: Test pipeline end-to-end before running on Azure H100
+# UNIFIED PIPELINE: same veRL framework as production, different params.
 #
-# Differences vs production (verl_grpo.yaml):
+# Target: Workstation RTX 4000 Ada (12GB VRAM, compute capability 8.9)
+# Model: Qwen2.5-0.5B-Instruct (instead of Qwen3-8B)
+# Purpose: Debug full veRL GRPO pipeline before running on H100
+#
+# Production config: verl_grpo.yaml (H100, Qwen3-8B, vLLM, rank 64)
+#
+# Differences vs production:
 #   - Model: 0.5B instead of 8B (~1GB VRAM vs ~16GB)
-#   - No vLLM (HuggingFace generate directly)
+#   - Rollout engine: HF generate instead of vLLM (fits 12GB)
+#   - LoRA rank: 16 instead of 64
 #   - group_size: 2 instead of 6
 #   - max_new_tokens: 256 instead of 512
 #   - max_steps: 20 instead of 2000
 #   - Dataset truncated to 50 items
 #   - No wandb logging
 #
-# Estimated VRAM: ~3-4 GB (fits on any modern GPU)
+# What's shared: veRL framework, data format, reward function, config structure
+#
+# Usage:
+#   python -m verl.trainer.main_ppo --config grubrics_science/configs/verl_grpo_debug.yaml
+#
+# Estimated VRAM: ~3.5-5.5 GB (fits comfortably in 12GB)
 # =============================================================================
 
 # --- Model ---

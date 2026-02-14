@@ -15,17 +15,12 @@
             "python": "${command:python.interpreterPath}"
         },
         {
-            "name": "Debug Train: Smoke Test (5 steps)",
+            "name": "veRL Debug: Workstation (20 steps)",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/debug_train.py",
+            "module": "verl.trainer.main_ppo",
             "args": [
-                "--dataset", "olympiad_math",
-                "--max_items", "10",
-                "--steps", "5",
-                "--group_size", "2",
-                "--max_new_tokens", "128",
-                "--lora_rank", "8"
+                "--config", "${workspaceFolder}/grubrics_science/configs/verl_grpo_debug.yaml"
             ],
             "console": "integratedTerminal",
             "justMyCode": false,
@@ -36,17 +31,33 @@
             "python": "${command:python.interpreterPath}"
         },
         {
-            "name": "Debug Train: Full Local (20 steps)",
+            "name": "veRL Production: H100 (2000 steps)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "verl.trainer.main_ppo",
+            "args": [
+                "--config", "${workspaceFolder}/grubrics_science/configs/verl_grpo.yaml"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}",
+            "python": "${command:python.interpreterPath}"
+        },
+        {
+            "name": "[DEPRECATED] Debug Train: Smoke Test (5 steps, no veRL)",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/debug_train.py",
             "args": [
                 "--dataset", "olympiad_math",
-                "--max_items", "50",
-                "--steps", "20",
+                "--max_items", "10",
+                "--steps", "5",
                 "--group_size", "2",
-                "--max_new_tokens", "256",
-                "--lora_rank", "16"
+                "--max_new_tokens", "128",
+                "--lora_rank", "8"
             ],
             "console": "integratedTerminal",
             "justMyCode": false,

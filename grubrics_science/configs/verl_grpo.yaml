@@ -1,15 +1,20 @@
 # =============================================================================
-# veRL GRPO Configuration for GRubrics-Transfer
+# veRL GRPO Production Configuration — Azure H100 NVL (94GB)
 # =============================================================================
 #
-# Target: Qwen3-8B + LoRA (rank 64) on 1x H100 NVL 94GB
+# UNIFIED PIPELINE: same veRL framework as debug, different params.
+#
+# Target: 1x H100 NVL 94GB (Azure Standard_NC40ads_H100_v5)
+# Model: Qwen3-8B + LoRA (rank 64)
 # Algorithm: GRPO (Group Relative Policy Optimization)
+#
+# Debug config: verl_grpo_debug.yaml (Workstation RTX 4000, Qwen2.5-0.5B, HF engine)
 #
 # Usage:
 #   python -m verl.trainer.main_ppo \
 #     --config grubrics_science/configs/verl_grpo.yaml
 #
-# Estimated VRAM: ~68GB (fits in 94GB with margin)
+# Estimated VRAM: ~68GB (fits in 94GB with ~26GB margin)
 # =============================================================================
 
 # --- Model ---

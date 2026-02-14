@@ -1,7 +1,14 @@
-"""Debug training script for local development.
+"""Debug training script for local development (DEPRECATED).
 
-Runs a minimal GRPO-like loop on a small model (Qwen2.5-0.5B) using the new
-data adapter pipeline + local reward function.  No veRL, no vLLM, no API calls.
+DEPRECATED: This script uses a hand-rolled REINFORCE loop, NOT veRL.
+The primary debug path is now veRL on the workstation (RTX 4000 Ada):
+
+    python -m verl.trainer.main_ppo \\
+        --config grubrics_science/configs/verl_grpo_debug.yaml
+
+This script remains only as a lightweight smoke test that doesn't require
+veRL installed (e.g., on MacBook without GPU). For real pipeline debugging,
+use veRL with the debug config above.
 
 Usage:
     python debug_train.py                         # defaults
