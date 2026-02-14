@@ -1,10 +1,10 @@
 # =============================================================================
-# veRL GRPO Debug Configuration — Workstation RTX 4000 Ada (12GB)
+# veRL GRPO Debug Configuration — Small GPU (Linux, ~12GB+ VRAM)
 # =============================================================================
 #
-# UNIFIED PIPELINE: same veRL framework as production, different params.
+# UNIFIED PIPELINE: same veRL framework as production, smaller params.
 #
-# Target: Workstation RTX 4000 Ada (12GB VRAM, compute capability 8.9)
+# Target: Any Linux GPU with 12GB+ VRAM (e.g. RTX 4000 Ada, A10, small Azure VM)
 # Model: Qwen2.5-0.5B-Instruct (instead of Qwen3-8B)
 # Purpose: Debug full veRL GRPO pipeline before running on H100
 #
@@ -12,91 +12,105 @@
 #
 # Differences vs production:
 #   - Model: 0.5B instead of 8B (~1GB VRAM vs ~16GB)
-#   - Rollout engine: HF generate instead of vLLM (fits 12GB)
 #   - LoRA rank: 16 instead of 64
-#   - group_size: 2 instead of 6
-#   - max_new_tokens: 256 instead of 512
-#   - max_steps: 20 instead of 2000
-#   - Dataset truncated to 50 items
+#   - group_size (rollout.n): 2 instead of 6
+#   - max_response_length: 256 instead of 512
+#   - total_training_steps: 20 instead of 2000
 #   - No wandb logging
 #
-# What's shared: veRL framework, data format, reward function, config structure
-#
 # Usage:
-#   python -m verl.trainer.main_ppo --config grubrics_science/configs/verl_grpo_debug.yaml
+#   python run_grpo.py --config grubrics_science/configs/verl_grpo_debug.yaml
 #
 # Estimated VRAM: ~3.5-5.5 GB (fits comfortably in 12GB)
 # =============================================================================
 
-# --- Model ---
-model:
-  name: "Qwen/Qwen2.5-0.5B-Instruct"
-  dtype: "float16"          # fp16 for wider compatibility
-  trust_remote_code: true
+# --- Model + Actor + Rollout ---
+actor_rollout_ref:
+  model:
+    path: Qwen/Qwen2.5-0.5B-Instruct
+    trust_remote_code: true
+    enable_gradient_checkpointing: false
+    use_remove_padding: false
+    # LoRA config (smaller rank for debug)
+    lora_rank: 16
+    lora_alpha: 32
+    target_modules: all-linear
 
-# --- LoRA ---
-peft:
-  enabled: true
-  lora_rank: 16             # smaller rank for debug
-  lora_alpha: 32
-  lora_dropout: 0.05
-  target_modules:
-    - "q_proj"
-    - "k_proj"
-    - "v_proj"
-    - "o_proj"
+  actor:
+    strategy: fsdp
+    ppo_mini_batch_size: 2
+    ppo_micro_batch_size_per_gpu: 2
+    ppo_epochs: 1
+    clip_ratio: 0.2
+    entropy_coeff: 0.01
+    use_kl_loss: false
+    grad_clip: 1.0
+    use_torch_compile: false
+    optim:
+      lr: 5.0e-5
+      lr_warmup_steps_ratio: 0.1
+      weight_decay: 0.01
+      lr_scheduler_type: cosine
+
+  rollout:
+    name: vllm
+    temperature: 1.0
+    top_k: -1
+    top_p: 0.95
+    do_sample: true
+    n: 2
+    gpu_memory_utilization: 0.4
+    tensor_model_parallel_size: 1
+    enforce_eager: true
+    log_prob_micro_batch_size_per_gpu: 2
+
+  hybrid_engine: true
 
 # --- GRPO Algorithm ---
 algorithm:
-  name: "grpo"
-  group_size: 2             # minimal rollouts for debug
-  kl_coef: 0.01
-  clip_range: 0.2
-  entropy_coef: 0.01
-  max_grad_norm: 1.0
-
-# --- Rollout ---
-rollout:
-  engine: "hf"              # HuggingFace generate (no vLLM for local)
-  max_new_tokens: 256       # shorter for speed
-  temperature: 1.0
-  top_k: 50
-  top_p: 0.95
-
-# --- Training ---
-training:
-  learning_rate: 5.0e-5     # slightly higher for small model
-  weight_decay: 0.01
-  warmup_ratio: 0.1
-  lr_scheduler: "cosine"
-  gradient_checkpointing: false  # not needed for 0.5B
-  gradient_accumulation_steps: 1
-  per_device_batch_size: 1
-  max_steps: 20             # just enough to verify gradients flow
-  save_steps: 10
-  eval_steps: 10
-  logging_steps: 1
+  adv_estimator: grpo
+  norm_adv_by_std_in_grpo: true
+  use_kl_in_reward: false
+  kl_ctrl:
+    type: fixed
+    kl_coef: 0.01
 
 # --- Data ---
 data:
-  train_files:
-    - "data/processed/test/olympiad_math_test.parquet"
+  train_files: data/processed/test/olympiad_math_train.parquet
+  val_files: data/processed/test/olympiad_math_train.parquet
   max_prompt_length: 1024
   max_response_length: 256
-  max_items: 50             # truncate dataset for debug
+  train_batch_size: 4
+  shuffle: true
+  trust_remote_code: true
+  filter_overlong_prompts: true
+  truncation: left
 
-# --- Reward ---
-reward:
-  reward_module: "grubrics_science.rewards.gsm8k_reward"
-  reward_function: "compute_score"
+# --- Custom Reward Function ---
+custom_reward_function:
+  path: grubrics_science/rewards/gsm8k_reward.py
+  name: compute_score
 
-# --- Logging ---
-logging:
-  project: "grubrics-transfer-debug"
-  run_name: "debug-local"
-  use_wandb: false          # no wandb for local debug
+# --- Reward Model (disabled — we use custom_reward_function) ---
+reward_model:
+  enable: false
 
-# --- Checkpointing ---
-checkpoint:
-  output_dir: "checkpoints/debug"
-  save_total_limit: 2
+# --- Critic (disabled for GRPO) ---
+critic:
+  enable: false
+
+# --- Trainer ---
+trainer:
+  total_training_steps: 20
+  project_name: grubrics-transfer-debug
+  experiment_name: debug-local
+  logger:
+    - console
+  n_gpus_per_node: 1
+  nnodes: 1
+  save_freq: 10
+  test_freq: 10
+  val_before_train: false
+  default_local_dir: checkpoints/${trainer.project_name}/${trainer.experiment_name}
+  device: cuda
