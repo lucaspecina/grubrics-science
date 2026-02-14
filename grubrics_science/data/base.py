@@ -141,10 +141,11 @@ class DatasetAdapter(ABC):
         rows: List[Dict[str, Any]] = []
         for item in items:
             row = self.to_verl_format(item, tokenizer=tokenizer)
-            # Serialise nested dicts/lists to JSON strings for parquet
-            for key in ("prompt", "reward_model", "extra_info"):
-                if key in row and not isinstance(row[key], str):
-                    row[key] = json.dumps(row[key], ensure_ascii=False)
+            # prompt must be JSON string (veRL tokenizes it from string).
+            # reward_model and extra_info must stay as dicts (veRL reads
+            # them via .get() and expects dict-like access).
+            if "prompt" in row and not isinstance(row["prompt"], str):
+                row["prompt"] = json.dumps(row["prompt"], ensure_ascii=False)
             rows.append(row)
 
         df = pd.DataFrame(rows)

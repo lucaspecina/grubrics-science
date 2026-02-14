@@ -2,20 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Test: Data Pipeline",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/test_phase0.py",
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            },
-            "cwd": "${workspaceFolder}",
-            "python": "${command:python.interpreterPath}"
-        },
-        {
-            "name": "veRL Debug: Workstation (20 steps)",
+            "name": "veRL Debug: 20 steps",
             "type": "debugpy",
             "request": "launch",
             "module": "verl.trainer.main_ppo",
@@ -31,33 +18,12 @@
             "python": "${command:python.interpreterPath}"
         },
         {
-            "name": "veRL Production: H100 (2000 steps)",
+            "name": "veRL Production: 2000 steps",
             "type": "debugpy",
             "request": "launch",
             "module": "verl.trainer.main_ppo",
             "args": [
                 "--config", "${workspaceFolder}/grubrics_science/configs/verl_grpo.yaml"
-            ],
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            },
-            "cwd": "${workspaceFolder}",
-            "python": "${command:python.interpreterPath}"
-        },
-        {
-            "name": "[DEPRECATED] Debug Train: Smoke Test (5 steps, no veRL)",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/debug_train.py",
-            "args": [
-                "--dataset", "olympiad_math",
-                "--max_items", "10",
-                "--steps", "5",
-                "--group_size", "2",
-                "--max_new_tokens", "128",
-                "--lora_rank", "8"
             ],
             "console": "integratedTerminal",
             "justMyCode": false,

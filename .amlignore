@@ -1,0 +1,36 @@
+# Azure ML: files to exclude from job code uploads
+# (keeps upload fast, avoids sending unnecessary data)
+
+# Git
+.git/
+
+# Python caches
+__pycache__/
+*.py[codz]
+*.egg-info/
+
+# Environments
+.env
+.envrc
+.venv/
+venv/
+
+# IDE
+.vscode/
+.cursor*/
+
+# Local caches and outputs
+.cache/
+outputs/
+checkpoints/
+wandb/
+
+# Generated parquets (will be regenerated on compute)
+data/processed/
+
+# Large datasets not needed for training
+# (olympiad_math CSV is needed, rest can be excluded if too large)
+data/primeintellect-synthetic-2/
+data/moose-chem/
+data/moose-chem2/
+data/research-plan-gen/
