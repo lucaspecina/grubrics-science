@@ -245,6 +245,38 @@ class TestJudgeParsing:
 
         assert k1 != k2  # rubric order matters
 
+    def test_parse_batched_response(self):
+        from grubrics_science.judge.judge import Judge
+
+        judge = Judge.__new__(Judge)  # skip __init__ (no API client needed)
+
+        # Good response
+        response = '{"evaluations": [{"answer_id": "a1", "total_score": 0.65}, {"answer_id": "a2", "total_score": 0.43}]}'
+        scores = judge._parse_batched_response(response, 2)
+        assert len(scores) == 2
+        assert scores[0] == 0.65
+        assert scores[1] == 0.43
+
+    def test_parse_batched_response_missing_answer(self):
+        from grubrics_science.judge.judge import Judge
+
+        judge = Judge.__new__(Judge)
+
+        # Response only has a1, but we expect 3 answers
+        response = '{"evaluations": [{"answer_id": "a1", "total_score": 0.70}]}'
+        scores = judge._parse_batched_response(response, 3)
+        assert len(scores) == 3
+        assert scores[0] == 0.70
+        assert scores[1] == 0.0  # missing → 0.0
+        assert scores[2] == 0.0
+
+    def test_parse_batched_response_garbage(self):
+        from grubrics_science.judge.judge import Judge
+
+        judge = Judge.__new__(Judge)
+        scores = judge._parse_batched_response("not json at all", 4)
+        assert scores == [0.0, 0.0, 0.0, 0.0]
+
 
 # =========================================================================
 # Integration: adapter → cache → reward (no API, no GPU)

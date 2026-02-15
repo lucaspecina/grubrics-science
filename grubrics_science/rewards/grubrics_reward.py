@@ -97,16 +97,13 @@ def _reward_open_sync(
     judge = _get_judge()
 
     try:
-        score_matrix, _ = _run_async(
-            judge.evaluate_multiple_answers(
+        scores = _run_async(
+            judge.evaluate_answers_batched(
                 question=question,
                 answers=answers,
-                rubrics=[rubric],
-                return_details=False,
+                rubric=rubric,
             )
         )
-        # score_matrix shape: [num_answers, 1] — extract the single-rubric column
-        scores = [row[0] for row in score_matrix]
     except Exception as exc:
         logger.error("Judge API call failed in reward: %s", exc)
         return 0.0

@@ -97,14 +97,11 @@ async def evaluate_with_golden_rubric(
     for _ in range(num_evals):
         # Clear cache so each evaluation is independent
         judge._cache = {}
-        score_matrix, _ = await judge.evaluate_multiple_answers(
+        scores = await judge.evaluate_answers_batched(
             question=question,
             answers=answers,
-            rubrics=[golden_rubric],
-            return_details=False,
+            rubric=golden_rubric,
         )
-        # score_matrix shape: [num_answers, 1]
-        scores = [row[0] for row in score_matrix]
         all_scores.append(scores)
 
     # Average across evaluations

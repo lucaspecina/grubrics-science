@@ -269,6 +269,54 @@ Return detailed scores and explanations for EACH ITEM within each rubric.
 
 Answer ID: {answer_id}
 """
-    
+
+    return prompt
+
+
+# ============================================================================
+# JUDGE BATCHED PROMPT (multiple answers, 1 rubric, 1 call)
+# ============================================================================
+
+JUDGE_BATCHED_SYSTEM_PROMPT = """You are an expert evaluator. You will be given a question, multiple answers, and a scoring rubric.
+
+Evaluate EACH answer independently against the rubric.
+For each rubric item ("Points: X, Item: Y"), decide how well the answer meets it:
+- 0.0 = Answer completely fails to meet this item's criteria
+- 0.5 = Answer partially meets this item's criteria
+- 1.0 = Answer fully meets this item's criteria
+
+Compute total_score for each answer as: sum(item_score * max_points) / sum(max_points).
+
+Return ONLY this JSON (no other text):
+{"evaluations": [{"answer_id": "a1", "total_score": 0.65}, {"answer_id": "a2", "total_score": 0.43}, ...]}"""
+
+
+def get_judge_batched_prompt(
+    question: str,
+    answers: List[str],
+    rubric: str,
+) -> str:
+    """Generate prompt for Judge to evaluate multiple answers against one rubric.
+
+    This is more efficient than calling get_judge_prompt per answer:
+    one API call instead of N, and the model can compare answers for
+    more consistent relative scoring.
+
+    Args:
+        question: The original question.
+        answers: List of answers to evaluate.
+        rubric: Single rubric string.
+
+    Returns:
+        Formatted prompt string.
+    """
+    prompt = f"Question: {question}\n\n"
+
+    for i, answer in enumerate(answers):
+        prompt += f"--- Answer a{i + 1} ---\n{answer}\n\n"
+
+    prompt += f"--- Rubric ---\n{rubric}\n\n"
+    prompt += "Evaluate each answer independently against the rubric."
+
     return prompt
 

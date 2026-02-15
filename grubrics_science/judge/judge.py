@@ -12,7 +12,12 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..llm.client import AzureOpenAIClient
-from ..llm.prompts import JUDGE_SYSTEM_PROMPT, get_judge_prompt
+from ..llm.prompts import (
+    JUDGE_SYSTEM_PROMPT,
+    JUDGE_BATCHED_SYSTEM_PROMPT,
+    get_judge_prompt,
+    get_judge_batched_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,8 +86,11 @@ class Judge:
         self._timeout = timeout
         self._cache: Dict[str, Tuple[List[float], List[Dict[str, Any]]]] = {}
 
-    async def _call_with_retry(self, prompt: str) -> str:
+    async def _call_with_retry(
+        self, prompt: str, system_prompt: Optional[str] = None, max_tokens: int = 5000,
+    ) -> str:
         """Call the LLM with rate limiting, timeout, and retry."""
+        system_prompt = system_prompt or JUDGE_SYSTEM_PROMPT
         last_error: Optional[Exception] = None
 
         for attempt in range(self._max_retries):
@@ -91,8 +99,8 @@ class Judge:
                     response = await asyncio.wait_for(
                         self.client.generate(
                             prompt=prompt,
-                            system_prompt=JUDGE_SYSTEM_PROMPT,
-                            max_tokens=5000,
+                            system_prompt=system_prompt,
+                            max_tokens=max_tokens,
                         ),
                         timeout=self._timeout,
                     )
@@ -235,3 +243,72 @@ class Judge:
         score_matrix = [scores for scores, _ in results]
         details_matrix = [details for _, details in results]
         return score_matrix, details_matrix
+
+    async def evaluate_answers_batched(
+        self,
+        question: str,
+        answers: List[str],
+        rubric: str,
+    ) -> List[float]:
+        """Evaluate multiple answers against one rubric in a single API call.
+
+        More efficient than evaluate_multiple_answers for the common case
+        of one rubric + many answers (1 call instead of N). The model can
+        also compare answers in context, producing more consistent rankings.
+
+        Args:
+            question: The original question.
+            answers: List of answers to evaluate.
+            rubric: Single rubric string.
+
+        Returns:
+            List of total_scores, one per answer.
+        """
+        # Cache key covers all answers + the rubric
+        key = _cache_key(question, json.dumps(answers), [rubric])
+        if key in self._cache:
+            cached_scores, _ = self._cache[key]
+            return cached_scores
+
+        prompt = get_judge_batched_prompt(question, answers, rubric)
+
+        response = await self._call_with_retry(
+            prompt,
+            system_prompt=JUDGE_BATCHED_SYSTEM_PROMPT,
+            max_tokens=2000,
+        )
+
+        scores = self._parse_batched_response(response, len(answers))
+
+        # Store in cache (use same tuple format for consistency)
+        self._cache[key] = (scores, [])
+        return scores
+
+    def _parse_batched_response(
+        self, response: str, num_answers: int
+    ) -> List[float]:
+        """Parse batched Judge response into a list of scores."""
+        result = extract_json_from_response(response)
+
+        if not result or "evaluations" not in result:
+            logger.warning(
+                "Failed to parse batched judge response: %s...", response[:300]
+            )
+            return [0.0] * num_answers
+
+        evaluations = result["evaluations"]
+
+        # Build dict by answer_id for robust lookup
+        eval_dict = {}
+        for e in evaluations:
+            aid = e.get("answer_id", "")
+            eval_dict[aid] = float(e.get("total_score", 0.0))
+
+        scores = []
+        for i in range(num_answers):
+            aid = f"a{i + 1}"
+            score = eval_dict.get(aid, 0.0)
+            score = max(0.0, min(1.0, score))
+            scores.append(score)
+
+        return scores
