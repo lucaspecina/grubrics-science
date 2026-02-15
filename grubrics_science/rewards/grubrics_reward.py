@@ -53,7 +53,21 @@ def _reward_verifiable(
     ground_truth: str,
     extra_info: Dict[str, Any],
 ) -> float:
-    """Reward for verifiable domains. Delegates to the local reward."""
+    """Reward for verifiable domains.
+
+    If precomputed answers + gold_scores are available in extra_info,
+    uses functional alignment (same as open domains). Otherwise falls
+    back to the local format-only reward.
+    """
+    answers: List[str] = extra_info.get("answers", [])
+    gold_scores: List[float] = extra_info.get("gold_scores", [])
+
+    if answers and gold_scores:
+        # Functional alignment path (Phase 2): Judge evaluates answers
+        # with the generated rubric, then Spearman vs programmatic gold_scores.
+        return _reward_functional_alignment(solution_str, extra_info)
+
+    # Fallback: format-only reward (Phase 0 behaviour)
     return local_compute_score(
         data_source=extra_info.get("data_source", "gsm8k"),
         solution_str=solution_str,
@@ -63,14 +77,17 @@ def _reward_verifiable(
 
 
 # ---------------------------------------------------------------------------
-# Open domain reward (Judge API)
+# Functional alignment reward (shared by verifiable + open domains)
 # ---------------------------------------------------------------------------
 
-def _reward_open_sync(
+def _reward_functional_alignment(
     solution_str: str,
     extra_info: Dict[str, Any],
 ) -> float:
-    """Reward for open domains. Calls the Judge API synchronously.
+    """Compute functional alignment reward using Judge API.
+
+    Shared by both verifiable and open domains when precomputed
+    answers + gold_scores are available.
 
     Expects ``extra_info`` to contain:
         - answers: List[str]  — precomputed diverse answers
@@ -80,17 +97,6 @@ def _reward_open_sync(
     answers: List[str] = extra_info.get("answers", [])
     gold_scores: List[float] = extra_info.get("gold_scores", [])
     question: str = extra_info.get("question", "")
-
-    if not answers or not gold_scores:
-        logger.warning(
-            "No precomputed answers/gold_scores for open-domain reward. "
-            "Falling back to format-only reward."
-        )
-        return local_compute_score(
-            data_source="frontierscience",
-            solution_str=solution_str,
-            extra_info=extra_info,
-        )
 
     # The solution_str IS the generated rubric — evaluate answers with it
     rubric = solution_str
@@ -112,7 +118,6 @@ def _reward_open_sync(
     alignment = compute_alignment(scores, gold_scores, metric="spearman")
 
     # Length penalty: only penalise rubrics longer than a reasonable threshold.
-    # Scientific rubrics are naturally 1-3k chars; penalise excess beyond that.
     rubric_chars = len(rubric)
     CHAR_THRESHOLD = 3000
     excess_chars = max(0, rubric_chars - CHAR_THRESHOLD)
@@ -134,11 +139,37 @@ def _reward_open_sync(
     )
 
     logger.debug(
-        "Open reward: alignment=%.3f info=%.3f defense=%.3f len=%.0f -> %.3f",
+        "Functional alignment reward: alignment=%.3f info=%.3f defense=%.3f len=%.0f -> %.3f",
         alignment, info_val, defense_pen, len_pen, reward,
     )
 
     return float(reward)
+
+
+# ---------------------------------------------------------------------------
+# Open domain reward (Judge API)
+# ---------------------------------------------------------------------------
+
+def _reward_open_sync(
+    solution_str: str,
+    extra_info: Dict[str, Any],
+) -> float:
+    """Reward for open domains. Calls the Judge API synchronously."""
+    answers: List[str] = extra_info.get("answers", [])
+    gold_scores: List[float] = extra_info.get("gold_scores", [])
+
+    if not answers or not gold_scores:
+        logger.warning(
+            "No precomputed answers/gold_scores for open-domain reward. "
+            "Falling back to format-only reward."
+        )
+        return local_compute_score(
+            data_source="frontierscience",
+            solution_str=solution_str,
+            extra_info=extra_info,
+        )
+
+    return _reward_functional_alignment(solution_str, extra_info)
 
 
 def _run_async(coro):

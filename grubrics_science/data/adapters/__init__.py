@@ -16,8 +16,13 @@ ADAPTERS: Dict[str, Type[DatasetAdapter]] = {
 }
 
 
-def get_adapter(name: str) -> DatasetAdapter:
+def get_adapter(name: str, cache_path: str = None) -> DatasetAdapter:
     """Instantiate an adapter by name.
+
+    Args:
+        name: Adapter name (e.g. "gsm8k", "math", "frontierscience").
+        cache_path: Optional path to precompute cache JSONL. Adapters
+            that support it will load answers + gold_scores from cache.
 
     Raises:
         KeyError: If ``name`` is not in the registry.
@@ -25,4 +30,11 @@ def get_adapter(name: str) -> DatasetAdapter:
     if name not in ADAPTERS:
         available = ", ".join(sorted(ADAPTERS))
         raise KeyError(f"Unknown adapter '{name}'. Available: {available}")
-    return ADAPTERS[name]()
+
+    cls = ADAPTERS[name]
+    # Pass cache_path to adapters that support it
+    try:
+        return cls(cache_path=cache_path)
+    except TypeError:
+        # Adapter doesn't accept cache_path (e.g. VerifiableMathAdapter)
+        return cls()

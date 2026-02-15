@@ -1,0 +1,952 @@
+# GRubrics-Transfer
+
+## Objetivo de la Investigacion
+
+**Pregunta principal**: Podemos entrenar un modelo de lenguaje para que genere rubricas de evaluacion cientifica tan buenas como las escritas por humanos, eliminando el costo de crear rubricas manuales a escala?
+
+### El problema
+
+Reinforcement Learning with Verifiable Rewards (RLVR) funciona increible en dominios verificables (matematica, codigo) porque existen verificadores automaticos baratos. Pero muchas tareas reales — diagnostico medico, argumentacion legal, analisis cientifico — no tienen respuesta correcta unica. Para estos dominios, se demostro que **rubricas** (criterios de evaluacion estructurados con puntajes) pueden servir como reward signal para RL (RaR, RURA). Pero el cuello de botella es: **quien escribe las rubricas?**
+
+- Rubricas humanas son caras y no escalan.
+- Rubricas generadas por LLMs son baratas pero de menor calidad.
+- Ninguna evoluciona durante el training: al mejorar la policy, rubricas estaticas se saturan.
+
+En paralelo, self-evolving rubrics (RLCER, DR-Tulu) resuelven la evolucion pero **solo funcionan en dominios verificables**, porque validan la rubrica correlacionandola con la correctitud de la respuesta final.
+
+### El gap
+
+| Direccion | Fortaleza | Debilidad |
+|---|---|---|
+| Rubric-based RL (RaR, RURA) | Funciona en dominios abiertos | Necesita rubricas humanas caras y estaticas |
+| Self-evolving rubrics (RLCER) | Baratas y adaptativas | Solo dominios verificables |
+
+Nadie combina la adaptividad de las self-evolving con la cobertura de dominios de las rubric-based.
+
+### Nuestra propuesta
+
+**GRubrics-Transfer**: un framework que entrena un rubricator (generador de rubricas) simultaneamente en:
+
+1. **Dominios verificables** (math), donde la calidad de la rubrica se valida gratis correlacionando con correctitud. Señal abundante y barata.
+2. **Dominios abiertos** (ciencia), donde la calidad se valida via *ranking consistency* con rubricas humanas. Señal cara pero especifica del dominio objetivo.
+
+El insight clave es que **la habilidad de generar buenas rubricas es mayormente domain-general**: una rubrica que captura "consistencia logica" o "evita claims no fundamentados" es valiosa tanto para un proof matematico como para un diagnostico medico. Explotamos esto con un curriculum que va de mayormente-verificable (bootstrap barato) a balanceado (adaptacion al dominio).
+
+Usamos **ranking consistency** (Spearman) como señal de alineamiento: en vez de comparar scores absolutos (sensibles a escala y bias del judge), requerimos que la rubrica generada produzca el mismo *orden relativo* de respuestas que la rubrica humana.
+
+### Subpreguntas de investigacion
+
+- Functional alignment (ranking consistency) es una señal de reward viable para RL?
+- El transfer desde dominios verificables hacia abiertos funciona? (reduce rubricas humanas necesarias?)
+- Un curriculum gradual supera al training en un solo dominio?
+- Las rubricas generadas se acercan en calidad a las humanas?
+
+### Criterio de exito
+
+El modelo entrenado genera rubricas que superan a baselines (zero-shot, GPT frontier) en alignment score sobre held-out FrontierScience, acercandose a la calidad de las rubricas humanas.
+
+---
+
+## El Sistema: Como Funciona
+
+### En una oracion
+
+Entrenamos Qwen3-8B para que aprenda a escribir rubricas de evaluacion para preguntas cientificas abiertas, usando reinforcement learning con functional alignment como reward.
+
+### El problema en detalle
+
+Cuando un profesor hace un examen con preguntas abiertas, necesita una **rubrica** para corregir: una lista de criterios con puntajes que dice "esto vale 2 puntos, esto vale 3, esto vale 5". Escribir buenas rubricas es dificil y lento, especialmente para preguntas de investigacion cientifica donde las respuestas pueden ser muy variadas.
+
+Queremos un modelo que, dada una pregunta, genere automaticamente esa rubrica.
+
+No se puede entrenar esto como un problema clasico de "dado input X, predeci output Y", porque no hay una unica rubrica correcta para cada pregunta. Distintos expertos escribirian rubricas distintas, y todas podrian ser buenas. Lo que importa no es que la rubrica se parezca textualmente a alguna referencia, sino que **funcione bien**: que al usarla para corregir respuestas, separe bien las buenas de las malas.
+
+### La solucion: functional alignment
+
+Decimos que una rubrica es buena si produce **rankings similares** a los que produce la rubrica de referencia (escrita por cientificos humanos). Si ambas rubricas dicen "esta respuesta es la mejor, esta es mediocre, esta es mala", entonces la rubrica generada esta capturando lo que importa, aunque el texto sea completamente diferente.
+
+Medimos esto con correlacion de Spearman entre los scores que da nuestra rubrica y los scores que da la rubrica humana, sobre las mismas respuestas.
+
+### Los tres actores del sistema
+
+El sistema tiene tres modelos de lenguaje, pero solo uno se entrena:
+
+```
+          Pregunta
+              |
+              v
+    +-----------------+
+    |    GRubrics      |  <-- SE ENTRENA (Qwen3-8B + LoRA)
+    |  genera rubrica  |
+    +--------+--------+
+             |
+             | rubrica generada
+             v
++----------+    +----------+
+|  Answer  |--->|  Judge   |  <-- AMBOS FIJOS (GPT via Azure OpenAI API)
+|  Policy  |    | evalua   |
+| genera   |    | respuestas|
+| respuestas|   | con la    |
++----------+    | rubrica   |
+                +-----+----+
+                      |
+                      | scores por respuesta
+                      v
+               +-----------+
+               |  Reward   |  = Spearman(scores, gold_scores) + bonuses - penalties
+               +-----------+
+```
+
+**GRubrics** (Qwen3-8B con LoRA): recibe una pregunta y genera una rubrica en formato `Points: X, Item: Y`. Es el unico modelo que se entrena.
+
+**Answer Policy** (GPT, fijo): genera respuestas diversas a cada pregunta. Esto se hace una vez y se cachea. Son las "pruebas de examen" sobre las que vamos a aplicar las rubricas.
+
+**Judge** (GPT, fijo): toma una pregunta, respuestas, y una rubrica, y evalua las respuestas segun la rubrica. Devuelve scores. Es el "profesor" que usa la rubrica para corregir. Opera en modo batched: N answers + 1 rubric = 1 sola API call.
+
+### Los dos dominios
+
+El sistema opera sobre dos tipos de datos. El truco del transfer learning es que el modelo aprende primero con el dominio facil (verificable) y despues transfiere al dificil (abierto).
+
+#### Dominio verificable (matematica) — barato, abundante
+
+- **Datasets**: MATH (Hendrycks, 12K problemas), GSM8K (8.5K problemas), olympiad_math (1K del repo)
+- **Propiedad clave**: tienen respuesta correcta conocida (un numero, una expresion)
+
+**Como funciona el training:**
+
+1. Se toma un problema de matematica del batch.
+2. GRubrics genera N rubricas candidatas.
+3. Para cada rubrica, se evalua contra respuestas precomputadas (mix correctas/incorrectas):
+   - Gold_scores son programaticos (correct=1.0, incorrect=0.0) — GRATIS
+   - GRubrics scores vienen del Judge evaluando las mismas answers con la rubrica generada
+   - Reward = Spearman(gold_scores, grubrics_scores) + bonuses - penalties
+4. Se comparan las N rubricas y se actualiza el modelo (GRPO).
+
+**Ventaja**: los gold_scores no requieren Judge (son programaticos). Solo necesitamos Judge para los grubrics_scores. Abundante y barato.
+
+#### Dominio abierto (ciencia) — con API, caro, escaso pero valioso
+
+- **Dataset**: FrontierScience (60 subtasks de investigacion en fisica, con rubricas escritas por PhD)
+- **Propiedad clave**: no hay "respuesta correcta" — las respuestas son ensayos de investigacion con distintos grados de calidad
+
+**Precompute (una sola vez, antes de entrenar):**
+
+1. Para cada pregunta, el **Answer Policy** (GPT) genera K=6 respuestas diversas variando instrucciones.
+2. El **Judge** evalua cada respuesta usando la **rubrica golden** (la humana). Esto produce `gold_scores`: el ranking "verdadero" de calidad.
+3. Se promedia N=3 evaluaciones para estabilizar gold_scores (gpt-5.2 solo soporta temperature=1, lo cual introduce ruido).
+4. Todo se cachea en disco (`data/cache/frontierscience_precompute.jsonl`).
+
+**Como funciona el training:**
+
+1. Se toma una pregunta con sus K respuestas y gold_scores pre-cacheados.
+2. GRubrics genera N rubricas candidatas.
+3. Para cada rubrica:
+   a. El Judge evalua las K respuestas usando esa rubrica → grubrics_scores (1 batched API call)
+   b. Reward = Spearman(gold_scores, grubrics_scores) + info_value - defense_penalty - length_penalty
+4. Se comparan las N rubricas y se actualiza (GRPO).
+
+#### Resumen: las diferencias
+
+| | Verificable (math) | Abierto (ciencia) |
+|---|---|---|
+| Respuesta correcta | Si (un numero) | No (ensayos) |
+| Precompute | Si (answers + programmatic scores) | Si (answers + Judge gold_scores) |
+| Gold scores | Programaticos (gratis) | Judge + golden rubric (caro) |
+| GRubrics scores | Judge + generated rubric | Judge + generated rubric |
+| Costo por step | ~$0.003 (1 Judge call) | ~$0.003 (1 Judge call) |
+| Volumen disponible | ~20K problemas | ~60 subtasks |
+| Rol en curriculum | Etapas tempranas (80% → 20%) | Etapas tardias (20% → 80%) |
+
+### El curriculum: de facil a dificil
+
+El training loop de GRPO es siempre el mismo: generar N rubricas, calcular rewards, actualizar con advantages. Lo que cambia entre fases es **la mezcla de datos**:
+
+1. **Fase 1** (80% math, 20% ciencia): el modelo aprende que es una rubrica, como formatearla, que criterios importan. La mayoria de los steps usan el dominio verificable (barato, abundante).
+2. **Fase 2** (50% math, 50% ciencia): transicion gradual. El modelo ya sabe formatear rubricas y empieza a especializarse en discriminar calidad de respuestas cientificas.
+3. **Fase 3** (20% math, 80% ciencia): fine-tuning en el dominio objetivo real.
+
+La intuicion es que "escribir buenas rubricas" es una habilidad transferible. Un modelo que sabe distinguir buenas soluciones de matematica tiene la base para distinguir buena investigacion cientifica.
+
+### La reward function en detalle
+
+```
+reward = alignment                    # Spearman(gold_scores, grubrics_scores) — componente principal
+       - 0.1 * length_penalty        # Solo penaliza exceso sobre 3000 chars (rubricas cientificas son largas)
+       + 0.3 * info_value            # 4*p*(1-p) — incentiva criterios que discriminen
+       - 0.3 * defense_penalty       # Detecta rubricas degeneradas (dan mismo score a todo)
+```
+
+- **alignment**: correlacion de Spearman entre scores de la rubrica generada y gold_scores. La metrica principal.
+- **length_penalty**: `max(0, chars - 3000) / 3000`. Penaliza exceso, no el largo per se (rubricas cientificas necesitan ser detalladas).
+- **info_value**: `4 * p * (1-p)` donde p = fraccion de answers que pasan cada criterio. Maxima cuando p=0.5. Incentiva criterios que no sean triviales ("todos pasan" o "nadie pasa").
+- **defense_penalty**: `max(0, 1 - std(scores)/0.2)`. Penaliza rubricas que dan el mismo score a todas las respuestas (degenerate).
+
+### El modelo y como se entrena
+
+**Modelo base:** Qwen3-8B (8 mil millones de parametros).
+
+**LoRA (Low-Rank Adaptation):** congelamos el modelo base y agregamos adaptadores de bajo rango (rank 64) en atencion y FFN. ~200M parametros entrenables (~2.5%), factible en 1 GPU.
+
+**GRPO (Group Relative Policy Optimization):** variante de PPO sin critic model. En cada step, se generan N=6 rubricas del grupo, se calculan rewards, advantages = diferencia respecto al promedio del grupo. Mas simple y estable que PPO para generacion de texto.
+
+**vLLM:** genera las N rubricas en paralelo con PagedAttention y KV-cache eficiente.
+
+### El dataset gold standard: FrontierScience
+
+60 subtasks de investigacion en fisica creadas por cientificos con PhD. Cada subtask tiene:
+- Una pregunta de investigacion (abierta, no trivial)
+- Una rubrica de evaluacion con 10 puntos distribuidos en multiples criterios
+- Multiples respuestas pre-evaluadas
+
+Esto es extremadamente raro: rubricas humanas para ciencia abierta. FrontierScience es esencialmente el unico recurso viable para validar functional alignment en el dominio objetivo.
+
+---
+
+## Baselines y Evaluacion
+
+### Baselines zero-cost (sin training)
+
+| Baseline | Que mide | Como |
+|---|---|---|
+| **Golden Rubric** (upper bound) | Techo: la mejor rubrica posible | Usar la rubrica humana PhD directamente |
+| **Zero-shot Qwen3-8B** (lower bound) | Piso: que puede hacer el modelo base sin RL | Qwen3-8B genera rubricas sin fine-tuning |
+| **Zero-shot GPT-5.2** | Que hace un modelo frontier sin RL | GPT-5.2 genera rubricas zero-shot |
+| **Random rubric** | Sanity check: nuestras metricas discriminan? | Items de rubrica aleatorios |
+
+### Baselines con training (1 run cada uno)
+
+| Baseline | Que mide | Como |
+|---|---|---|
+| **SFT en golden rubrics** | Es RL necesario, o basta con imitar? | Supervised fine-tune en las 60 rubricas humanas |
+| **Verifiable-only** | Funciona el transfer? | Entrenar solo en GSM8K/MATH, evaluar en FrontierScience |
+| **Open-only** | Ayuda el curriculum vs training directo? | Entrenar solo en FrontierScience |
+| **Format-only reward** | Es necesario functional alignment? | Entrenar con reward de formato solamente (sin Judge, sin Spearman) |
+
+### Ablations (removiendo componentes del sistema completo)
+
+| Ablation | Que mide |
+|---|---|
+| **Sin contrastive excerpts** | Ayudan los best/worst answer excerpts en el prompt? |
+| **Sin info_value** | Importa el bonus de discriminacion? |
+| **Sin defense_penalty** | Importa la penalidad de degeneracion? |
+| **Sin curriculum** (flat 50/50) | Ayuda el shifting gradual vs proporcion fija? |
+| **Sin evolucion** (Phase 4) | Aporta la evolucion de rubricas durante training? |
+
+### Metricas de evaluacion
+
+Todos los baselines y ablations evaluados en el mismo held-out de FrontierScience:
+
+| Metrica | Que captura |
+|---|---|
+| **Alignment (Spearman)** | Metrica principal: la rubrica rankea answers como la golden? |
+| **Discrimination (std of scores)** | La rubrica diferencia calidad? |
+| **Format validity** | Fraccion con formato correcto `Points: X, Item: Y` |
+| **Info value** | Promedio 4*p*(1-p) — criterios no-triviales? |
+
+### Definicion de exito
+
+El sistema completo supera a zero-shot baselines y se acerca a golden rubric quality en alignment score sobre held-out FrontierScience.
+
+---
+
+## Analisis de Datasets
+
+### Datasets en el Repositorio
+
+| Dataset | Ubicacion | Tipo | Rubrics? | Humanas? | Ciencia? | Verdict |
+|---|---|---|---|---|---|---|
+| verifiable-math-problems | `primeintellect-synthetic-1/` | Math olimpiada con soluciones gold | No | N/A | Math | **D_verif OK** |
+| stackexchange-QA | `primeintellect-synthetic-1/` | Q&A con respuestas gold, dominios mixtos | No | N/A | Mixto | D_verif parcial (filtrar) |
+| synthetic-1-subsample | `primeintellect-synthetic-1/` | Pares preferencia (preferred/rejected) | No | N/A | Mixto | No util directamente |
+| synthetic-2 | `primeintellect-synthetic-2/` | Instruction following con rewards de modelos | No | N/A | No | **No sirve para D_verif** |
+| FrontierScience Research | `frontierscience-research/` | 60 subtasks de investigacion fisica, PhD-authored | **Si, 10pts** | **Si (PhD)** | **Fisica** | **D_open GOLD STANDARD** |
+| rurl-science | `rubrichub/` | Preguntas ciencia con rubricas criterio/puntos | Si | No (LLM) | Ciencia basica | Suplementario |
+| rurl-medical | `rubrichub/` | Preguntas medicas con rubricas | Si | No (LLM) | Medicina | Suplementario |
+| researchrubrics | `scaleai/` | Rubricas detalladas criterio/peso/eje | Si | **Si (humanas)** | **No (general)** | Util para formato |
+| moose-chem | `moose-chem/` | Papers quimica con hipotesis/experimentos | No | N/A | Quimica | Sin rubricas |
+| research-plan-gen | `research-plan-gen/` | Planes de investigacion arxiv/pubmed con rubricas | Si | No (LLM) | CS/Med | Suplementario |
+| ruft-bestof6 | `rubrichub/` | Muestras best-of-6, dominio general | Si | No | No | No relevante |
+
+### Datasets Externos Relevantes
+
+**Para D_verif (dominios verificables):**
+
+| Dataset | Tamano | Dominio | Soluciones paso-a-paso? | Fuente |
+|---|---|---|---|---|
+| **MATH (Hendrycks)** | 12,500 (12K train + 500 test) | Math competitiva, 7 subjects, 5 niveles | **Si** | `hendrycks/competition_math` |
+| **GSM8K** | 8,500 (7.5K train + 1K test) | Math escolar multi-step | **Si** | `openai/gsm8k` |
+| GPQA | 448 | Bio/Fisica/Quimica grad-level | No (MCQ) | `Idavidrein/gpqa` |
+| ARC (AI2) | 7,787 | Ciencia escolar (MCQ) | No | `allenai/ai2_arc` |
+| SciQ | 13,700 | Ciencia escolar (MCQ) | Parcial (supporting evidence) | `allenai/sciq` |
+
+**Para D_open (dominio abierto con rubricas):**
+
+| Dataset | Tamano | Rubrics humanas? | Ciencia? | Notas |
+|---|---|---|---|---|
+| **FrontierScience Research** | 60 subtasks | **Si (PhD scientists)** | **Fisica investigacion** | Ya en repo. THE gold standard |
+| RaR-Science-20k | ~20K | No (o3-mini generated) | Ciencia (GPQA-aligned) | Scale AI, utiles para pre-training |
+| PRBench | 1,100 | Si (expertos) | No (legal/finanzas) | Dominio incorrecto |
+| Dr. SCI | 1M (545K open-ended) | No (LLM-generated) | STEM | No publico aun (Feb 2026) |
+| ScaleAI ResearchRubrics | ~100+ | Si (humanas) | No (general) | Ya en repo, util para formato |
+| OpenRubrics | Large-scale | No (CRG synthetic) | General | Util como referencia de arquitectura |
+
+### Conclusiones sobre datos
+
+1. **D_verif**: MATH (Hendrycks) es la mejor opcion primaria (12K, step-by-step, multiple difficulty levels). GSM8K como warm-up.
+2. **D_open**: FrontierScience es esencialmente la unica opcion viable con rubricas humanas cientificas.
+3. **synthetic-2 NO sirve** — es instruction following con rewards de modelos, no problemas verificables.
+4. **Potencial futuro**: Dr. SCI (1M questions) podria ser util cuando se publique. Codigo flexible para incorporarlo.
+
+### Arquitectura de datos flexible
+
+Patron **DatasetAdapter** abstracto. Agregar un nuevo dataset = crear un adapter (~50 lineas).
+
+```python
+class DatasetAdapter(ABC):
+    data_source: str          # "gsm8k", "frontierscience", etc.
+    domain_type: str          # "verifiable" | "open_rubric" | "open_no_rubric"
+
+    def load_raw(self, path) -> List[Dict]: ...
+    def to_verl_format(self, item, tokenizer) -> Dict: ...  # {data_source, prompt, reward_model, extra_info}
+    def to_parquet(self, output_dir, tokenizer): ...
+```
+
+Adapters: `GSM8KAdapter`, `MATHAdapter`, `FrontierScienceAdapter`, `VerifiableMathAdapter`.
+
+---
+
+## Estrategia de Desarrollo
+
+### Principio: un solo framework (veRL) para debug y produccion
+
+```bash
+# Debug (workstation RTX 4000 Ada, 12GB):
+python -m verl.trainer.main_ppo --config grubrics_science/configs/verl_grpo_debug.yaml
+
+# Produccion (H100 94GB):
+python -m verl.trainer.main_ppo --config grubrics_science/configs/verl_grpo.yaml
+```
+
+### Tres ambientes
+
+| | MacBook | Workstation RTX 4000 | H100 Azure |
+|---|---|---|---|
+| **Rol** | Desarrollo de codigo, edicion, git | Debug pipeline veRL completo | Training real |
+| **veRL instalado** | No | **Si** | Si |
+| **Modelo** | N/A | Qwen2.5-0.5B-Instruct | Qwen3-8B |
+| **Config** | N/A | `verl_grpo_debug.yaml` | `verl_grpo.yaml` |
+| **VRAM** | N/A | 12GB (~5GB usados) | 94GB (~68GB usados) |
+| **Costo** | $0 | $0 | ~$7/h |
+
+**Conda environment**: `RL`
+
+### Que comparten debug y produccion
+
+- **Framework**: veRL (mismo training loop GRPO)
+- **Datos**: mismos parquets generados por `prepare.py`
+- **Reward function**: mismo `compute_score()`
+- **Config structure**: mismo YAML, diferentes valores
+
+### Que cambia entre debug y produccion
+
+| Parametro | Debug (RTX 4000) | Produccion (H100) |
+|---|---|---|
+| Modelo | Qwen2.5-0.5B-Instruct | Qwen3-8B |
+| LoRA rank | 16 | 64 |
+| Rollout engine | HF generate | vLLM |
+| group_size | 2 | 6 |
+| max_new_tokens | 256 | 512 |
+| max_steps | 20 | 2000 |
+| batch_size | 1 | 2 |
+| wandb | off | on |
+
+### debug_train.py (DEPRECADO)
+
+Fallback ultra-liviano sin veRL. Util solo para smoke tests en MacBook sin GPU. No es el path principal.
+
+---
+
+## Descubrimientos Clave Durante la Validacion
+
+Cosas que descubrimos haciendo pruebas controladas y que impactan el diseño del sistema:
+
+1. **Judge noise es significativo**: gpt-5.2-chat solo soporta `temperature=1`. Una sola evaluacion de la golden rubric contra si misma dio Spearman=-0.16. Promediando N=3 evaluaciones: Spearman=0.77-0.94. **Solucion**: promediar N=3 evaluaciones en precompute.
+
+2. **Length penalty necesita threshold**: Rubricas cientificas son naturalmente largas (1-3k chars). Penalidad lineal destruia todas las rubricas largas (golden rubric scored -13). **Solucion**: solo penalizar exceso sobre 3000 chars, normalizado.
+
+3. **Batched evaluation es critico**: Evaluar 6 answers en 1 call (vs 6 individuales) reduce latencia de ~22s a ~9s y mejora consistencia del ranking (el modelo puede comparar answers en contexto).
+
+4. **Suficiente varianza para GRPO**: Con 6 rubricas simuladas por pregunta, reward std=0.31-0.40, suficiente para que GRPO compute advantages significativos.
+
+5. **Reward discrimina correctamente**: Golden rubric (+0.62) > Bad rubric (+0.57) > Degenerate rubric (-0.30).
+
+6. **Instruction diversity NO produce correctness diversity en verifiable**: GPT-5.2 con 4 instruction types (rigorous/shallow/overconfident/careless) da resultados "todo o nada" por pregunta — las 4 correctas o las 4 incorrectas. Probado en GSM8K + MATH L2-L5 (28 respuestas). El estilo de instruccion no cambia la capacidad matematica. **Solucion**: perturbacion deterministica de respuestas (cambiar numero final, truncar, etc.).
+
+7. **Functional alignment funciona con gold_scores programaticos**: Probado end-to-end con Judge API en GSM8K. Gold_scores [1.0, 0.0, 0.0, 0.0] (1 correcta + 3 perturbaciones). Good rubric: reward +1.0. Bad/degenerate: reward -0.3. Gap de +1.3. Las perturbaciones son suficientemente distintas para que el Judge asigne scores diferenciados con una buena rubrica.
+
+---
+
+## Plan de Implementacion por Fases
+
+### Phase 0: veRL Foundation + Single Data Source -- COMPLETA
+
+**Objetivo:** veRL corriendo con GRPO + LoRA, pipeline verificado.
+
+**Hecho:**
+- Adapters de datos (GSM8K, MATH, FrontierScience, olympiad_math)
+- Reward local (formato + coherencia)
+- CLI para generar parquets (`python -m grubrics_science.data.prepare`)
+- Debug training script + launch configs
+- veRL debug training corrido en workstation (Qwen2.5-0.5B + LoRA + HF engine)
+- Pipeline completo validado: datos -> rollouts -> reward -> gradients
+
+**Pendiente (H100 Azure) — no bloquea:**
+1. Configurar la maquina (`setup_env.sh`)
+2. Correr veRL con `verl_grpo.yaml` (Qwen3-8B + LoRA + vLLM)
+3. Verificar que cabe en 94GB (~68GB estimados)
+
+**Archivos creados:**
+1. `grubrics_science/data/base.py` — DatasetAdapter ABC
+2. `grubrics_science/data/adapters/gsm8k.py` — GSM8KAdapter
+3. `grubrics_science/data/adapters/math_hendrycks.py` — MATHAdapter
+4. `grubrics_science/data/adapters/frontierscience.py` — FrontierScienceAdapter
+5. `grubrics_science/data/adapters/verifiable_math.py` — VerifiableMathAdapter
+6. `grubrics_science/data/adapters/__init__.py` — Registry
+7. `grubrics_science/data/prepare.py` — CLI entry point
+8. `grubrics_science/rewards/gsm8k_reward.py` — Reward local simple
+9. `grubrics_science/configs/verl_grpo.yaml` — Config produccion (H100)
+10. `grubrics_science/configs/verl_grpo_debug.yaml` — Config debug (workstation)
+11. `setup_env.sh` — Script de setup
+
+---
+
+### Phase 1: Reward con API Externa (Judge) -- COMPLETA
+
+**Objetivo:** Pipeline completo de reward con Judge API para evaluar rubricas generadas.
+
+**Estado:** Codigo implementado y validado con pruebas controladas (2 preguntas, 59 tests).
+Flujo completo funciona: rubrica -> Judge batched -> scores -> Spearman vs gold_scores -> reward.
+
+**Archivos creados/modificados:**
+
+1. **`grubrics_science/rewards/grubrics_reward.py`** — CREADO
+   - `compute_score()`: entry point para veRL, rutea por `data_source`
+   - Verifiable (gsm8k, math, olympiad_math) -> reward local (formato + coherencia)
+   - Open (frontierscience) -> Judge API batched -> functional alignment reward
+   - Reward formula: `alignment - 0.1*len_pen + 0.3*info_val - 0.3*defense_pen`
+   - Length penalty: solo penaliza exceso sobre 3000 chars
+   - `_get_judge()`: singleton lazy, lee modelo de env var `JUDGE_MODEL`
+   - `_run_async()`: wrapper sync->async compatible con event loops existentes
+
+2. **`grubrics_science/judge/judge.py`** — MODIFICADO
+   - `asyncio.Semaphore` para rate limiting (max 10 concurrent)
+   - Retry con exponential backoff (3 reintentos, 1s/2s/4s)
+   - Timeout configurable por llamada
+   - Cache dict para evitar llamadas duplicadas
+   - **`evaluate_answers_batched()`**: evalua N answers contra 1 rubric en 1 API call
+   - `_parse_batched_response()`: parsea `{"evaluations": [{"answer_id": "a1", "total_score": 0.65}, ...]}`
+
+3. **`grubrics_science/rewards/alignment.py`** — MODIFICADO
+   - `compute_info_value(scores)`: `4*p*(1-p)`, maximizado en p=0.5
+   - `compute_defense_penalty(scores)`: detecta rubricas degeneradas
+   - `compute_reward()`: combina alignment + info_value - defense_penalty - length_penalty
+
+4. **`grubrics_science/llm/prompts.py`** — MODIFICADO
+   - `JUDGE_BATCHED_SYSTEM_PROMPT`: prompt para evaluacion batched
+   - `get_judge_batched_prompt()`: formatea N answers + 1 rubric para 1 call
+   - Fix: `base_instruction` -> `instructions["rigorous"]`
+
+5. **`grubrics_science/data/precompute.py`** — CREADO
+   - Pipeline de precomputo: genera K answers, evalua con golden rubric
+   - `evaluate_with_golden_rubric()`: promedia N=3 evaluaciones para estabilizar gold_scores
+   - Usa `evaluate_answers_batched()` para eficiencia
+   - Cache incremental (skip preguntas ya computadas)
+   - CLI: `python -m grubrics_science.data.precompute --limit 2 --num_evals 3`
+
+6. **`grubrics_science/data/adapters/frontierscience.py`** — MODIFICADO
+   - Lee precompute cache y popula `extra_info` con answers + gold_scores
+   - Genera contrastive excerpts (best/worst answer) cuando hay cache
+   - Incluye excerpts en el prompt de generacion de rubricas
+
+7. **`tests/test_phase1.py`** — CREADO (59 tests, todos pasan)
+   - `TestInfoValue`: 5 tests
+   - `TestDefensePenalty`: 4 tests
+   - `TestGrubricsRewardRouting`: 3 tests
+   - `TestComputeRewardExtended`: 2 tests
+   - `TestJudgeParsing`: 6 tests (incl. batched)
+   - `TestAdapterCacheIntegration`: 7 tests (adapter -> cache -> reward -> parquet)
+
+**Datos de prueba generados:**
+- `data/cache/frontierscience_precompute.jsonl`: 2 preguntas, 6 answers cada una, gold_scores promediados (num_evals=3)
+  - Q0: gold_scores std=0.076, rango 0.42-0.65
+  - Q1: gold_scores std=0.038, rango 0.50-0.61
+- `data/processed/frontierscience_train.parquet`: 60 rows (2 con cache data, 58 sin)
+
+**Validaciones realizadas:**
+- Judge API funciona con Azure OpenAI (gpt-5.2-chat)
+- Batched Judge: 1 call para 6 answers, ~9s vs ~22s
+- Gold_scores estables con promedio de 3 evaluaciones
+- Reward discrimina: Golden (+0.62) > Bad (+0.57) > Degenerate (-0.30)
+- Flujo GRPO simulado: 6 rubricas/pregunta, std=0.31-0.40
+- 59 tests pasan (sin GPU, sin API)
+
+---
+
+### Phase 2: Functional Alignment para Verifiable + Curriculum -- EN PROGRESO
+
+**Objetivo:** Functional alignment reward para GSM8K/MATH + mezcla con FrontierScience + curriculum.
+
+**Problema a resolver:** El reward para dominios verificables es solo format-based. No mide si la rubrica realmente distingue respuestas correctas de incorrectas. Necesitamos functional alignment tambien para verifiable.
+
+**Concepto**: Para GSM8K/MATH:
+- Generar N answers (mix correctas/incorrectas)
+- Gold_scores = programmatic correctness (gratis, sin Judge)
+- GRubrics scores = Judge evalua answers con generated rubric
+- Reward = Spearman(gold_scores, grubrics_scores)
+
+**Decisiones tomadas:**
+- Gold_scores para verifiable = programaticos (correct=1.0, incorrect=0.0). Gratis.
+- GRubrics_scores para verifiable = Judge evalua answers con generated rubric (igual que open). 1 batched API call por rubrica.
+- 4 answers por pregunta verifiable (vs 6 en open). Suficiente para Spearman con mix correct/incorrect.
+
+**Decision tomada (respuestas incorrectas para verifiable):**
+
+Resultado experimental (`scripts/test_verifiable_answers.py`): GPT-5.2 con 4 instruction types (rigorous, shallow, overconfident, careless) produce resultados "todo o nada" — para una pregunta dada, o las 4 son correctas o las 4 son incorrectas. Probado con 7 preguntas (GSM8K, MATH L2-L5, 28 respuestas total). El instruction type NO cambia la capacidad matematica del modelo, solo el estilo de presentacion.
+
+**Estrategia elegida: perturbacion deterministica.**
+1. Generar 1 respuesta con modelo fuerte (GPT-5.2)
+2. Verificar programaticamente (correcta/incorrecta)
+3. Si correcta: crear 2-3 perturbaciones:
+   - Cambiar numero final (±1, ×2, error aritmetico comun)
+   - Mantener razonamiento pero swapear respuesta final
+   - Truncar solucion a la mitad (incompleta)
+4. Si incorrecta: generar 1-2 mas (probablemente tambien incorrectas) + tomar respuesta gold como "correcta"
+5. Gold_scores = programaticos (1.0 para correctas, 0.0 para incorrectas)
+
+Ventajas: gratis (sin API extra), determinista, garantiza varianza en gold_scores para Spearman.
+
+**Archivos creados/modificados (hecho):**
+
+1. **`grubrics_science/data/precompute_verifiable.py`** — CREADO
+   - Genera 1 respuesta + 3 perturbaciones por pregunta
+   - Perturbaciones: cambio de numero final, truncado, swap de respuesta
+   - Gold_scores programaticos (1.0 correct, 0.0 incorrect)
+   - Cache JSONL compatible con adapters
+   - CLI: `python -m grubrics_science.data.precompute_verifiable --dataset gsm8k --limit 5`
+   - Validado: 5 preguntas GSM8K, cada una con 4 answers [1.0, 0.0, 0.0, 0.0]
+
+2. **`grubrics_science/rewards/grubrics_reward.py`** — MODIFICADO
+   - Nuevo: `_reward_functional_alignment()` — shared por verifiable y open
+   - `_reward_verifiable()`: si hay answers+gold_scores en extra_info → usa functional alignment. Sino → fallback a format-only
+   - `_reward_open_sync()`: refactored para usar `_reward_functional_alignment()`
+   - Eliminada duplicacion de logica de reward
+
+3. **`grubrics_science/data/adapters/gsm8k.py`** — MODIFICADO
+   - Constructor acepta `cache_path` opcional
+   - `_load_cache()`: lee precompute cache JSONL
+   - `to_verl_format()`: popula answers + gold_scores desde cache
+   - Genera contrastive excerpts (best/worst answer) cuando hay cache
+
+4. **`grubrics_science/data/adapters/math_hendrycks.py`** — MODIFICADO
+   - Mismo patron que GSM8K: cache_path, _load_cache, contrastive excerpts
+
+5. **`grubrics_science/data/adapters/__init__.py`** — MODIFICADO
+   - `get_adapter()` acepta `cache_path` y lo pasa a adapters que lo soporten
+
+6. **`tests/test_phase2.py`** — CREADO (19 tests, todos pasan)
+   - `TestPerturbations`: 7 tests (perturb_final_number, truncate, create_perturbations, variance guarantee)
+   - `TestAnswerChecking`: 5 tests (extract_hash, extract_boxed, normalize, check_correct)
+   - `TestVerifiableAdapterCache`: 3 tests (load cache, no cache, contrastive excerpts)
+   - `TestUnifiedRewardRouting`: 2 tests (with/without cache routing)
+   - `TestCacheFormatCompatibility`: 2 tests (required fields, variance guarantee)
+
+**Datos de prueba generados:**
+- `data/cache/gsm8k_precompute_test.jsonl`: 5 preguntas, 4 answers cada una, gold_scores=[1.0, 0.0, 0.0, 0.0]
+
+7. **`grubrics_science/training/curriculum.py`** — CREADO
+   - `CurriculumPhase`: dataclass con verif_ratio, open_ratio, fraction, lr_scale
+   - `CurriculumScheduler`: trackea fase por step, provee data_file, lr_scale, boundaries
+   - `parse_phases()`: parsea strings CLI "0.8:0.2:0.4" a CurriculumPhase
+   - `generate_parquets()`: genera parquets de curriculum con cache_paths
+   - Default: 3 fases (80/20 → 50/50 → 20/80), fraccion (40%/30%/30%)
+
+8. **`grubrics_science/training/run_grpo.py`** — CREADO
+   - `run_curriculum_training()`: orquesta multi-phase training con veRL
+   - Por cada fase: carga parquet, ajusta LR, corre veRL run_ppo, preserva checkpoint
+   - CLI: `python -m grubrics_science.training.run_grpo --config ... --generate_data`
+   - Soporta: `--phases`, `--gsm8k_cache`, `--math_cache`, `--fs_cache`
+
+9. **`grubrics_science/data/prepare.py`** — MODIFICADO
+   - Nuevo: `prepare_mixed_with_cache()` — como prepare_mixed pero pasa cache_path a adapters
+
+10. **`tests/test_curriculum.py`** — CREADO (13 tests, todos pasan)
+    - `TestCurriculumScheduler`: 10 tests (phases, boundaries, phase_index, data_file, switch, lr, summary, normalization, ratios)
+    - `TestParsePhases`: 3 tests (3-value, 4-value with lr, invalid format)
+
+**Tests totales: 91 (29 Phase 0 + 30 Phase 1 + 19 Phase 2 + 13 Curriculum), todos pasan.**
+
+**Validacion realizada:**
+- Reward end-to-end con Judge API (`scripts/test_verifiable_reward_e2e.py`):
+  - Good rubric: +1.00 / +1.04 (alignment perfecto + info_value)
+  - Bad rubric: -0.30 (defense penalty, Judge da mismo score a todo)
+  - Degenerate rubric: -0.30 (idem)
+  - Gap de +1.3 entre good y bad → suficiente para GRPO
+- Gold_scores programaticos [1.0, 0.0, 0.0, 0.0] funcionan correctamente con Spearman
+
+**Validacion pendiente:**
+- Proporciones correctas en parquets de curriculum (end-to-end con datasets reales)
+- 50 steps con datos mixtos en workstation
+
+---
+
+### Phase 3: Generacion Contrastiva + Tuning de Rewards -- PARCIALMENTE IMPLEMENTADA
+
+**Objetivo:** Mejorar calidad de rubricas con contrastive prompting y tuning de pesos.
+
+**Ya implementado (se adelanto a Phase 1):**
+- `compute_info_value()` en alignment.py
+- `compute_defense_penalty()` en alignment.py
+- Contrastive excerpts en FrontierScienceAdapter (best/worst answer)
+- `get_grubrics_prompt()` soporta `best_answer_excerpt` / `worst_answer_excerpt`
+- Tests unitarios para todo lo anterior
+
+**Lo que falta:**
+
+1. **Toggling de contrastive via config** — permitir A/B testing
+2. **Tuning de pesos del reward** — hacerlos configurables via YAML
+   - Pesos actuales: alignment=1.0, length=0.1, info=0.3, defense=0.3
+3. **Contrastive para verifiable** — excerpts de respuestas correctas/incorrectas
+
+**Validacion:**
+- A/B: training con vs sin contrastive prompt
+- Sweep de pesos con pruebas controladas (simulated GRPO)
+
+---
+
+### Phase 4: Evolucion de Rubricas (merge evolving_rubrics/) -- PENDIENTE
+
+**Objetivo:** Refinamiento periodico de rubricas durante training.
+
+**Archivos a crear (portados de evolving_rubrics/):**
+
+1. `grubrics_science/evolution/__init__.py`
+2. `grubrics_science/evolution/adaptive_rubrics.py` — portar `generate_adaptive_rubrics()`, `update_ground_truth()`
+3. `grubrics_science/evolution/prompts.py` — portar prompts adaptativos
+4. `grubrics_science/evolution/evolution_manager.py` — `RubricEvolutionManager`:
+   - `maybe_evolve(step, question_id, rubric_group, rewards)`: cada N steps, toma best/worst, genera criterios adaptativos
+   - `rubric_bank: Dict[question_id, List[evolved_criteria]]`
+   - Criterios se inyectan en futuros prompts
+5. `grubrics_science/evolution/output.py` — save/load evolution history
+
+Post-merge: `evolving_rubrics/` se marca deprecated.
+
+**Validacion:**
+- `test_evolve.py` adaptado
+- Rubricas evolucionadas mejoran alignment en holdout
+- A/B: training con vs sin evolucion
+
+---
+
+### Phase 5: Evaluacion + Baselines + Metricas -- PENDIENTE
+
+**Objetivo:** Evaluacion rigurosa con held-out, baselines, y metricas publicables.
+
+**Archivos a crear:**
+
+1. `grubrics_science/evaluation/__init__.py`
+2. `grubrics_science/evaluation/eval_rubrics.py`
+   - `evaluate_on_holdout(model_path, eval_parquet, judge_config) -> Dict`
+   - Genera rubricas, evalua con Judge, computa alignment con gold
+   - Retorna metricas agregadas + per-question
+3. `grubrics_science/evaluation/baselines.py`
+   - `baseline_golden_rubric()` — upper bound
+   - `baseline_zero_shot()` — Qwen3-8B sin RL
+   - `baseline_gpt_rubric()` — GPT-5.2 zero-shot
+   - `baseline_sft()` — Qwen3-8B SFT en golden rubrics
+4. `grubrics_science/evaluation/metrics.py`
+   - `rubric_alignment_score()` — Spearman con gold
+   - `rubric_discrimination_score()` — std de scores
+   - `rubric_format_score()` — formato valido
+   - `rubric_info_value()` — promedio 4*p*(1-p)
+5. `grubrics_science/evaluation/run_eval.py`
+   - Script standalone: carga LoRA, corre eval, genera reporte, logea a wandb
+
+**Validacion:**
+- Eval en modelo pre-entrenado como baseline
+- Eval despues de cada fase de curriculum
+- Comparar todas las variantes en mismo held-out
+- Bootstrap confidence intervals
+
+---
+
+## Guia Practica: Archivos y Como se Usan
+
+### Estructura del Repositorio
+
+```
+grubrics-science/
+  run_grpo.py                      # Punto de entrada principal para training
+  setup_env.sh                     # Instalacion de dependencias en maquinas con GPU
+  requirements.txt                 # Dependencias Python
+  RESEARCH.md                      # Este documento
+
+  azure_job_phase0_debug.yaml      # Job de Azure ML: debug
+  azure_job_phase0_prod.yaml       # Job de Azure ML: produccion
+  .amlignore                       # Archivos a excluir al subir jobs a Azure
+
+  grubrics_science/                # Paquete principal
+    configs/
+      default.yaml                 (referencia)
+      verl_grpo.yaml               (produccion H100) ✓
+      verl_grpo_debug.yaml         (debug workstation) ✓
+    data/
+      base.py                      (DatasetAdapter ABC) ✓
+      prepare.py                   (CLI entry point) ✓
+      precompute.py                (precompute FrontierScience) ✓
+      precompute_verifiable.py     (precompute GSM8K/MATH + perturbaciones) ✓
+      adapters/
+        __init__.py                (registry) ✓
+        gsm8k.py                   ✓
+        math_hendrycks.py          ✓
+        frontierscience.py         (+ cache + contrastive) ✓
+        verifiable_math.py         ✓
+    evolution/                     — PENDIENTE Phase 4
+      __init__.py
+      adaptive_rubrics.py
+      evolution_manager.py
+      prompts.py
+      output.py
+    evaluation/                    — PENDIENTE Phase 5
+      __init__.py
+      eval_rubrics.py
+      baselines.py
+      metrics.py
+      run_eval.py
+    judge/
+      judge.py                     (rate limiting, retry, cache, batched) ✓
+    llm/
+      client.py                    ✓
+      prompts.py                   (answer policy + grubrics + judge + batched) ✓
+    rewards/
+      alignment.py                 (spearman, info_value, defense, compute_reward) ✓
+      grubrics_reward.py           (unified reward para veRL) ✓
+      gsm8k_reward.py              (reward local format-only) ✓
+    rl/
+      model_wrap.py                (RETIRADO - reemplazado por veRL)
+      train_grpo.py                (RETIRADO - reemplazado por veRL)
+    tasks/
+      frontierscience.py           ✓
+    training/
+      __init__.py                  ✓
+      curriculum.py                (CurriculumScheduler + parse_phases) ✓
+      run_grpo.py                  (multi-phase training orchestrator) ✓
+    utils/
+      io.py                        ✓
+      logging.py                   ✓
+      seeding.py                   ✓
+
+  evolving_rubrics/                # Referencia para Phase 4
+
+  tests/
+    test_phase1.py                 (29 tests) ✓
+    test_phase2.py                 (19 tests) ✓
+    test_curriculum.py             (13 tests) ✓
+
+  data/
+    cache/
+      frontierscience_precompute.jsonl  (2 preguntas de prueba) ✓
+      gsm8k_precompute_test.jsonl       (5 preguntas de prueba) ✓
+    processed/
+      frontierscience_train.parquet     (60 rows, 2 con cache) ✓
+    frontierscience-research/      # FrontierScience (60 subtasks, rubricas PhD)
+    primeintellect-synthetic-1/    # Math olimpiada + StackExchange
+    rubrichub/                     # RubricHub (rubricas LLM-generated)
+    scaleai/                       # ResearchRubrics (rubricas humanas, general)
+```
+
+### Comandos de ejecucion
+
+#### Training
+
+```bash
+# Debug single-phase (modelo chico, 20 steps):
+python run_grpo.py --config grubrics_science/configs/verl_grpo_debug.yaml
+
+# Produccion single-phase (Qwen3-8B, 2000 steps):
+python run_grpo.py --config grubrics_science/configs/verl_grpo.yaml
+
+# Con overrides:
+python run_grpo.py --config grubrics_science/configs/verl_grpo.yaml \
+    trainer.total_training_steps=50 data.train_batch_size=8
+
+# Curriculum training (3 fases: 80/20 → 50/50 → 20/80):
+python -m grubrics_science.training.run_grpo \
+    --config grubrics_science/configs/verl_grpo.yaml \
+    --total_steps 2000 \
+    --generate_data \
+    --gsm8k_cache data/cache/gsm8k_precompute.jsonl \
+    --fs_cache data/cache/frontierscience_precompute.jsonl
+
+# Curriculum custom phases:
+python -m grubrics_science.training.run_grpo \
+    --config grubrics_science/configs/verl_grpo.yaml \
+    --total_steps 1000 \
+    --phases 0.9:0.1:0.3 0.5:0.5:0.4 0.1:0.9:0.3
+```
+
+#### Datos
+
+```bash
+# Generar parquet de un dataset:
+python -m grubrics_science.data.prepare single \
+    --dataset olympiad_math --output_dir ./data/processed/test/
+
+# Precompute de FrontierScience (answers + gold_scores):
+python -m grubrics_science.data.precompute \
+    --model gpt-5.2-chat --max_tokens 4096 --limit 2 --num_evals 3
+
+# Precompute de verifiable (1 answer + 3 perturbaciones por pregunta):
+python -m grubrics_science.data.precompute_verifiable \
+    --dataset gsm8k --model gpt-5.2-chat --limit 5
+
+# Datasets disponibles: olympiad_math, gsm8k, math, frontierscience
+```
+
+#### Setup
+
+```bash
+chmod +x setup_env.sh && ./setup_env.sh
+```
+
+#### Azure ML
+
+```bash
+# Instalar Azure CLI (una vez):
+brew install azure-cli && az extension add -n ml && az login
+
+# Mandar job:
+az ml job create --file azure_job_phase0_debug.yaml \
+    --workspace-name AI-coscientist-agents \
+    --resource-group RG-IAF-YTEC-poc-int
+
+# Ver logs:
+az ml job stream --name <job-id> \
+    --workspace-name AI-coscientist-agents \
+    --resource-group RG-IAF-YTEC-poc-int
+```
+
+### Modulos del paquete
+
+#### `data/` — Pipeline de datos
+- **`base.py`**: DatasetAdapter ABC.
+- **`prepare.py`**: CLI que genera parquets.
+- **`precompute.py`**: Precompute answers + gold_scores para FrontierScience. Usa Answer Policy (GPT) + Judge batched. Promedia N evaluaciones.
+- **`adapters/`**: un archivo por dataset. FrontierScienceAdapter integra cache de precompute y genera contrastive excerpts.
+
+#### `rewards/` — Funciones de reward
+- **`gsm8k_reward.py`**: reward local para verifiable. Chequea formato + coherencia. Sin API.
+- **`alignment.py`**: metricas (Spearman, Pearson, pairwise accuracy), info_value, defense_penalty, compute_reward.
+- **`grubrics_reward.py`**: entry point para veRL. Rutea por data_source: verifiable -> local, open -> Judge API + functional alignment.
+
+#### `judge/` — Evaluacion de respuestas
+- **`judge.py`**: wrapper con rate limiting, retry, cache, batched evaluation. `evaluate_answers_batched()` evalua N answers contra 1 rubric en 1 call.
+
+#### `llm/` — Clientes y prompts
+- **`client.py`**: cliente Azure OpenAI.
+- **`prompts.py`**: templates para answer policy (6 instruction types), grubrics generation (con/sin contrastive), judge (individual y batched).
+
+#### `tasks/` — Loaders especificos
+- **`frontierscience.py`**: carga FrontierScience, parsea rubricas golden.
+
+#### `utils/` — Utilidades
+- **`io.py`**: JSON, JSONL, cache.
+- **`logging.py`**: configuracion de loggers.
+- **`seeding.py`**: reproducibilidad.
+
+---
+
+## Estimacion de Memoria
+
+### Produccion: H100 94GB (Qwen3-8B + LoRA rank 64 + vLLM)
+
+| Componente | VRAM estimado |
+|---|---|
+| Qwen3-8B base (bf16) | ~16 GB |
+| Reference model (para KL, bf16) | ~16 GB |
+| LoRA adapter (rank 64) | ~0.2 GB |
+| vLLM rollout engine + KV cache | ~25 GB |
+| Optimizer states (AdamW, solo LoRA) | ~0.4 GB |
+| Activaciones + gradients (gradient checkpointing) | ~10 GB |
+| **Total** | **~68 GB** |
+| **Margen disponible** | **~26 GB** |
+
+### Debug: RTX 4000 Ada 12GB (Qwen2.5-0.5B + LoRA rank 16 + HF engine)
+
+| Componente | VRAM estimado |
+|---|---|
+| Qwen2.5-0.5B base (fp16) | ~1.0 GB |
+| Reference model (fp16) | ~1.0 GB |
+| LoRA adapter (rank 16) | ~0.01 GB |
+| HF generate overhead | ~0.5-1.0 GB |
+| Optimizer states | ~0.04 GB |
+| Activaciones + buffers | ~0.5-1.5 GB |
+| CUDA overhead | ~0.5-1.0 GB |
+| **Total** | **~3.5-5.5 GB** |
+| **Margen disponible** | **~6.5-8.5 GB** |
+
+---
+
+## Costo Estimado por Run Completo
+
+| Concepto | Costo |
+|---|---|
+| GPU (10h x $7/h) | ~$70 |
+| API Judge (~35K calls x $0.0006) | ~$20 |
+| **Total por run** | **~$90** |
+| **6 runs (ablations)** | **~$540** |
+
+---
+
+## Verificacion End-to-End
+
+1. **Phase 0** ✓: veRL corre en workstation (debug), pipeline unificado validado
+2. **Phase 1** ✓: Judge API funciona, rewards discriminan, flujo GRPO simulado valida suficiente varianza
+3. **Phase 2** (en progreso): precompute_verifiable ✓, reward unificado ✓, adapters con cache ✓, curriculum scheduler ✓, run_grpo ✓, prepare_mixed_with_cache ✓, validación e2e con API ✓. Falta: smoke test con datos reales en workstation
+4. **Phase 3**: Contrastive toggling + tuning de pesos
+5. **Phase 4**: Evolucion de rubricas
+6. **Phase 5**: Eval completo con baselines
+
+---
+
+## Glosario de Conceptos
+
+| Concepto | Definicion |
+|---|---|
+| **Question** | Pregunta del dataset (GSM8K, MATH, o FrontierScience) |
+| **Golden Rubric** | Rubrica humana de referencia (solo FrontierScience tiene, PhD-authored) |
+| **Answer Policy** | LLM (gpt-5.2) que genera K diverse answers por question en precompute |
+| **Precomputed Answers** | K answers generadas por Answer Policy, almacenadas en cache JSONL |
+| **Judge** | LLM evaluador que puntua answers contra una rubric (GPT via Azure, batched) |
+| **Gold Scores** | Scores del Judge evaluando precomputed answers con golden rubric. Para verifiable: programaticos. Para open: Judge + golden rubric, promediado N=3 veces |
+| **GRubrics Model** | Qwen3-8B + LoRA entrenado con GRPO para generar rubricas |
+| **Generated Rubric** | Rubrica producida por el GRubrics model durante rollout |
+| **GRubrics Scores** | Scores del Judge evaluando precomputed answers con generated rubric |
+| **Functional Alignment** | Spearman(gold_scores, grubrics_scores) — mide si el ranking de la rubrica generada coincide con el gold |
+| **Reward** | Señal que recibe GRPO: alignment + info_value - defense_penalty - length_penalty |
+| **Info Value** | 4*p*(1-p) — mide cuanto discrimina una rubrica (maximo cuando p=0.5) |
+| **Defense Penalty** | Penaliza rubricas degeneradas que dan mismo score a todas las answers |
+| **GRPO** | Group Relative Policy Optimization — genera N=6 rubricas por question, compara rewards |
+| **Batched Judge** | Evalua N answers contra 1 rubric en 1 sola API call |
+| **Curriculum** | Training schedule que va de 80% verifiable / 20% open hacia 20% / 80% |
+| **Contrastive Excerpts** | Fragmentos de best/worst answers incluidos en el prompt para guiar la generacion |
+
+---
+
+## Referencias
+
+- **RaR** (Gunjal et al., 2025): Rubrics as Rewards — rubric-based feedback outperforms Likert LLM-as-judge, 31% improvement en HealthBench
+- **RURA** (Huang et al., 2025): RL with Rubric Anchors — 10K+ rubrics de humanos y LLMs
+- **RLCER** (Sheng et al., 2026): Self-evolving rubrics que co-evolucionan con la policy (solo verifiable)
+- **DR-Tulu** (2025): Evolving rubrics para deep research tasks
+- **FrontierScience** (OpenAI): 60 PhD-authored physics research subtasks con rubricas humanas
+- **veRL**: Framework GRPO escalable con vLLM rollouts y LoRA

@@ -135,6 +135,81 @@ def prepare_mixed(
     return parquet_file
 
 
+def prepare_mixed_with_cache(
+    adapters_with_ratios: Sequence[Tuple[str, float]],
+    output_dir: str,
+    tokenizer: Any = None,
+    total_items: Optional[int] = None,
+    split: str = "train",
+    cache_paths: Optional[Dict[str, str]] = None,
+    seed: int = 42,
+) -> Path:
+    """Like prepare_mixed but passes cache_path to adapters that support it.
+
+    Args:
+        adapters_with_ratios: List of ``(adapter_name, ratio)`` tuples.
+        output_dir: Directory for the output parquet.
+        tokenizer: Optional HuggingFace tokenizer.
+        total_items: Total rows in output. None = use all available.
+        split: Name tag for the parquet file.
+        cache_paths: Dict mapping adapter name to precompute cache path.
+        seed: Random seed.
+
+    Returns:
+        Path to the written parquet file.
+    """
+    rng = random.Random(seed)
+    cache_paths = cache_paths or {}
+
+    # Normalise ratios
+    total_ratio = sum(r for _, r in adapters_with_ratios)
+    normed = [(name, r / total_ratio) for name, r in adapters_with_ratios]
+
+    # Load all raw items per adapter
+    all_rows: Dict[str, List[Dict[str, Any]]] = {}
+    for name, _ in normed:
+        adapter = get_adapter(name, cache_path=cache_paths.get(name))
+        raw = adapter.load_raw()
+        rows = []
+        for item in raw:
+            row = adapter.to_verl_format(item, tokenizer=tokenizer)
+            for key in ("prompt", "reward_model", "extra_info"):
+                if key in row and not isinstance(row[key], str):
+                    row[key] = json.dumps(row[key], ensure_ascii=False)
+            rows.append(row)
+        all_rows[name] = rows
+
+    # Determine counts per adapter
+    if total_items is None:
+        min_total = min(
+            int(len(all_rows[n]) / r) for n, r in normed if r > 0
+        )
+        total_items = min_total
+
+    sampled: List[Dict[str, Any]] = []
+    for name, ratio in normed:
+        count = int(total_items * ratio)
+        pool = all_rows[name]
+        if count > len(pool):
+            chosen = [rng.choice(pool) for _ in range(count)]
+        else:
+            chosen = rng.sample(pool, count)
+        sampled.extend(chosen)
+
+    rng.shuffle(sampled)
+
+    df = pd.DataFrame(sampled)
+    out_path = Path(output_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+    parquet_file = out_path / f"mixed_{split}.parquet"
+    df.to_parquet(parquet_file, index=False)
+
+    sources = df["data_source"].value_counts().to_dict()
+    print(f"[mixed] Wrote {len(df)} rows -> {parquet_file}")
+    print(f"  Composition: {sources}")
+    return parquet_file
+
+
 def prepare_curriculum(
     verif_adapters: Sequence[Tuple[str, float]],
     open_adapters: Sequence[Tuple[str, float]],

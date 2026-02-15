@@ -1,5 +1,7 @@
 """GSM8K dataset adapter (Grade School Math 8K)."""
 
+import json
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..base import DatasetAdapter
@@ -15,6 +17,31 @@ class GSM8KAdapter(DatasetAdapter):
 
     data_source = "gsm8k"
     domain_type = "verifiable"
+
+    def __init__(self, cache_path: Optional[str] = None):
+        """
+        Args:
+            cache_path: Optional path to precompute cache JSONL with
+                pre-generated answers and programmatic gold scores.
+        """
+        self._cache_path = cache_path
+        self._cache: Optional[Dict[str, Any]] = None
+
+    def _load_cache(self) -> Dict[str, Any]:
+        """Load the precompute cache (answers + gold scores per question)."""
+        if self._cache is not None:
+            return self._cache
+
+        self._cache = {}
+        if self._cache_path and Path(self._cache_path).exists():
+            with open(self._cache_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        entry = json.loads(line)
+                        qid = entry.get("question_id", "")
+                        if qid:
+                            self._cache[qid] = entry
+        return self._cache
 
     def load_raw(self, path: Optional[str] = None) -> List[Dict[str, Any]]:
         """Load GSM8K from HuggingFace datasets."""
@@ -44,13 +71,39 @@ class GSM8KAdapter(DatasetAdapter):
     def to_verl_format(self, item: Dict[str, Any], tokenizer: Any = None) -> Dict[str, Any]:
         """Convert a GSM8K item to veRL row format.
 
-        The prompt asks the model to generate a rubric for evaluating
-        an answer to the math question.
+        If a precompute cache is available, attaches answers + gold_scores
+        into extra_info for functional alignment reward.
         """
         question = item["question"]
+
+        # Try to load cached answers and gold scores
+        # Cache key format: gsm8k_{index} — matches precompute_verifiable.py
+        cache = self._load_cache()
+        # Find by question text match (more robust than index)
+        cached = {}
+        for entry in cache.values():
+            if entry.get("question") == question:
+                cached = entry
+                break
+
+        answers = cached.get("answers", [])
+        gold_scores = cached.get("gold_scores", [])
+
+        # Build contrastive excerpts if answers are available
+        best_excerpt = None
+        worst_excerpt = None
+        if answers and gold_scores:
+            best_idx = gold_scores.index(max(gold_scores))
+            worst_idx = gold_scores.index(min(gold_scores))
+            if gold_scores[best_idx] != gold_scores[worst_idx]:
+                best_excerpt = answers[best_idx][:500]
+                worst_excerpt = answers[worst_idx][:500]
+
         prompt_messages = self.build_rubric_generation_prompt(
             question=question,
             context="This is a grade-school math problem with a unique numerical answer.",
+            best_answer_excerpt=best_excerpt,
+            worst_answer_excerpt=worst_excerpt,
         )
 
         return {
@@ -65,5 +118,7 @@ class GSM8KAdapter(DatasetAdapter):
                 "solution": item["solution"],
                 "final_answer": item["final_answer"],
                 "question": question,
+                "answers": answers,
+                "gold_scores": gold_scores,
             },
         }
