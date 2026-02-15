@@ -93,7 +93,6 @@ class Judge:
                             prompt=prompt,
                             system_prompt=JUDGE_SYSTEM_PROMPT,
                             max_tokens=5000,
-                            temperature=0.0,
                         ),
                         timeout=self._timeout,
                     )

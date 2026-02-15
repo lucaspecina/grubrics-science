@@ -18,22 +18,30 @@ def get_answer_policy_prompt(question: str, instruction_type: str = "normal") ->
     Returns:
         Formatted prompt string
     """
-    base_instruction = """Answer the following question clearly and completely, but be concise. 
-Provide a complete answer with a clear conclusion. Do not cut off mid-sentence or leave the answer incomplete."""
-    
+    # All instructions request detailed, thorough answers of similar length.
+    # Diversity comes from different *approaches*, not different lengths.
     instructions = {
-        "normal": base_instruction,
-        "low_temp": """Answer the following question in a detailed and precise manner, including all necessary derivations and assumptions.
-Be thorough but concise. Ensure your answer is complete with a clear conclusion.""",
-        "high_temp": """Answer the following question creatively, exploring different perspectives and approaches.
-Be concise while covering multiple angles. End with a clear summary or conclusion.""",
-        "failure_mode_1": """Answer the following question but omit any derivations or mathematical steps. Just state conclusions.
-Be brief and direct. Provide a complete answer with clear conclusions.""",
-        "failure_mode_2": """Answer the following question but omit explicit assumptions or boundary conditions. Be vague about limitations.
-Keep it concise. Provide a complete answer even if some details are omitted.""",
+        "rigorous": """Answer the following question in a detailed and precise manner. Include all necessary derivations,
+mathematical steps, assumptions, and boundary conditions. Be thorough and systematic.
+Ensure your answer is complete with a clear conclusion.""",
+        "conceptual": """Answer the following question with a detailed conceptual explanation. Focus on physical intuition,
+qualitative reasoning, and connecting ideas. Explain the underlying principles thoroughly,
+but prioritize conceptual clarity over mathematical formalism. Write a thorough, complete answer.""",
+        "exploratory": """Answer the following question by exploring multiple approaches or perspectives in detail.
+Consider alternative methods, discuss trade-offs, and connect to related problems.
+Write a thorough and complete answer covering different angles.""",
+        "tangential": """Answer the following question in detail but spend significant time on tangential topics,
+historical context, and loosely related concepts. Include some correct content but dilute it
+with extensive discussion of secondary or marginally relevant material. Write a long, detailed answer.""",
+        "overconfident": """Answer the following question in detail. State your conclusions confidently even when
+making approximations or assumptions. Skip some intermediate justification steps and present results
+as more certain than they are. Write a thorough, complete answer.""",
+        "shallow": """Answer the following question with a detailed response. Cover the main points at a surface level
+but avoid deep derivations or rigorous justifications. Discuss the topic broadly rather than deeply.
+Write a long, complete answer that touches on many aspects without going into full detail on any.""",
     }
     
-    instruction = instructions.get(instruction_type, base_instruction)
+    instruction = instructions.get(instruction_type, instructions["rigorous"])
     
     return f"""{instruction}
 

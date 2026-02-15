@@ -39,26 +39,22 @@ async def generate_answers(
     """Generate diverse answers using the Answer Policy."""
     from ..llm.prompts import get_answer_policy_prompt
 
-    # Mix of instruction types for quality diversity
+    # Mix of instruction types for quality diversity (all produce long answers)
     instruction_types = [
-        "low_temp", "low_temp",     # precise, focused answers
-        "normal", "normal",         # standard quality
-        "high_temp",                # creative, exploratory
-        "failure_mode_1",           # omits derivations (deliberately worse)
+        "rigorous",       # precise, all derivations
+        "conceptual",     # physical intuition, less math
+        "exploratory",    # multiple approaches
+        "tangential",     # diluted with secondary material
+        "overconfident",  # skips justifications
+        "shallow",        # broad but not deep
     ]
     if num_answers > len(instruction_types):
         instruction_types = (instruction_types * ((num_answers // len(instruction_types)) + 1))
     instruction_types = instruction_types[:num_answers]
     random.shuffle(instruction_types)
 
-    temps = {
-        "low_temp": 0.3,
-        "normal": 0.7,
-        "high_temp": 1.2,
-        "failure_mode_1": 0.5,
-        "failure_mode_2": 0.5,
-    }
-
+    # GPT-5+ only supports temperature=1 (default).
+    # Diversity comes from different instruction types instead.
     tasks = []
     for inst_type in instruction_types:
         prompt = get_answer_policy_prompt(question, inst_type)
@@ -66,7 +62,6 @@ async def generate_answers(
             client.generate(
                 prompt=prompt,
                 max_tokens=max_tokens,
-                temperature=temps.get(inst_type, 0.7),
             )
         )
 
