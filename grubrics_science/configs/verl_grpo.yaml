@@ -80,8 +80,9 @@ data:
   truncation: left
 
 # --- Custom Reward Function ---
+# grubrics_reward.py routes: verifiable → local, open → Judge API
 custom_reward_function:
-  path: grubrics_science/rewards/gsm8k_reward.py
+  path: grubrics_science/rewards/grubrics_reward.py
   name: compute_score
 
 # --- Reward Model (disabled — we use custom_reward_function) ---

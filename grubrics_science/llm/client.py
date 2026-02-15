@@ -112,13 +112,24 @@ class AzureOpenAIClient(LLMClient):
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
         
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            **kwargs
-        )
+        # Newer OpenAI models require max_completion_tokens instead of max_tokens.
+        # Try max_completion_tokens first; fall back to max_tokens on error.
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_completion_tokens=max_tokens,
+                temperature=temperature,
+                **kwargs
+            )
+        except Exception:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                **kwargs
+            )
         return response.choices[0].message.content
     
     def generate_sync(
