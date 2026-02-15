@@ -244,3 +244,162 @@ class TestJudgeParsing:
         k2 = _cache_key("q1", "a1", ["r2", "r1"])
 
         assert k1 != k2  # rubric order matters
+
+
+# =========================================================================
+# Integration: adapter → cache → reward (no API, no GPU)
+# =========================================================================
+
+class TestAdapterCacheIntegration:
+    """Verify FrontierScienceAdapter reads precompute cache and produces
+    extra_info that grubrics_reward can consume."""
+
+    @pytest.fixture
+    def cache_file(self, tmp_path):
+        """Create a minimal precompute cache JSONL."""
+        cache = tmp_path / "cache.jsonl"
+        entry = {
+            "question_id": "0",
+            "question": "Derive the partition function for a 2D ideal gas.",
+            "subject": "physics",
+            "golden_rubric": "Points: 5.0, Item: Correct derivation\nPoints: 5.0, Item: Units",
+            "answers": [
+                "Answer A: detailed derivation with correct steps...",
+                "Answer B: superficial treatment, missing key steps...",
+                "Answer C: wrong approach but long text...",
+            ],
+            "gold_scores": [0.85, 0.45, 0.20],
+        }
+        cache.write_text(json.dumps(entry, ensure_ascii=False) + "\n")
+        return str(cache)
+
+    @pytest.fixture
+    def dataset_file(self, tmp_path):
+        """Create a minimal FrontierScience dataset JSONL."""
+        ds = tmp_path / "test.jsonl"
+        record = {
+            "problem": "Derive the partition function for a 2D ideal gas.",
+            "answer": "Points: 5.0, Item: Correct derivation\nPoints: 5.0, Item: Units",
+            "subject": "physics",
+        }
+        ds.write_text(json.dumps(record, ensure_ascii=False) + "\n")
+        return str(ds)
+
+    def test_adapter_loads_cache_into_extra_info(self, cache_file, dataset_file):
+        """Adapter reads cache and populates answers + gold_scores in extra_info."""
+        from grubrics_science.data.adapters.frontierscience import FrontierScienceAdapter
+
+        adapter = FrontierScienceAdapter(cache_path=cache_file)
+        items = adapter.load_raw(path=dataset_file)
+        assert len(items) == 1
+
+        row = adapter.to_verl_format(items[0])
+        extra = row["extra_info"]
+
+        assert len(extra["answers"]) == 3
+        assert len(extra["gold_scores"]) == 3
+        assert extra["gold_scores"] == [0.85, 0.45, 0.20]
+        assert extra["question"] == "Derive the partition function for a 2D ideal gas."
+        assert extra["golden_rubric"] != ""
+
+    def test_adapter_without_cache_gives_empty_lists(self, dataset_file):
+        """Without cache, adapter still works but answers/gold_scores are empty."""
+        from grubrics_science.data.adapters.frontierscience import FrontierScienceAdapter
+
+        adapter = FrontierScienceAdapter(cache_path=None)
+        items = adapter.load_raw(path=dataset_file)
+        row = adapter.to_verl_format(items[0])
+        extra = row["extra_info"]
+
+        assert extra["answers"] == []
+        assert extra["gold_scores"] == []
+
+    def test_adapter_prompt_has_contrastive_excerpts_when_cached(self, cache_file, dataset_file):
+        """When cache is available, prompt should include best/worst answer excerpts."""
+        from grubrics_science.data.adapters.frontierscience import FrontierScienceAdapter
+
+        adapter = FrontierScienceAdapter(cache_path=cache_file)
+        items = adapter.load_raw(path=dataset_file)
+        row = adapter.to_verl_format(items[0])
+
+        # prompt is a list of messages
+        prompt_text = json.dumps(row["prompt"])
+        assert "High-quality answer excerpt" in prompt_text
+        assert "Low-quality answer excerpt" in prompt_text
+
+    def test_extra_info_compatible_with_reward_function(self, cache_file, dataset_file):
+        """extra_info from adapter has the keys grubrics_reward expects."""
+        from grubrics_science.data.adapters.frontierscience import FrontierScienceAdapter
+
+        adapter = FrontierScienceAdapter(cache_path=cache_file)
+        items = adapter.load_raw(path=dataset_file)
+        row = adapter.to_verl_format(items[0])
+        extra = row["extra_info"]
+
+        # These are the keys _reward_open_sync reads from extra_info
+        assert "answers" in extra
+        assert "gold_scores" in extra
+        assert "question" in extra
+        assert isinstance(extra["answers"], list)
+        assert isinstance(extra["gold_scores"], list)
+        assert isinstance(extra["question"], str)
+        assert len(extra["answers"]) == len(extra["gold_scores"])
+
+    def test_reward_verifiable_path_no_api(self):
+        """Verifiable reward path works end-to-end without any API."""
+        from grubrics_science.rewards.grubrics_reward import compute_score
+
+        rubric = (
+            "Points: 3.0, Item: Correctly identifies the operation\n"
+            "Points: 4.0, Item: Shows clear step-by-step work\n"
+            "Points: 3.0, Item: Arrives at the correct final answer"
+        )
+        score = compute_score(
+            data_source="gsm8k",
+            solution_str=rubric,
+            ground_truth="42",
+            extra_info={"question": "What is 6*7?", "domain_type": "verifiable"},
+        )
+        assert 0.0 <= score <= 1.0
+        assert score > 0.5  # well-formed rubric
+
+    def test_reward_open_fallback_when_no_cache(self):
+        """Open domain without cache data falls back to format-only reward."""
+        from grubrics_science.rewards.grubrics_reward import compute_score
+
+        rubric = (
+            "Points: 5.0, Item: Correct derivation of partition function\n"
+            "Points: 5.0, Item: Proper treatment of boundary conditions"
+        )
+        score = compute_score(
+            data_source="frontierscience",
+            solution_str=rubric,
+            extra_info={
+                "question": "Derive the partition function.",
+                "answers": [],
+                "gold_scores": [],
+            },
+        )
+        assert 0.0 <= score <= 1.0
+
+    def test_parquet_roundtrip_preserves_cache_data(self, cache_file, dataset_file, tmp_path):
+        """Parquet write/read preserves answers and gold_scores in extra_info."""
+        import pandas as pd
+        from grubrics_science.data.adapters.frontierscience import FrontierScienceAdapter
+
+        adapter = FrontierScienceAdapter(cache_path=cache_file)
+        pq_path = adapter.to_parquet(
+            output_dir=str(tmp_path / "parquet"),
+            path=dataset_file,
+            split="test",
+        )
+
+        df = pd.read_parquet(pq_path)
+        assert len(df) == 1
+
+        extra = df.iloc[0]["extra_info"]
+        # extra_info is stored as a dict in parquet
+        assert len(extra["answers"]) == 3
+        # parquet may return numpy arrays, so compare element-wise
+        assert len(extra["gold_scores"]) == 3
+        assert list(extra["gold_scores"]) == [0.85, 0.45, 0.20]

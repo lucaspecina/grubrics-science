@@ -32,10 +32,12 @@ def _get_judge():
     verifiable-only runs that never need one."""
     global _judge
     if _judge is None:
+        import os
         from ..judge.judge import Judge
 
-        _judge = Judge()
-        logger.info("Judge initialised for API-based reward.")
+        model = os.environ.get("JUDGE_MODEL", "gpt-4o-mini")
+        _judge = Judge(model=model)
+        logger.info("Judge initialised for API-based reward (model=%s).", model)
     return _judge
 
 
@@ -112,8 +114,12 @@ def _reward_open_sync(
     # Functional alignment: how well does this rubric's ranking match the gold ranking?
     alignment = compute_alignment(scores, gold_scores, metric="spearman")
 
-    # Length penalty
-    len_pen = length_penalty(rubric, penalty_type="characters")
+    # Length penalty: only penalise rubrics longer than a reasonable threshold.
+    # Scientific rubrics are naturally 1-3k chars; penalise excess beyond that.
+    rubric_chars = len(rubric)
+    CHAR_THRESHOLD = 3000
+    excess_chars = max(0, rubric_chars - CHAR_THRESHOLD)
+    len_pen = excess_chars / CHAR_THRESHOLD  # 0.0 at threshold, 1.0 at 2x threshold
 
     # Info value bonus
     info_val = compute_info_value(scores)
@@ -125,7 +131,7 @@ def _reward_open_sync(
     # Weights can be tuned via config in future phases
     reward = (
         alignment
-        - 0.001 * len_pen
+        - 0.1 * len_pen
         + 0.3 * info_val
         - 0.3 * defense_pen
     )

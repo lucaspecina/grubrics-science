@@ -83,16 +83,33 @@ async def evaluate_with_golden_rubric(
     question: str,
     answers: List[str],
     golden_rubric: str,
+    num_evals: int = 1,
 ) -> List[float]:
-    """Evaluate answers using the golden rubric. Returns gold_scores."""
-    score_matrix, _ = await judge.evaluate_multiple_answers(
-        question=question,
-        answers=answers,
-        rubrics=[golden_rubric],
-        return_details=False,
-    )
-    # score_matrix shape: [num_answers, 1]
-    return [row[0] for row in score_matrix]
+    """Evaluate answers using the golden rubric. Returns gold_scores.
+
+    Args:
+        num_evals: Number of evaluations to average per answer.
+            Higher values reduce noise from stochastic LLMs (e.g. temperature=1).
+    """
+    import numpy as np
+
+    all_scores = []
+    for _ in range(num_evals):
+        # Clear cache so each evaluation is independent
+        judge._cache = {}
+        score_matrix, _ = await judge.evaluate_multiple_answers(
+            question=question,
+            answers=answers,
+            rubrics=[golden_rubric],
+            return_details=False,
+        )
+        # score_matrix shape: [num_answers, 1]
+        scores = [row[0] for row in score_matrix]
+        all_scores.append(scores)
+
+    # Average across evaluations
+    avg_scores = np.mean(all_scores, axis=0).tolist()
+    return avg_scores
 
 
 async def precompute_dataset(
@@ -103,11 +120,14 @@ async def precompute_dataset(
     model: str = "gpt-4o-mini",
     use_azure: bool = True,
     limit: int = 0,
+    num_evals: int = 3,
 ):
     """Run the full precompute pipeline.
 
     Args:
         limit: If > 0, only process this many questions (for validation).
+        num_evals: Number of Judge evaluations to average per answer.
+            Higher values produce more stable gold_scores. Default 3.
     """
     from ..llm.client import AzureOpenAIClient
     from ..judge.judge import Judge
@@ -130,7 +150,7 @@ async def precompute_dataset(
         logger.info("Limiting to %d questions (validation mode)", limit)
 
     logger.info("Loaded %d questions from %s", len(items), dataset_path)
-    logger.info("Model: %s | max_tokens: %d | answers_per_question: %d", model, max_tokens, num_answers)
+    logger.info("Model: %s | max_tokens: %d | answers_per_question: %d | judge_evals: %d", model, max_tokens, num_answers, num_evals)
 
     # Load existing cache (skip already-computed questions)
     cache_path = Path(output_cache)
@@ -168,10 +188,11 @@ async def precompute_dataset(
                 i + 1, len(items), qid, lengths,
             )
 
-            logger.info("[%d/%d] %s — evaluating with golden rubric...", i + 1, len(items), qid)
+            logger.info("[%d/%d] %s — evaluating with golden rubric (%d evals to average)...", i + 1, len(items), qid, num_evals)
 
             gold_scores = await evaluate_with_golden_rubric(
-                judge, item["problem"], answers, item["golden_rubric"]
+                judge, item["problem"], answers, item["golden_rubric"],
+                num_evals=num_evals,
             )
 
             # Log gold scores + variance
@@ -217,6 +238,7 @@ def main():
     parser.add_argument("--max_tokens", type=int, default=4096, help="Max tokens per answer")
     parser.add_argument("--model", default="gpt-4o-mini", help="LLM model for answer generation + judge")
     parser.add_argument("--limit", type=int, default=0, help="Limit to N questions (0=all, use for validation)")
+    parser.add_argument("--num_evals", type=int, default=3, help="Judge evaluations to average per answer (reduces noise)")
     parser.add_argument("--no_azure", action="store_true", help="Use OpenAI directly instead of Azure")
 
     args = parser.parse_args()
@@ -229,6 +251,7 @@ def main():
             model=args.model,
             use_azure=not args.no_azure,
             limit=args.limit,
+            num_evals=args.num_evals,
         )
     )
 
