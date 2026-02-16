@@ -643,7 +643,7 @@ Ventajas: gratis (sin API extra), determinista, garantiza varianza en gold_score
     - `TestCurriculumScheduler`: 10 tests (phases, boundaries, phase_index, data_file, switch, lr, summary, normalization, ratios)
     - `TestParsePhases`: 3 tests (3-value, 4-value with lr, invalid format)
 
-**Tests totales: 120 (29 Phase 0 + 30 Phase 1 + 19 Phase 2 + 13 Curriculum + 29 Evaluation), todos pasan.**
+**Tests totales: 137 (29 Phase 0 + 30 Phase 1 + 19 Phase 2 + 13 Curriculum + 29 Evaluation + 17 Phase 3), todos pasan.**
 
 **Validacion realizada:**
 - Reward end-to-end con Judge API (`scripts/test_verifiable_reward_e2e.py`):
@@ -712,26 +712,61 @@ python scripts/run_baselines.py --baselines B0 B1 B3 --output data/results/basel
 
 ---
 
-### Phase 3: Generacion Contrastiva + Tuning de Rewards -- PARCIALMENTE IMPLEMENTADA
+### Phase 3: Reward Configurable + Ablation Flags -- COMPLETA
 
 **Objetivo:** Hacer los componentes del reward configurables para A/B testing y ablations.
 
-**Ya implementado (se adelanto a Phase 1):**
-- `compute_info_value()` en alignment.py
-- `compute_defense_penalty()` en alignment.py
-- Contrastive excerpts en FrontierScienceAdapter y GSM8K/MATH adapters (best/worst answer)
-- `get_grubrics_prompt()` soporta `best_answer_excerpt` / `worst_answer_excerpt`
-- Tests unitarios para todo lo anterior
+**Implementado:**
 
-**Lo que falta (menor — engineering polish):**
+1. **`RewardConfig` dataclass** en `grubrics_reward.py`:
+   - `lambda_len` (0.1), `lambda_info` (0.3), `lambda_defense` (0.3), `char_threshold` (3000)
+   - `use_functional_alignment` (true/false) — controla B4 ablation (format-only reward)
+   - Carga desde env vars: `REWARD_LAMBDA_LEN`, `REWARD_LAMBDA_INFO`, `REWARD_LAMBDA_DEFENSE`, `REWARD_CHAR_THRESHOLD`, `REWARD_USE_FUNCTIONAL`
+   - `configure_reward(config)` para override programatico
+   - `get_reward_config()` singleton lazy
 
-1. **Pesos del reward configurables via YAML** — actualmente hardcodeados:
-   - `alignment=1.0, length=0.1, info=0.3, defense=0.3`
-   - Hacerlos leibles de env vars o config para poder hacer ablations A1-A3
-2. **Flag de contrastive** — `use_contrastive=True/False` en config para ablation A1
-3. **Flag de functional alignment** — para baseline B4 (format-only)
+2. **`USE_CONTRASTIVE` env var** — controla A1 ablation (sin contrastive excerpts):
+   - `use_contrastive()` helper en `adapters/__init__.py`
+   - GSM8K, MATH, FrontierScience adapters respetan el flag
+   - `USE_CONTRASTIVE=0` → prompts sin best/worst answer excerpts
 
-**Esfuerzo:** Menor. Son cambios de config, no de logica.
+3. **`reward_config` section en YAML configs**:
+   - Ambos `verl_grpo.yaml` y `verl_grpo_debug.yaml` tienen la seccion
+   - `run_grpo.py` lee reward_config del YAML y setea env vars via `_apply_reward_config_env()`
+
+4. **Tests**: `tests/test_phase3.py` — 17 tests (todos pasan)
+   - `TestRewardConfig`: defaults, from_env, env_defaults
+   - `TestConfigureReward`: programmatic override
+   - `TestRewardWeightsIntegration`: format-only ablation, functional alignment
+   - `TestContrastiveFlag`: default, disabled, enabled, adapter behavior (GSM8K + FS)
+   - `TestApplyRewardConfigEnv`: YAML → env bridging
+   - `TestYAMLConfig`: production + debug configs have reward_config
+
+**Como correr ablations:**
+
+```bash
+# A1: Sin contrastive excerpts
+python -m grubrics_science.training.run_grpo --config ... \
+    reward_config.use_contrastive=false
+
+# A2: Sin info_value bonus
+python -m grubrics_science.training.run_grpo --config ... \
+    reward_config.lambda_info=0.0
+
+# A3: Sin defense penalty
+python -m grubrics_science.training.run_grpo --config ... \
+    reward_config.lambda_defense=0.0
+
+# B4: Format-only reward (sin functional alignment)
+python -m grubrics_science.training.run_grpo --config ... \
+    reward_config.use_functional=false
+```
+
+O via env vars directamente:
+```bash
+REWARD_LAMBDA_INFO=0.0 python -m grubrics_science.training.run_grpo --config ...
+USE_CONTRASTIVE=0 python -m grubrics_science.training.run_grpo --config ...
+```
 
 ---
 
@@ -847,6 +882,7 @@ grubrics-science/
     test_phase2.py                 (19 tests) ✓
     test_curriculum.py             (13 tests) ✓
     test_evaluation.py             (29 tests) ✓
+    test_phase3.py                 (17 tests) ✓
 
   data/
     cache/
@@ -1022,7 +1058,7 @@ az ml job stream --name <job-id> \
 2. **Phase 1** ✓: Judge API funciona, rewards discriminan, flujo GRPO simulado valida suficiente varianza
 3. **Phase 2** ✓ (codigo completo): precompute_verifiable, reward unificado, adapters con cache, curriculum, run_grpo, validación e2e con API. Falta: smoke test en workstation con GPU
 4. **Phase 2.5** ✓ (codigo completo): evaluador + baselines zero-cost (B0, B1, B3). Falta: precompute 60 preguntas + correr
-5. **Phase 3**: Config de pesos + flags para ablations (engineering menor)
+5. **Phase 3** ✓: Reward configurable via YAML/env + flags para ablations (B4, A1-A3)
 6. **Phase 4**: Evolucion de rubricas (bonus, no bloquea)
 7. **Phase 5**: Training runs completos + tabla final (GPU)
 

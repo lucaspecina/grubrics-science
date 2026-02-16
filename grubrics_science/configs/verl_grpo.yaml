@@ -85,6 +85,18 @@ custom_reward_function:
   path: grubrics_science/rewards/grubrics_reward.py
   name: compute_score
 
+# --- Reward Weights (Phase 3 configurable) ---
+# These are passed as env vars to the reward function.
+# To disable a component for ablation, set its lambda to 0.0.
+# To disable functional alignment entirely (B4 ablation), set use_functional to false.
+reward_config:
+  lambda_len: 0.1          # Length penalty weight
+  lambda_info: 0.3         # Info value bonus weight
+  lambda_defense: 0.3      # Defense penalty weight
+  char_threshold: 3000     # Chars before length penalty kicks in
+  use_functional: true     # false = format-only reward (B4 ablation)
+  use_contrastive: true    # false = no contrastive excerpts in prompt (A1 ablation)
+
 # --- Reward Model (disabled — we use custom_reward_function) ---
 reward_model:
   enable: false

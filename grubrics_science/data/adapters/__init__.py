@@ -1,6 +1,13 @@
-"""Dataset adapter registry."""
+"""Dataset adapter registry.
 
-from typing import Dict, Type
+Flags:
+    USE_CONTRASTIVE: env var or kwarg to control contrastive excerpts
+        in prompts. Set ``USE_CONTRASTIVE=0`` to disable (ablation A1).
+        Default: enabled ("1").
+"""
+
+import os
+from typing import Dict, Optional, Type
 
 from ..base import DatasetAdapter
 from .gsm8k import GSM8KAdapter
@@ -16,7 +23,18 @@ ADAPTERS: Dict[str, Type[DatasetAdapter]] = {
 }
 
 
-def get_adapter(name: str, cache_path: str = None) -> DatasetAdapter:
+def use_contrastive() -> bool:
+    """Check if contrastive excerpts should be included in prompts.
+
+    Reads ``USE_CONTRASTIVE`` env var. Default: True.
+    """
+    return os.environ.get("USE_CONTRASTIVE", "1") == "1"
+
+
+def get_adapter(
+    name: str,
+    cache_path: Optional[str] = None,
+) -> DatasetAdapter:
     """Instantiate an adapter by name.
 
     Args:

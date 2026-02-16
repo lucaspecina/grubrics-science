@@ -93,6 +93,15 @@ custom_reward_function:
   path: grubrics_science/rewards/grubrics_reward.py
   name: compute_score
 
+# --- Reward Weights (Phase 3 configurable) ---
+reward_config:
+  lambda_len: 0.1
+  lambda_info: 0.3
+  lambda_defense: 0.3
+  char_threshold: 3000
+  use_functional: true
+  use_contrastive: true
+
 # --- Reward Model (disabled — we use custom_reward_function) ---
 reward_model:
   enable: false

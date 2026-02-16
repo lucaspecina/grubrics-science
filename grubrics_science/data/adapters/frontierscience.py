@@ -92,18 +92,20 @@ class FrontierScienceAdapter(DatasetAdapter):
         answers = cached.get("answers", [])
         gold_scores = cached.get("gold_scores", [])
 
-        # Build contrastive excerpts if answers are available
+        # Build contrastive excerpts if answers are available and enabled
         best_excerpt = None
         worst_excerpt = None
         if answers and gold_scores:
-            import numpy as np
+            from . import use_contrastive
+            if use_contrastive():
+                import numpy as np
 
-            scores_arr = np.array(gold_scores)
-            best_idx = int(scores_arr.argmax())
-            worst_idx = int(scores_arr.argmin())
-            # Take first 500 chars as excerpt
-            best_excerpt = answers[best_idx][:500]
-            worst_excerpt = answers[worst_idx][:500]
+                scores_arr = np.array(gold_scores)
+                best_idx = int(scores_arr.argmax())
+                worst_idx = int(scores_arr.argmin())
+                # Take first 500 chars as excerpt
+                best_excerpt = answers[best_idx][:500]
+                worst_excerpt = answers[worst_idx][:500]
 
         prompt_messages = self.build_rubric_generation_prompt(
             question=question,

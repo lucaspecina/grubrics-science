@@ -100,15 +100,17 @@ class MATHAdapter(DatasetAdapter):
         answers = cached.get("answers", [])
         gold_scores = cached.get("gold_scores", [])
 
-        # Build contrastive excerpts if answers are available
+        # Build contrastive excerpts if answers are available and enabled
         best_excerpt = None
         worst_excerpt = None
         if answers and gold_scores:
-            best_idx = gold_scores.index(max(gold_scores))
-            worst_idx = gold_scores.index(min(gold_scores))
-            if gold_scores[best_idx] != gold_scores[worst_idx]:
-                best_excerpt = answers[best_idx][:500]
-                worst_excerpt = answers[worst_idx][:500]
+            from . import use_contrastive
+            if use_contrastive():
+                best_idx = gold_scores.index(max(gold_scores))
+                worst_idx = gold_scores.index(min(gold_scores))
+                if gold_scores[best_idx] != gold_scores[worst_idx]:
+                    best_excerpt = answers[best_idx][:500]
+                    worst_excerpt = answers[worst_idx][:500]
 
         context = f"This is a competition math problem ({subject}"
         if level:

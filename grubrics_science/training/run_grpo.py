@@ -51,6 +51,31 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
+def _apply_reward_config_env(reward_config: dict) -> None:
+    """Set reward config values as environment variables.
+
+    The reward function (grubrics_reward.py) reads these env vars
+    at initialisation time. This bridges the YAML config to reward.
+    """
+    env_map = {
+        "lambda_len": "REWARD_LAMBDA_LEN",
+        "lambda_info": "REWARD_LAMBDA_INFO",
+        "lambda_defense": "REWARD_LAMBDA_DEFENSE",
+        "char_threshold": "REWARD_CHAR_THRESHOLD",
+        "use_functional": "REWARD_USE_FUNCTIONAL",
+        "use_contrastive": "USE_CONTRASTIVE",
+    }
+
+    for key, env_var in env_map.items():
+        if key in reward_config:
+            val = reward_config[key]
+            # Convert booleans to "1"/"0"
+            if isinstance(val, bool):
+                val = "1" if val else "0"
+            os.environ[env_var] = str(val)
+            logger.info("  reward env: %s=%s", env_var, os.environ[env_var])
+
+
 def load_config(config_path: str, overrides: Optional[List[str]] = None):
     """Load veRL base config + project overrides, return merged OmegaConf."""
     from omegaconf import OmegaConf
@@ -90,6 +115,10 @@ def run_curriculum_training(
     from verl.trainer.main_ppo import run_ppo
 
     logger.info("\n%s", scheduler.summary())
+
+    # Apply reward_config as env vars (read by grubrics_reward.py)
+    merged_dict_initial = load_config(config_path, overrides)
+    _apply_reward_config_env(merged_dict_initial.get("reward_config", {}))
 
     boundaries = scheduler.get_phase_boundaries()
     prev_checkpoint = None
