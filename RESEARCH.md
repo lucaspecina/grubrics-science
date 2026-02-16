@@ -204,48 +204,108 @@ Esto es extremadamente raro: rubricas humanas para ciencia abierta. FrontierScie
 
 ## Baselines y Evaluacion
 
-### Baselines zero-cost (sin training)
+### Que queremos demostrar
 
-| Baseline | Que mide | Como |
-|---|---|---|
-| **Golden Rubric** (upper bound) | Techo: la mejor rubrica posible | Usar la rubrica humana PhD directamente |
-| **Zero-shot Qwen3-8B** (lower bound) | Piso: que puede hacer el modelo base sin RL | Qwen3-8B genera rubricas sin fine-tuning |
-| **Zero-shot GPT-5.2** | Que hace un modelo frontier sin RL | GPT-5.2 genera rubricas zero-shot |
-| **Random rubric** | Sanity check: nuestras metricas discriminan? | Items de rubrica aleatorios |
+La pregunta central: **¿el RL con functional alignment produce rúbricas que se acercan a las humanas?**
 
-### Baselines con training (1 run cada uno)
+No nos interesa comparar contra modelos más grandes por el tamaño. Nos interesa demostrar que nuestra *estrategia de entrenamiento* (RL + functional alignment + transfer) es efectiva para que un modelo chico (8B) genere rúbricas de calidad.
 
-| Baseline | Que mide | Como |
-|---|---|---|
-| **SFT en golden rubrics** | Es RL necesario, o basta con imitar? | Supervised fine-tune en las 60 rubricas humanas |
-| **Verifiable-only** | Funciona el transfer? | Entrenar solo en GSM8K/MATH, evaluar en FrontierScience |
-| **Open-only** | Ayuda el curriculum vs training directo? | Entrenar solo en FrontierScience |
-| **Format-only reward** | Es necesario functional alignment? | Entrenar con reward de formato solamente (sin Judge, sin Spearman) |
+El claim más fuerte sería: "un Qwen 8B entrenado con nuestra estrategia genera rúbricas comparables a las de PhDs, y se acerca a GPT-5.2 zero-shot con una fracción del costo de inference".
+
+### Los baselines que importan
+
+**Comparaciones centrales (responden la pregunta de investigación):**
+
+| # | Baseline | Que mide | Requiere | Costo |
+|---|---|---|---|---|
+| B0 | **Golden Rubric** (upper bound) | A que apuntamos: las rúbricas humanas PhD | Solo precompute cache (ya existe) | $0 |
+| B2 | **Zero-shot Qwen3-8B** (lower bound) | De donde partimos: el mismo modelo sin entrenar | GPU para inference | ~$0 |
+| B7 | **SFT Qwen3-8B** | ¿Necesitamos RL o alcanza con imitar las rúbricas humanas? | GPU + transformers Trainer | ~$10 |
+| B3 | **Random rubric** | Sanity check: ¿las métricas discriminan? | Nada (generación local) | $0 |
+
+**Comparaciones secundarias (demuestran que cada componente aporta):**
+
+| # | Baseline | Que mide | Requiere | Costo |
+|---|---|---|---|---|
+| B4 | **Format-only reward** | ¿Functional alignment (Judge + Spearman) aporta vs solo formato? | GPU + veRL | ~$70 |
+| B5 | **Verifiable-only** | ¿El transfer desde math a ciencia funciona? | GPU + veRL | ~$70 |
+| B6 | **Open-only** | ¿El curriculum ayuda vs entrenar directo en ciencia? | GPU + veRL | ~$90 |
+
+**Referencia informativa (barato, claim fuerte si sale bien):**
+
+| # | Baseline | Que mide | Requiere | Costo |
+|---|---|---|---|---|
+| B1 | **Zero-shot GPT-5.2** | Referencia de modelo frontier. Si Qwen-RL se acerca, es un claim muy fuerte: 8B entrenado ≈ modelo frontier | Solo API (~120 calls) | <$1 |
+
+### Comparaciones clave para el paper
+
+1. **Qwen-RL vs Qwen-base (B2)**: ¿El RL mejora? (debería ser obvio)
+2. **Qwen-RL vs Qwen-SFT (B7)**: ¿El RL supera a la imitación supervisada? (la más importante)
+3. **Qwen-RL vs Golden (B0)**: ¿Qué tan cerca estamos del humano?
+4. **Qwen-RL vs GPT-5.2 (B1)**: Si se acerca, claim fuerte sobre eficiencia del método
+5. **Verifiable-only (B5) vs Full system**: ¿El transfer funciona?
+6. **Format-only (B4) vs Full system**: ¿Functional alignment aporta?
 
 ### Ablations (removiendo componentes del sistema completo)
 
-| Ablation | Que mide |
-|---|---|
-| **Sin contrastive excerpts** | Ayudan los best/worst answer excerpts en el prompt? |
-| **Sin info_value** | Importa el bonus de discriminacion? |
-| **Sin defense_penalty** | Importa la penalidad de degeneracion? |
-| **Sin curriculum** (flat 50/50) | Ayuda el shifting gradual vs proporcion fija? |
-| **Sin evolucion** (Phase 4) | Aporta la evolucion de rubricas durante training? |
+| # | Ablation | Que mide | Como desactivar |
+|---|---|---|---|
+| A1 | **Sin contrastive excerpts** | Ayudan los best/worst answer excerpts en el prompt? | Flag en adapter: `use_contrastive=False` |
+| A2 | **Sin info_value** | Importa el bonus de discriminacion? | `lambda_info=0.0` en config |
+| A3 | **Sin defense_penalty** | Importa la penalidad de degeneracion? | `lambda_defense=0.0` en config |
+| A4 | **Sin curriculum** (flat 50/50) | Ayuda el shifting gradual vs proporcion fija? | `--phases 0.5:0.5:1.0` |
+| A5 | **Sin evolucion** (Phase 4) | Aporta la evolucion de rubricas durante training? | No activar evolution module |
+
+### Cuando correr cada cosa
+
+| Grupo | Cuando | Requiere |
+|---|---|---|
+| B0 (golden), B1 (GPT-5.2), B3 (random) | Apenas tengamos el evaluador | Solo API, no GPU |
+| B2 (Qwen base) | Cuando tengamos GPU | GPU para inference |
+| B7 (SFT), B4 (format-only), B5 (verif-only), B6 (open-only) | Después del primer run exitoso | GPU + veRL |
+| A1-A5 (ablations) | Al final | GPU + sistema completo |
+
+Los baselines sin training se corren con un script evaluador: toma rúbricas → Judge evalúa answers → computa métricas. La infraestructura ya existe, solo falta el script que orquesta.
 
 ### Metricas de evaluacion
 
-Todos los baselines y ablations evaluados en el mismo held-out de FrontierScience:
+Todos evaluados en el mismo held-out de FrontierScience:
 
-| Metrica | Que captura |
-|---|---|
-| **Alignment (Spearman)** | Metrica principal: la rubrica rankea answers como la golden? |
-| **Discrimination (std of scores)** | La rubrica diferencia calidad? |
-| **Format validity** | Fraccion con formato correcto `Points: X, Item: Y` |
-| **Info value** | Promedio 4*p*(1-p) — criterios no-triviales? |
+| Metrica | Que captura | Rango |
+|---|---|---|
+| **Alignment (Spearman)** | Metrica principal: la rubrica rankea answers como la golden? | [-1, 1], higher=better |
+| **Discrimination (std of scores)** | La rubrica diferencia calidad? | [0, ∞), higher=better |
+| **Format validity** | Fraccion con formato correcto `Points: X, Item: Y` | [0, 1], higher=better |
+| **Info value** | Promedio 4*p*(1-p) — criterios no-triviales? | [0, 1], higher=better |
+
+**Held-out split:** De las 60 preguntas FrontierScience, reservar ~12 (20%) como held-out.
+Las otras 48 se usan en training. Todos los baselines y ablations se evaluan en las mismas 12.
 
 ### Definicion de exito
 
-El sistema completo supera a zero-shot baselines y se acerca a golden rubric quality en alignment score sobre held-out FrontierScience.
+1. **Minimo**: Qwen-RL supera a Qwen-base (B2) en alignment score → el RL aporta.
+2. **Bueno**: Qwen-RL supera a Qwen-SFT (B7) → RL + functional alignment > imitacion supervisada.
+3. **Muy bueno**: Qwen-RL supera a format-only (B4) → functional alignment es necesario.
+4. **Excelente**: Qwen-RL se acerca a Golden (B0) → rúbricas generadas ≈ humanas.
+5. **Bonus**: Qwen-RL se acerca a GPT-5.2 (B1) → 8B entrenado ≈ modelo frontier en calidad de rúbricas.
+6. **Transfer**: Verifiable-only (B5) obtiene alignment > 0 en FrontierScience → la habilidad es transferible.
+
+### Tabla de resultados (a completar)
+
+| Variante | Alignment ↑ | Discrimination ↑ | Format ↑ | Info Value ↑ | Costo |
+|---|---|---|---|---|---|
+| B0: Golden Rubric | ~0.85-0.94* | ? | 1.0 | ? | $0 |
+| B1: Zero-shot GPT-5.2 | ? | ? | ? | ? | <$1 |
+| B2: Zero-shot Qwen3-8B | ? | ? | ? | ? | ~$0 |
+| B3: Random Rubric | ~0.0 | ? | 0.0 | ? | $0 |
+| B4: Format-only reward | ? | ? | ? | ? | ~$70 |
+| B5: Verifiable-only | ? | ? | ? | ? | ~$70 |
+| B6: Open-only | ? | ? | ? | ? | ~$90 |
+| B7: SFT Qwen3-8B | ? | ? | ? | ? | ~$10 |
+| **Qwen-RL (full system)** | ? | ? | ? | ? | ~$90 |
+| A1-A5: Ablations | ? | ? | ? | ? | ~$90 c/u |
+
+*B0 alignment es ~0.85-0.94 porque el Judge tiene ruido (temperature=1). Con promedio N=3 se estabiliza.
 
 ---
 
@@ -583,7 +643,7 @@ Ventajas: gratis (sin API extra), determinista, garantiza varianza en gold_score
     - `TestCurriculumScheduler`: 10 tests (phases, boundaries, phase_index, data_file, switch, lr, summary, normalization, ratios)
     - `TestParsePhases`: 3 tests (3-value, 4-value with lr, invalid format)
 
-**Tests totales: 91 (29 Phase 0 + 30 Phase 1 + 19 Phase 2 + 13 Curriculum), todos pasan.**
+**Tests totales: 120 (29 Phase 0 + 30 Phase 1 + 19 Phase 2 + 13 Curriculum + 29 Evaluation), todos pasan.**
 
 **Validacion realizada:**
 - Reward end-to-end con Judge API (`scripts/test_verifiable_reward_e2e.py`):
@@ -599,83 +659,118 @@ Ventajas: gratis (sin API extra), determinista, garantiza varianza en gold_score
 
 ---
 
+### Phase 2.5: Evaluador + Baselines Zero-Cost -- CODIGO COMPLETO
+
+**Objetivo:** Armar el framework de evaluacion y correr los 4 baselines zero-cost ANTES de hacer training. Esto nos da los numeros de referencia.
+
+**Por que ahora:** Sin saber cuanto da Golden Rubric (~upper bound) y cuanto da Zero-shot GPT-5.2, no sabemos a que apuntamos ni si nuestro primer training run esta funcionando.
+
+**Archivos creados:**
+
+1. **`grubrics_science/evaluation/__init__.py`** — CREADO
+2. **`grubrics_science/evaluation/metrics.py`** — CREADO
+   - `alignment_score(rubric_scores, gold_scores)` → Spearman correlation
+   - `discrimination_score(rubric_scores)` → std of scores
+   - `format_validity(rubric_text)` → fraction de lineas con formato correcto
+   - `points_sum(rubric_text)` → suma de puntos (target: 10.0)
+   - `info_value(rubric_scores)` → 4*p*(1-p) discriminativeness
+   - `compute_all_metrics(rubric_text, rubric_scores, gold_scores)` → dict completo
+3. **`grubrics_science/evaluation/eval_rubrics.py`** — CREADO
+   - `evaluate_rubric_on_question(rubric, question, answers, gold_scores, judge)` → dict de metricas
+   - `evaluate_on_holdout(rubric_generator_fn, holdout_data, judge, num_eval_runs)` → per-question + aggregated
+   - Soporta multiples Judge eval runs para promediar ruido (num_eval_runs)
+4. **`grubrics_science/evaluation/holdout.py`** — CREADO
+   - `load_frontierscience_with_cache(dataset_path, cache_path)` → solo questions con cache
+   - `split_holdout(data, holdout_size=12, seed=42)` → (train, holdout) deterministic
+5. **`grubrics_science/evaluation/baselines.py`** — CREADO
+   - `golden_rubric(entry)` — B0: retorna la rubrica humana
+   - `GPTZeroShotBaseline(model)` — B1: genera rubrica con GPT zero-shot
+   - `QwenZeroShotBaseline(model_name)` — B2: genera con Qwen base (requiere GPU)
+   - `SeededRandomBaseline(base_seed)` — B3: rubrica random deterministic
+6. **`scripts/run_baselines.py`** — CREADO
+   - CLI: `python scripts/run_baselines.py --baselines B0 B1 B3`
+   - Soporta `--num_eval_runs`, `--holdout_size`, `--output results.json`
+   - Genera tabla markdown con resultados
+7. **`tests/test_evaluation.py`** — CREADO (29 tests, todos pasan)
+   - `TestAlignmentScore` (5), `TestDiscriminationScore` (3), `TestFormatValidity` (4)
+   - `TestPointsSum` (2), `TestInfoValue` (2), `TestComputeAllMetrics` (1)
+   - `TestGoldenRubricBaseline` (2), `TestRandomRubricBaseline` (4)
+   - `TestHoldout` (4), `TestEvalPipeline` (2)
+
+**Prerequisito para correr:** Completar precompute de FrontierScience (todas las 60 preguntas, no solo 2).
+
+**Resultado esperado:** Tabla con B0, B1, B3 completados. Esto establece el rango [random, golden] que necesitamos superar.
+
+**Comando:**
+```bash
+# Precompute todas las preguntas primero:
+python -m grubrics_science.data.precompute --limit 60 --num_evals 3
+
+# Correr baselines zero-cost:
+python scripts/run_baselines.py --baselines B0 B1 B3 --output data/results/baselines.json
+```
+
+---
+
 ### Phase 3: Generacion Contrastiva + Tuning de Rewards -- PARCIALMENTE IMPLEMENTADA
 
-**Objetivo:** Mejorar calidad de rubricas con contrastive prompting y tuning de pesos.
+**Objetivo:** Hacer los componentes del reward configurables para A/B testing y ablations.
 
 **Ya implementado (se adelanto a Phase 1):**
 - `compute_info_value()` en alignment.py
 - `compute_defense_penalty()` en alignment.py
-- Contrastive excerpts en FrontierScienceAdapter (best/worst answer)
+- Contrastive excerpts en FrontierScienceAdapter y GSM8K/MATH adapters (best/worst answer)
 - `get_grubrics_prompt()` soporta `best_answer_excerpt` / `worst_answer_excerpt`
 - Tests unitarios para todo lo anterior
 
-**Lo que falta:**
+**Lo que falta (menor — engineering polish):**
 
-1. **Toggling de contrastive via config** — permitir A/B testing
-2. **Tuning de pesos del reward** — hacerlos configurables via YAML
-   - Pesos actuales: alignment=1.0, length=0.1, info=0.3, defense=0.3
-3. **Contrastive para verifiable** — excerpts de respuestas correctas/incorrectas
+1. **Pesos del reward configurables via YAML** — actualmente hardcodeados:
+   - `alignment=1.0, length=0.1, info=0.3, defense=0.3`
+   - Hacerlos leibles de env vars o config para poder hacer ablations A1-A3
+2. **Flag de contrastive** — `use_contrastive=True/False` en config para ablation A1
+3. **Flag de functional alignment** — para baseline B4 (format-only)
 
-**Validacion:**
-- A/B: training con vs sin contrastive prompt
-- Sweep de pesos con pruebas controladas (simulated GRPO)
+**Esfuerzo:** Menor. Son cambios de config, no de logica.
 
 ---
 
-### Phase 4: Evolucion de Rubricas (merge evolving_rubrics/) -- PENDIENTE
+### Phase 4: Evolucion de Rubricas (merge evolving_rubrics/) -- PENDIENTE (BONUS)
 
 **Objetivo:** Refinamiento periodico de rubricas durante training.
+
+**Que es:** Cada N steps durante training, se miran las mejores y peores rubricas del batch y se generan "criterios adaptativos" que se inyectan en los prompts futuros. Las rubricas evolucionan junto con el modelo.
+
+**Es necesario para la investigacion?** No. El sistema funciona sin esto. Es un BONUS que podria mejorar resultados y aporta una contribucion adicional al paper. La ablation A5 (con vs sin evolucion) mide su impacto.
 
 **Archivos a crear (portados de evolving_rubrics/):**
 
 1. `grubrics_science/evolution/__init__.py`
 2. `grubrics_science/evolution/adaptive_rubrics.py` — portar `generate_adaptive_rubrics()`, `update_ground_truth()`
 3. `grubrics_science/evolution/prompts.py` — portar prompts adaptativos
-4. `grubrics_science/evolution/evolution_manager.py` — `RubricEvolutionManager`:
-   - `maybe_evolve(step, question_id, rubric_group, rewards)`: cada N steps, toma best/worst, genera criterios adaptativos
-   - `rubric_bank: Dict[question_id, List[evolved_criteria]]`
-   - Criterios se inyectan en futuros prompts
+4. `grubrics_science/evolution/evolution_manager.py` — `RubricEvolutionManager`
 5. `grubrics_science/evolution/output.py` — save/load evolution history
 
 Post-merge: `evolving_rubrics/` se marca deprecated.
 
-**Validacion:**
-- `test_evolve.py` adaptado
-- Rubricas evolucionadas mejoran alignment en holdout
-- A/B: training con vs sin evolucion
-
 ---
 
-### Phase 5: Evaluacion + Baselines + Metricas -- PENDIENTE
+### Phase 5: Training Runs + Tabla Final -- PENDIENTE
 
-**Objetivo:** Evaluacion rigurosa con held-out, baselines, y metricas publicables.
+**Objetivo:** Correr todos los training baselines, ablations, y el sistema completo. Generar la tabla final del paper.
 
-**Archivos a crear:**
+**Orden de ejecucion:**
 
-1. `grubrics_science/evaluation/__init__.py`
-2. `grubrics_science/evaluation/eval_rubrics.py`
-   - `evaluate_on_holdout(model_path, eval_parquet, judge_config) -> Dict`
-   - Genera rubricas, evalua con Judge, computa alignment con gold
-   - Retorna metricas agregadas + per-question
-3. `grubrics_science/evaluation/baselines.py`
-   - `baseline_golden_rubric()` — upper bound
-   - `baseline_zero_shot()` — Qwen3-8B sin RL
-   - `baseline_gpt_rubric()` — GPT-5.2 zero-shot
-   - `baseline_sft()` — Qwen3-8B SFT en golden rubrics
-4. `grubrics_science/evaluation/metrics.py`
-   - `rubric_alignment_score()` — Spearman con gold
-   - `rubric_discrimination_score()` — std de scores
-   - `rubric_format_score()` — formato valido
-   - `rubric_info_value()` — promedio 4*p*(1-p)
-5. `grubrics_science/evaluation/run_eval.py`
-   - Script standalone: carga LoRA, corre eval, genera reporte, logea a wandb
+1. Training run del **sistema completo** (curriculum 3 fases) — el run principal
+2. **B4** (format-only reward) — una linea de config
+3. **B5** (verifiable-only) — `--phases 1.0:0.0:1.0`
+4. **B6** (open-only) — `--phases 0.0:1.0:1.0`
+5. **B7** (SFT) — script separado con transformers Trainer
+6. **A1-A5** (ablations) — variantes de config
+7. Evaluar todo en held-out, completar la tabla
 
-**Validacion:**
-- Eval en modelo pre-entrenado como baseline
-- Eval despues de cada fase de curriculum
-- Comparar todas las variantes en mismo held-out
-- Bootstrap confidence intervals
+**Costo estimado:** ~$90 por run × ~10 runs = ~$900 total.
+Mas los baselines zero-cost (~$5 total).
 
 ---
 
@@ -716,12 +811,12 @@ grubrics-science/
       evolution_manager.py
       prompts.py
       output.py
-    evaluation/                    — PENDIENTE Phase 5
-      __init__.py
-      eval_rubrics.py
-      baselines.py
-      metrics.py
-      run_eval.py
+    evaluation/                    ✓ Phase 2.5
+      __init__.py                  ✓
+      metrics.py                   (alignment, discrimination, format, info_value, points_sum) ✓
+      eval_rubrics.py              (evaluate_rubric_on_question, evaluate_on_holdout) ✓
+      holdout.py                   (load_frontierscience_with_cache, split_holdout) ✓
+      baselines.py                 (golden, GPTZeroShot, QwenZeroShot, SeededRandom) ✓
     judge/
       judge.py                     (rate limiting, retry, cache, batched) ✓
     llm/
@@ -751,6 +846,7 @@ grubrics-science/
     test_phase1.py                 (29 tests) ✓
     test_phase2.py                 (19 tests) ✓
     test_curriculum.py             (13 tests) ✓
+    test_evaluation.py             (29 tests) ✓
 
   data/
     cache/
@@ -810,6 +906,19 @@ python -m grubrics_science.data.precompute_verifiable \
     --dataset gsm8k --model gpt-5.2-chat --limit 5
 
 # Datasets disponibles: olympiad_math, gsm8k, math, frontierscience
+```
+
+#### Evaluacion y Baselines
+
+```bash
+# Correr baselines zero-cost (B0=golden, B1=GPT, B3=random):
+python scripts/run_baselines.py --baselines B0 B1 B3 --output data/results/baselines.json
+
+# Solo golden rubric (sin costo de API para generacion):
+python scripts/run_baselines.py --baselines B0
+
+# Con multiples evaluaciones para reducir ruido del Judge:
+python scripts/run_baselines.py --baselines B0 B1 B3 --num_eval_runs 3
 ```
 
 #### Setup
@@ -911,10 +1020,11 @@ az ml job stream --name <job-id> \
 
 1. **Phase 0** ✓: veRL corre en workstation (debug), pipeline unificado validado
 2. **Phase 1** ✓: Judge API funciona, rewards discriminan, flujo GRPO simulado valida suficiente varianza
-3. **Phase 2** (en progreso): precompute_verifiable ✓, reward unificado ✓, adapters con cache ✓, curriculum scheduler ✓, run_grpo ✓, prepare_mixed_with_cache ✓, validación e2e con API ✓. Falta: smoke test con datos reales en workstation
-4. **Phase 3**: Contrastive toggling + tuning de pesos
-5. **Phase 4**: Evolucion de rubricas
-6. **Phase 5**: Eval completo con baselines
+3. **Phase 2** ✓ (codigo completo): precompute_verifiable, reward unificado, adapters con cache, curriculum, run_grpo, validación e2e con API. Falta: smoke test en workstation con GPU
+4. **Phase 2.5** ✓ (codigo completo): evaluador + baselines zero-cost (B0, B1, B3). Falta: precompute 60 preguntas + correr
+5. **Phase 3**: Config de pesos + flags para ablations (engineering menor)
+6. **Phase 4**: Evolucion de rubricas (bonus, no bloquea)
+7. **Phase 5**: Training runs completos + tabla final (GPU)
 
 ---
 
