@@ -446,6 +446,64 @@ Cosas que descubrimos haciendo pruebas controladas y que impactan el diseño del
 
 ---
 
+## Investigaciones Pendientes (TODOs)
+
+Preguntas abiertas y mejoras a investigar antes o durante los training runs.
+
+### TODO 1: Variabilidad de respuestas con modelos de distinta calidad
+
+**Problema**: Actualmente generamos respuestas con un solo modelo (GPT-5.2) y usamos perturbaciones determinísticas para crear diversidad. Esto produce gold_scores binarios [1.0, 0.0, 0.0, 0.0] — la rúbrica solo aprende a distinguir "correcto vs roto", no "bueno vs excelente".
+
+**Idea**: Generar respuestas con modelos de distintos tamaños/capacidades (GPT-5.2, GPT-4o-mini, Qwen-72B, Qwen-7B, etc.). Cada modelo intenta lo mejor posible, pero naturalmente produce distinta calidad de razonamiento. Esto da diversidad de calidad **real**, no forzada.
+
+**Ventajas**:
+- Gold_scores más continuos y realistas (no binarios)
+- La rúbrica aprende discriminación fina (bueno vs excelente), no solo gruesa (correcto vs incorrecto)
+- Más útil para el uso real del modelo (rubrics as rewards para policy training)
+
+**Por investigar**:
+- Qué modelos usar y cuántas respuestas por modelo
+- Cómo asignar gold_scores: ¿programáticos por modelo? ¿Judge con golden rubric?
+- Si hay que re-hacer el precompute o se puede complementar el existente
+
+### TODO 2: Mostrar respuestas completas al GRubrics
+
+**Problema**: Actualmente GRubrics solo ve la pregunta (+ opcionalmente 500 chars de contrastive excerpts). Genera rúbricas "a ciegas" sin saber cómo son las respuestas reales.
+
+**Idea**: Pasar respuestas completas (o más extensas) al modelo antes de generar la rúbrica. Esto le permite detectar failure modes específicos y crear criterios más targeted.
+
+**Consideraciones**:
+- Si en training le pasamos respuestas, en inferencia también hay que pasarle. Cambia la interfaz de "pregunta → rúbrica" a "pregunta + respuestas → rúbrica"
+- Para rubrics-as-rewards esto es natural: siempre hay respuestas del policy disponibles
+- Podría ser una ablation (con vs sin respuestas en prompt)
+- Hay que tener cuidado con el context length (respuestas completas de FrontierScience son largas)
+
+**Referencia**: RaR y RURA incluyen ejemplo de respuestas al generar rúbricas.
+
+### TODO 3: Datasets verificables con scores continuos
+
+**Problema**: GSM8K y MATH solo permiten gold_scores binarios (correcto/incorrecto). Esto limita la discriminación a gruesa.
+
+**Por investigar**:
+- ¿Existen datasets verificables con rubrics de evaluación parcial? (ej: "2 de 5 pasos correctos")
+- ¿Se pueden construir gold_scores continuos para MATH? Ej: una solución truncada a la mitad = 0.5, solución con un paso mal = 0.7
+- ¿GPQA, ARC u otros datasets con evaluación más fina?
+- ¿Generar gold_scores con Judge + golden rubric para verifiable también? (más caro pero más realista)
+- ¿Datasets de código (HumanEval, MBPP) donde se puede evaluar parcial correctness con test cases?
+
+### TODO 4: Investigar el Judge — consistencia y alternativas
+
+**Problema**: GPT-5.2 solo soporta temperature=1, lo que produce alta varianza. Promediamos N=3 evaluaciones pero es un parche.
+
+**Por investigar**:
+- **GPT-4o-mini como Judge**: soporta temperature=0, es más barato. ¿Es suficientemente capaz? Comparar consistencia (std de scores para misma rubrica+answer).
+- **Evaluación binaria por item**: en vez de scores continuos, pedir "sí/no cumple este criterio" por cada item de la rúbrica. Menos grados de libertad = menos varianza.
+- **Modelos de evaluación dedicados**: Prometheus, Auto-J, otros trained-for-evaluation models.
+- **Efecto de la varianza en RL**: ¿cuánto ruido tolera GRPO? ¿Necesitamos N=5 en vez de N=3?
+- **Test de consistencia**: evaluar la misma rubrica+answer 10 veces con distintos modelos y comparar std.
+
+---
+
 ## Plan de Implementacion por Fases
 
 ### Phase 0: veRL Foundation + Single Data Source -- COMPLETA
