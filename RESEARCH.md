@@ -14,36 +14,141 @@ Reinforcement Learning with Verifiable Rewards (RLVR) funciona increible en domi
 
 En paralelo, self-evolving rubrics (RLCER, DR-Tulu) resuelven la evolucion pero **solo funcionan en dominios verificables**, porque validan la rubrica correlacionandola con la correctitud de la respuesta final.
 
+### Landscape: Como se generan rubricas hoy
+
+Existen tres niveles de sofisticacion para generar rubricas con LLMs. Entender cada uno es clave para posicionar nuestra contribucion.
+
+#### Nivel 1: Prompting (no entrenan el generador)
+
+**Zero-shot prompting (baseline)**
+Le pedis a un LLM "genera una rubrica para esta pregunta". Sale lo que sale. Sin feedback, sin control de calidad. Rubrica generica, calidad inconsistente.
+
+**RaR — Rubrics as Rewards (Meta, arXiv:2507.17746)**
+Prompting con 4 principios de diseño: expert grounding, coverage, self-contained criteria, importance weighting. Cada criterio es binary pass/fail con peso (Essential/Important/Optional/Pitfall). Las rubricas se generan una vez y se usan como reward para entrenar una policy con GRPO. +31% en HealthBench vs Likert judges. **Pero nunca se mejoran las rubricas en si.**
+
+**Training AI Co-Scientists Using Rubric Rewards (Meta, arXiv:2512.23707)**
+Extraen rubricas automaticamente de papers cientificos: un LLM lee un paper, extrae research goal + rubrica + reference solution. Un Sample Selector filtra por calidad. 84% de los criterios extraidos fueron validados por expertos humanos. **Pero las rubricas son estaticas post-extraccion.**
+
+**RURA/Rubicon — RL with Rubric Anchors (arXiv:2508.12790)**
+10K+ rubricas creadas por humanos + LLMs. Despues de una ronda de RL, analizan rollouts manualmente y crean rubricas anti-reward-hacking. Iterativo pero manual: un humano mira donde falla y escribe rubricas nuevas. No escala.
+
+**OpenRubrics/CRG — Contrastive Rubric Generation (arXiv:2510.07743)**
+Genera rubricas contrastando pares de respuestas (preferred vs rejected). Extrae reglas y principios de las diferencias. Filtra por consistencia con preferencias humanas. Es un pipeline de datos (produce un dataset), no un modelo entrenado. Usado como pre-training data por Rubric-ARM.
+
+**Self-Rewarding Rubric-Based RL (arXiv:2509.25534)**
+Usa rubricas pre-existentes de HealthBench (escritas por medicos). La policy misma actua como judge (self-rewarding). No genera ni mejora rubricas — las toma como estan del benchmark. Supera GPT-5 en HealthBench Hard con solo 4K samples.
+
+> **Resumen Nivel 1**: Todos usan un LLM fijo para generar rubricas. La calidad depende de lo bueno que sea ese LLM. Ninguno entrena el generador.
+
+#### Nivel 2: Evolucion de rubricas (sin entrenar el generador)
+
+**DR-Tulu/RLER — Evolving Rubrics (Allen AI, arXiv:2511.19399)**
+Un LLM examiner (congelado) mira los rollouts actuales de la policy y propone rubricas nuevas:
+- Positivas: capturan conocimiento relevante descubierto
+- Negativas: targetean reward hacking emergente
+Las rubricas se rankeean por varianza de reward en el grupo GRPO — las que no discriminan se descartan. **Las rubricas evolucionan, pero el modelo que las genera esta congelado — no aprende.**
+
+**Auto-Rubric (arXiv:2510.17314)**
+Pipeline propose-evaluate-revise. Refina rubricas iterativamente, agrega y generaliza en taxonomias jerarquicas. Training-free, necesita solo 70 ejemplos de preferencias. Pero no entrena un modelo.
+
+**RRD — Recursive Rubric Decomposition (arXiv:2602.05125)**
+Ciclo recursivo de descomposicion y filtrado: toma rubricas gruesas → las descompone en sub-criterios finos → filtra las desalineadas → pondera por correlacion. +17.7 puntos en JudgeBench. Pero sigue siendo prompting sobre un LLM congelado.
+
+> **Resumen Nivel 2**: Las rubricas mejoran via seleccion darwiniana o refinamiento iterativo, pero el modelo generador no aprende. La calidad tiene un techo: el del LLM congelado que las produce.
+
+#### Nivel 3: Entrenan el generador con RL (3 papers existentes)
+
+**RLCER — Self-Evolving Rubrics (arXiv:2602.10885)**
+- El **mismo modelo** juega dos roles: reasoner (resuelve problemas) y rubricator (genera rubricas para evaluar razonamiento)
+- Señal: **validity reward** = correlacion entre "cumplir esta rubrica" y "responder correctamente"
+- Si cumplir un criterio predice correctitud → ese criterio es bueno → reward alto para el rubricator
+- Ambos roles mejoran juntos via GRPO
+- **Limitacion**: necesita respuesta correcta verificable para computar el validity reward. No funciona en dominios abiertos donde no hay verificador.
+
+**Rubric-ARM — Alternating RL (arXiv:2602.01511)**
+- **Dos modelos separados**: rubric generator + judge
+- Entrenamiento alternante:
+  - Fase A: fijo el generador, entreno el judge para maximizar prediccion de preferencias usando las rubricas
+  - Fase B: fijo el judge, entreno el generador para producir rubricas que maximicen la accuracy del judge
+- Señal: **prediccion de preferencias humanas** (¿la rubrica ayuda al judge a predecir que respuesta prefiere el humano?)
+- Funciona en dominios no-verificables
+- **Necesita pares de preferencia humanos (A > B)**, no rubricas de referencia
+
+**Query-Specific Rubrics (arXiv:2602.03619)**
+- Entrena el generador con GRPO
+- Señal hibrida: preferencias humanas + evaluacion LLM
+- Especifico para deep research reports
+- Tambien necesita 5K+ anotaciones de preferencia humana
+
+> **Resumen Nivel 3**: Solo 3 papers entrenan genuinamente un generador de rubricas con RL. Las señales que usan son: (a) correlacion con correctitud en dominio verificable (RLCER), (b) prediccion de preferencias humanas (Rubric-ARM), o (c) hibrido preferencias + LLM eval. Ninguno usa functional alignment contra rubricas humanas como señal de reward.
+
+#### Tabla comparativa completa
+
+| Metodo | Año | Entrena generador? | Señal de calidad de rubrica | Dominio | Dato humano requerido |
+|---|---|---|---|---|---|
+| Zero-shot prompting | baseline | No | Ninguna | Cualquiera | Ninguno |
+| RaR (Meta) | 2025 | No | Ninguna (estatica) | Abierto | Ninguno |
+| Co-Scientists (Meta) | 2025 | No | Validacion humana (offline) | Ciencia | Ninguno |
+| RURA/Rubicon | 2025 | No | Reward hacking analysis (manual) | Abierto | Rubricas humanas |
+| Self-Rewarding Rubric RL | 2025 | No | Ninguna (usa rubricas existentes) | Medico | Rubricas de medicos |
+| OpenRubrics/CRG | 2025 | No | Consistencia con preferencias | General | Pares de preferencia |
+| DR-Tulu/RLER | 2025 | No (evoluciona, no entrena) | Discriminatividad (varianza) | Deep research | Ninguno |
+| Auto-Rubric | 2025 | No | Validacion en preferencias | General | 70 preferencias |
+| RRD | 2026 | No | Accuracy de preferencia | Abierto | Pares de preferencia |
+| **RLCER** | **2026** | **Si (mismo modelo)** | **Correlacion con correctitud** | **Solo verificable** | **Ninguno** |
+| **Rubric-ARM** | **2026** | **Si (modelo separado)** | **Prediccion de preferencias** | **No-verificable** | **Pares preferencia** |
+| **Query-Specific** | **2026** | **Si** | **Preferencias + LLM eval** | **Deep research** | **5K+ preferencias** |
+| **GRubrics (ours)** | **2026** | **Si (RL + GRPO)** | **Functional alignment (Spearman vs rubricas humanas)** | **Abierto** | **Rubricas humanas** |
+
 ### El gap
 
-| Direccion | Fortaleza | Debilidad |
-|---|---|---|
-| Rubric-based RL (RaR, RURA) | Funciona en dominios abiertos | Necesita rubricas humanas caras y estaticas |
-| Self-evolving rubrics (RLCER) | Baratas y adaptativas | Solo dominios verificables |
+El campo evoluciono de prompting (2025) a entrenar generadores con RL (2026). Pero las tres señales existentes tienen limitaciones:
 
-Nadie combina la adaptividad de las self-evolving con la cobertura de dominios de las rubric-based.
+| Señal | Metodo | Fortaleza | Debilidad |
+|---|---|---|---|
+| Correlacion con correctitud | RLCER | Gratis, abundante | Solo dominios verificables |
+| Prediccion de preferencias | Rubric-ARM | Funciona en abiertos | Necesita pares A>B, no mide calidad de rubrica directamente |
+| Preferencias + LLM eval | Query-Specific | Hibrida | Cara, especifica a deep research |
+
+**Nadie usa functional alignment contra rubricas humanas como señal de RL para entrenar un generador.** Esta señal tiene propiedades unicas:
+
+1. **Mide directamente calidad funcional**: no "¿que respuesta prefiere el humano?" sino "¿tu rubrica rankea respuestas como la del experto?"
+2. **Aprovecha datos existentes**: HealthBench (5K rubricas de medicos), FrontierScience (60 rubricas de PhDs) ya existen. No requiere anotaciones de preferencia nuevas.
+3. **Compatible con bootstrap desde verificable**: en dominios verificables, gold_scores son programaticos (gratis). En dominios abiertos, gold_scores vienen de evaluar con la rubrica humana. **Misma reward function, distinta fuente de gold_scores.**
 
 ### Nuestra propuesta
 
-**GRubrics-Transfer**: un framework que entrena un rubricator (generador de rubricas) simultaneamente en:
+**GRubrics**: un sistema que entrena un rubricator (generador de rubricas) con RL, usando **functional alignment** como reward signal.
 
-1. **Dominios verificables** (math), donde la calidad de la rubrica se valida gratis correlacionando con correctitud. Señal abundante y barata.
-2. **Dominios abiertos** (ciencia), donde la calidad se valida via *ranking consistency* con rubricas humanas. Señal cara pero especifica del dominio objetivo.
+**Claim**: RL con functional alignment produce mejores rubricas que SFT y zero-shot prompting, acercandose a la calidad de rubricas humanas.
 
-El insight clave es que **la habilidad de generar buenas rubricas es mayormente domain-general**: una rubrica que captura "consistencia logica" o "evita claims no fundamentados" es valiosa tanto para un proof matematico como para un diagnostico medico. Explotamos esto con un curriculum que va de mayormente-verificable (bootstrap barato) a balanceado (adaptacion al dominio).
+**Que es functional alignment**: decimos que una rubrica generada es buena si produce **rankings de respuestas similares** a los que produce la rubrica humana de referencia. Medimos esto con correlacion de Spearman entre los scores que da nuestra rubrica y los scores que da la rubrica del experto, sobre las mismas respuestas. El texto puede ser completamente diferente — lo que importa es que **funcione igual**.
 
-Usamos **ranking consistency** (Spearman) como señal de alineamiento: en vez de comparar scores absolutos (sensibles a escala y bias del judge), requerimos que la rubrica generada produzca el mismo *orden relativo* de respuestas que la rubrica humana.
+**Por que RL y no SFT**: no hay una unica rubrica correcta para cada pregunta. Distintos expertos escribirian rubricas distintas, y todas podrian ser buenas. SFT optimiza similitud textual con una referencia. RL optimiza directamente la funcion objetivo: que la rubrica **funcione** (discrimine calidad de respuestas como lo haria un experto).
+
+**Curriculum desde dominios verificables**: el modelo aprende primero con datos verificables del mismo campo (medicina: MedQA, MedMCQA; ciencia: MATH, GSM8K) donde gold_scores son programaticos y gratis, y despues transfiere al dominio abierto donde gold_scores son mas caros (requieren evaluar con rubrica humana). Misma reward function, distinta fuente de señal.
+
+**Dominios de validacion**:
+1. **HealthBench** (5000 conversaciones medicas, rubricas de 262 medicos): validacion primaria, resultados estadisticamente robustos.
+2. **FrontierScience** (60 subtasks de fisica, rubricas de PhDs): validacion de generalizacion a otro dominio.
+
+**La receta replicable**: dado cualquier dominio con algunas rubricas humanas de referencia, el metodo produce un generador de rubricas entrenado. Funciona para medicina, ciencia, legal, educacion, etc.
 
 ### Subpreguntas de investigacion
 
-- Functional alignment (ranking consistency) es una señal de reward viable para RL?
-- El transfer desde dominios verificables hacia abiertos funciona? (reduce rubricas humanas necesarias?)
-- Un curriculum gradual supera al training en un solo dominio?
-- Las rubricas generadas se acercan en calidad a las humanas?
+- Functional alignment (ranking consistency via Spearman) es una señal de reward viable para RL?
+- RL supera a SFT para generacion de rubricas? (dado que no hay una unica rubrica correcta)
+- El curriculum desde dominios verificables ayuda? (reduce la cantidad de rubricas humanas necesarias?)
+- Las rubricas generadas se acercan en calidad funcional a las humanas?
+- El metodo generaliza entre dominios? (entrenado en medicina, funciona en ciencia?)
 
 ### Criterio de exito
 
-El modelo entrenado genera rubricas que superan a baselines (zero-shot, GPT frontier) en alignment score sobre held-out FrontierScience, acercandose a la calidad de las rubricas humanas.
+1. **Minimo**: RL supera a zero-shot y SFT en alignment score → el metodo funciona.
+2. **Bueno**: RL se acerca a rubricas humanas en HealthBench → utilidad practica.
+3. **Muy bueno**: Generaliza a FrontierScience sin reentrenar → la receta es transferible.
+4. **Excelente**: RL se acerca a GPT-5.2 zero-shot con una fraccion del costo → eficiencia.
+5. **Bonus**: Mostrar que las rubricas generadas, usadas como reward para entrenar una policy, producen un modelo mejor que usando rubricas zero-shot → impacto downstream.
 
 ---
 
@@ -1148,9 +1253,37 @@ az ml job stream --name <job-id> \
 
 ## Referencias
 
-- **RaR** (Gunjal et al., 2025): Rubrics as Rewards — rubric-based feedback outperforms Likert LLM-as-judge, 31% improvement en HealthBench
-- **RURA** (Huang et al., 2025): RL with Rubric Anchors — 10K+ rubrics de humanos y LLMs
-- **RLCER** (Sheng et al., 2026): Self-evolving rubrics que co-evolucionan con la policy (solo verifiable)
-- **DR-Tulu** (2025): Evolving rubrics para deep research tasks
+### Rubricas como reward (no entrenan el generador)
+
+- **RaR** (Gunjal et al., 2025): Rubrics as Rewards — rubric-based feedback outperforms Likert LLM-as-judge, +31% en HealthBench. [arXiv:2507.17746](https://arxiv.org/abs/2507.17746)
+- **Training AI Co-Scientists Using Rubric Rewards** (Goel, Hazra et al., Meta, 2025): Extraccion automatica de rubricas de papers cientificos, 84% validadas por expertos. [arXiv:2512.23707](https://arxiv.org/abs/2512.23707)
+- **RURA/Rubicon** (Huang et al., 2025): RL with Rubric Anchors — 10K+ rubrics de humanos y LLMs, +5.2% en open-ended benchmarks. [arXiv:2508.12790](https://arxiv.org/abs/2508.12790)
+- **Self-Rewarding Rubric-Based RL** (Ye et al., 2025): Policy = judge, self-rewarding loop con rubricas de HealthBench. Supera GPT-5 en HealthBench Hard. [arXiv:2509.25534](https://arxiv.org/abs/2509.25534)
+- **OpenRubrics/CRG** (Liu, Xu et al., 2025): Contrastive Rubric Generation a escala, pipeline de datos sinteticos. [arXiv:2510.07743](https://arxiv.org/abs/2510.07743)
+
+### Evolucion de rubricas (sin entrenar el generador)
+
+- **DR-Tulu/RLER** (Allen AI, 2025): Evolving rubrics para deep research, rubric buffer con seleccion por discriminatividad. [arXiv:2511.19399](https://arxiv.org/abs/2511.19399)
+- **Auto-Rubric** (Xie, Huang et al., 2025): Training-free, propose-evaluate-revise, 70 ejemplos suficientes. [arXiv:2510.17314](https://arxiv.org/abs/2510.17314)
+- **RRD** (Shen, Qiu et al., 2026): Recursive Rubric Decomposition, +17.7 en JudgeBench. [arXiv:2602.05125](https://arxiv.org/abs/2602.05125)
+- **OpenRS** (Qwen team, 2026): Pairwise Adaptive Meta-Rubrics, SOTA en 4 reward modeling benchmarks. [arXiv:2602.14069](https://arxiv.org/abs/2602.14069)
+- **Data-Driven Reasoning Rubrics** (Sanders et al., 2026): Error taxonomies automaticas, +45% vs general LLM judges. [arXiv:2602.06795](https://arxiv.org/abs/2602.06795)
+
+### Entrenan el generador con RL
+
+- **RLCER** (Sheng et al., 2026): Self-evolving rubrics, mismo modelo = reasoner + rubricator, validity reward = correlacion con correctitud. Solo dominios verificables. [arXiv:2602.10885](https://arxiv.org/abs/2602.10885)
+- **Rubric-ARM** (Xu, Liu et al., 2026): Alternating RL, rubric generator + judge entrenados alternadamente, señal = prediccion de preferencias. [arXiv:2602.01511](https://arxiv.org/abs/2602.01511)
+- **Query-Specific Rubrics** (Lv, Zhou et al., 2026): GRPO para rubric generator, señal hibrida preferencias + LLM eval, deep research reports. [arXiv:2602.03619](https://arxiv.org/abs/2602.03619)
+
+### Datasets y benchmarks
+
+- **HealthBench** (OpenAI, 2025): 5000 conversaciones medicas con 48,562 criterios de 262 medicos. MIT license. [arXiv:2505.08775](https://arxiv.org/abs/2505.08775), [HuggingFace](https://huggingface.co/datasets/openai/healthbench)
 - **FrontierScience** (OpenAI): 60 PhD-authored physics research subtasks con rubricas humanas
+- **MedQA-USMLE**: 12,723 preguntas MCQ de USMLE, verificable, usado en Med-RLVR. [HuggingFace](https://huggingface.co/datasets/GBaker/MedQA-USMLE-4-options)
+- **MedMCQA**: 194K preguntas MCQ medicas, 21 especialidades, verificable. [HuggingFace](https://huggingface.co/datasets/openlifescienceai/medmcqa)
+- **FIRE-Bench**: Full-cycle Insight Rediscovery Evaluation, benchmark de tareas cientificas. [OpenReview](https://openreview.net/pdf?id=454tA4k8yJ)
+
+### Infraestructura
+
 - **veRL**: Framework GRPO escalable con vLLM rollouts y LoRA
+- **Med-RLVR** (Zhang et al., 2025): RLVR aplicado a medicina con MedQA como unico dato verificable. [arXiv:2502.19655](https://arxiv.org/abs/2502.19655)
