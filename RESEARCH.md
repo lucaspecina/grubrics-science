@@ -1,8 +1,8 @@
-# GRubrics-Transfer
+# GRubrics
 
 ## Objetivo de la Investigacion
 
-**Pregunta principal**: Podemos entrenar un modelo de lenguaje para que genere rubricas de evaluacion cientifica tan buenas como las escritas por humanos, eliminando el costo de crear rubricas manuales a escala?
+**Pregunta principal**: Podemos entrenar un modelo de lenguaje para que genere rubricas de evaluacion medica tan buenas como las escritas por medicos, y demostrar que esas rubricas mejores producen mejores policies cuando se usan como reward para RL?
 
 ### El problema
 
@@ -23,7 +23,7 @@ Existen tres niveles de sofisticacion para generar rubricas con LLMs. Entender c
 **Zero-shot prompting (baseline)**
 Le pedis a un LLM "genera una rubrica para esta pregunta". Sale lo que sale. Sin feedback, sin control de calidad. Rubrica generica, calidad inconsistente.
 
-**RaR — Rubrics as Rewards (Meta, arXiv:2507.17746)**
+**RaR — Rubrics as Rewards (Scale AI, arXiv:2507.17746)**
 Prompting con 4 principios de diseño: expert grounding, coverage, self-contained criteria, importance weighting. Cada criterio es binary pass/fail con peso (Essential/Important/Optional/Pitfall). Las rubricas se generan una vez y se usan como reward para entrenar una policy con GRPO. +31% en HealthBench vs Likert judges. **Pero nunca se mejoran las rubricas en si.**
 
 **Training AI Co-Scientists Using Rubric Rewards (Meta, arXiv:2512.23707)**
@@ -87,7 +87,7 @@ Ciclo recursivo de descomposicion y filtrado: toma rubricas gruesas → las desc
 | Metodo | Año | Entrena generador? | Señal de calidad de rubrica | Dominio | Dato humano requerido |
 |---|---|---|---|---|---|
 | Zero-shot prompting | baseline | No | Ninguna | Cualquiera | Ninguno |
-| RaR (Meta) | 2025 | No | Ninguna (estatica) | Abierto | Ninguno |
+| RaR (Scale AI) | 2025 | No | Ninguna (estatica) | Abierto | Ninguno |
 | Co-Scientists (Meta) | 2025 | No | Validacion humana (offline) | Ciencia | Ninguno |
 | RURA/Rubicon | 2025 | No | Reward hacking analysis (manual) | Abierto | Rubricas humanas |
 | Self-Rewarding Rubric RL | 2025 | No | Ninguna (usa rubricas existentes) | Medico | Rubricas de medicos |
@@ -118,37 +118,104 @@ El campo evoluciono de prompting (2025) a entrenar generadores con RL (2026). Pe
 
 ### Nuestra propuesta
 
-**GRubrics**: un sistema que entrena un rubricator (generador de rubricas) con RL, usando **functional alignment** como reward signal.
+**GRubrics**: un sistema que entrena un rubricator (generador de rubricas) con RL, usando **functional alignment** como reward signal. Validado en medicina (HealthBench) con generalizacion a ciencia (FrontierScience).
 
-**Claim**: RL con functional alignment produce mejores rubricas que SFT y zero-shot prompting, acercandose a la calidad de rubricas humanas.
+**Dos contribuciones**:
+1. **Hallazgo empirico**: La calidad de las rubricas impacta directamente la calidad de la policy entrenada con ellas. Nadie demostro esto — todo el campo lo asume sin testearlo (ver seccion "La pregunta que nadie respondio").
+2. **Metodo**: RL con functional alignment para generar rubricas de mayor calidad que zero-shot y SFT, a una fraccion del costo de usar un modelo frontier.
 
 **Que es functional alignment**: decimos que una rubrica generada es buena si produce **rankings de respuestas similares** a los que produce la rubrica humana de referencia. Medimos esto con correlacion de Spearman entre los scores que da nuestra rubrica y los scores que da la rubrica del experto, sobre las mismas respuestas. El texto puede ser completamente diferente — lo que importa es que **funcione igual**.
 
 **Por que RL y no SFT**: no hay una unica rubrica correcta para cada pregunta. Distintos expertos escribirian rubricas distintas, y todas podrian ser buenas. SFT optimiza similitud textual con una referencia. RL optimiza directamente la funcion objetivo: que la rubrica **funcione** (discrimine calidad de respuestas como lo haria un experto).
 
-**Curriculum desde dominios verificables**: el modelo aprende primero con datos verificables del mismo campo (medicina: MedQA, MedMCQA; ciencia: MATH, GSM8K) donde gold_scores son programaticos y gratis, y despues transfiere al dominio abierto donde gold_scores son mas caros (requieren evaluar con rubrica humana). Misma reward function, distinta fuente de señal.
+**Curriculum desde dominios verificables**: el modelo aprende primero con datos verificables medicos (MedQA ~10K, MedMCQA ~183K) donde gold_scores son programaticos y gratis, y despues transfiere al dominio abierto medico (HealthBench) donde gold_scores vienen de rubricas de medicos. Misma reward function, distinta fuente de señal. Transfer dentro del mismo campo (medicina).
 
 **Dominios de validacion**:
-1. **HealthBench** (5000 conversaciones medicas, rubricas de 262 medicos): validacion primaria, resultados estadisticamente robustos.
-2. **FrontierScience** (60 subtasks de fisica, rubricas de PhDs): validacion de generalizacion a otro dominio.
+1. **HealthBench** (5000 conversaciones medicas, rubricas de 262 medicos): validacion primaria, resultados estadisticamente robustos (holdout ~500 preguntas).
+2. **FrontierScience** (60 subtasks de fisica, rubricas de PhDs): validacion de generalizacion a otro dominio completamente distinto.
 
 **La receta replicable**: dado cualquier dominio con algunas rubricas humanas de referencia, el metodo produce un generador de rubricas entrenado. Funciona para medicina, ciencia, legal, educacion, etc.
 
+### La pregunta que nadie respondio
+
+Todos los papers de rubric-based RL (RaR, RLCER, DR-Tulu, Rubric-ARM, Baichuan-M2) **asumen** que mejores rubricas producen mejores policies. Pero nadie lo testeo directamente como variable independiente:
+
+| Paper | Que compara | Que demuestra | Que NO demuestra |
+|---|---|---|---|
+| RaR (Scale AI) | Rubricas vs Likert scoring | Rubricas > no-rubricas | No compara buenas vs malas rubricas |
+| RLCER | Rubricas evolving vs estaticas | Evolving > fijas (implicito) | No aisla calidad de rubrica |
+| DR-Tulu | Rubricas evolving vs fijas | Similar | No aisla calidad de rubrica |
+| Rubric-ARM | Rubricas RL vs zero-shot | Mejor reward modeling | NO testea policy training downstream |
+| Baichuan-M2 | Stages de training | Rubricas como reward funcionan | No compara calidades de rubrica |
+
+**El experimento que falta** (y que nadie hizo):
+
+Fijar todo (misma policy base, mismo RL, mismos datos). Cambiar SOLO la fuente de rubricas:
+
+| Rubrica usada como reward | Policy resultante (eval en HB held-out) |
+|---|---|
+| Random rubrics | ??? |
+| Zero-shot Qwen-8B rubrics | ??? |
+| Zero-shot GPT-5.2 rubrics | ??? |
+| SFT-trained rubrics | ??? |
+| RL-trained rubrics (ours) | ??? |
+| Human rubrics (HealthBench) | ??? |
+
+Si la calidad de la policy sube monotonicamente con la calidad de la rubrica → **demostrado: la calidad de la rubrica importa para el training de la policy.**
+
+Esto cambia la narrativa: ya no es solo "generamos mejores rubricas" (incremental). Es "demostramos que mejores rubricas → mejor policy, y proponemos como generarlas".
+
+### Justificacion: por que tiene sentido un generador de rubricas
+
+**El argumento en contra (la duda legitima):** Si el modelo tiene la informacion para hacer buenas rubricas, por que no usarlo directamente para responder? Y si la policy que entrenamos despues es mas grande, no tiene ya esa informacion?
+
+**Como lo justifican los otros papers:**
+- **RLCER**: Adaptividad — las rubricas necesitan evolucionar con la policy
+- **Rubric-ARM**: Optimizacion end-to-end — mejor rubrica → mejor judge → mejor reward
+- **Baichuan-M2**: Especificidad dinamica — cada interaccion necesita criterios distintos
+
+**Los argumentos reales a favor:**
+
+1. **Escala**: HealthBench tiene 5K preguntas con rubricas. Para RL de una policy necesitas rubricas para cada prompt — potencialmente 100K+. Un generador entrenado puede producirlas; medicos no pueden escribir 100K rubricas.
+
+2. **Costo**: GPT-5.2 zero-shot genera una rubrica por ~$0.01. Un 8B fine-tuned por ~$0.0001. Para 100K rubricas: $1,000 vs $10. A escala de RL training, la diferencia es 100x.
+
+3. **Asimetria evaluativa** (principio de RURA): Es fundamentalmente mas facil evaluar que producir. Un critico de cine no necesita ser director. Un modelo chico puede ser excelente evaluador sin ser buen respondedor. La rubrica codifica "que importa" — no necesita saber la respuesta.
+
+4. **El valor practico real**: El generador permite **RL en dominios nuevos sin rubricas humanas**. Con un generador que produce rubricas de calidad HealthBench para cualquier pregunta medica, se puede tomar 1M preguntas medicas de internet, generar rubricas, entrenar una policy con RL, y obtener un mejor modelo medico. Sin el generador, estas limitado a las 5K preguntas con rubricas humanas.
+
 ### Subpreguntas de investigacion
 
+**Pregunta principal (contribucion 1 — hallazgo empirico):**
+- La calidad de las rubricas impacta la calidad de la policy entrenada con ellas? (el experimento downstream)
+
+**Preguntas sobre el metodo (contribucion 2 — como generar mejores rubricas):**
 - Functional alignment (ranking consistency via Spearman) es una señal de reward viable para RL?
 - RL supera a SFT para generacion de rubricas? (dado que no hay una unica rubrica correcta)
-- El curriculum desde dominios verificables ayuda? (reduce la cantidad de rubricas humanas necesarias?)
-- Las rubricas generadas se acercan en calidad funcional a las humanas?
-- El metodo generaliza entre dominios? (entrenado en medicina, funciona en ciencia?)
+- Las rubricas generadas se acercan en calidad funcional a las de medicos?
+- Un 8B entrenado se acerca a GPT-5.2 zero-shot? (argumento de costo)
+
+**Preguntas sobre transfer (contribucion 3 — curriculum verificable → abierto):**
+- El curriculum desde dominios verificables medicos (MedQA/MedMCQA) ayuda?
+- La habilidad de generar rubricas transfiere de verificable a abierto?
+- El metodo generaliza entre campos? (entrenado en medicina, funciona en ciencia?)
 
 ### Criterio de exito
 
-1. **Minimo**: RL supera a zero-shot y SFT en alignment score → el metodo funciona.
-2. **Bueno**: RL se acerca a rubricas humanas en HealthBench → utilidad practica.
-3. **Muy bueno**: Generaliza a FrontierScience sin reentrenar → la receta es transferible.
-4. **Excelente**: RL se acerca a GPT-5.2 zero-shot con una fraccion del costo → eficiencia.
-5. **Bonus**: Mostrar que las rubricas generadas, usadas como reward para entrenar una policy, producen un modelo mejor que usando rubricas zero-shot → impacto downstream.
+**Contribucion 1 — Rubric quality → Policy quality:**
+1. **Minimo**: Policy entrenada con rubricas RL > policy con rubricas random.
+2. **Bueno**: La calidad de la policy correlaciona monotonicamente con la calidad de la rubrica usada.
+3. **Excelente**: Policy con rubricas RL se acerca a policy con rubricas humanas.
+
+**Contribucion 2 — Metodo de generacion:**
+1. **Minimo**: RL supera a zero-shot y SFT en alignment score.
+2. **Bueno**: RL se acerca a rubricas humanas en HealthBench.
+3. **Excelente**: 8B-RL se acerca a GPT-5.2 zero-shot (eficiencia 100x).
+
+**Contribucion 3 — Transfer:**
+1. **Minimo**: Verifiable-only obtiene alignment > 0 en HealthBench (hay transfer).
+2. **Bueno**: Curriculum > verifiable-only y > open-only.
+3. **Bonus**: Generaliza a FrontierScience sin reentrenar.
 
 ---
 
@@ -212,10 +279,12 @@ El sistema tiene tres modelos de lenguaje, pero solo uno se entrena:
 
 El sistema opera sobre dos tipos de datos. El truco del transfer learning es que el modelo aprende primero con el dominio facil (verificable) y despues transfiere al dificil (abierto).
 
-#### Dominio verificable (matematica) — barato, abundante
+#### Dominio verificable (medicina) — barato, abundante
 
-- **Datasets**: MATH (Hendrycks, 12K problemas), GSM8K (8.5K problemas), olympiad_math (1K del repo)
-- **Propiedad clave**: tienen respuesta correcta conocida (un numero, una expresion)
+- **Datasets primarios**: MedQA-USMLE (~10K, USMLE Steps 1/2/3), MedMCQA (~183K, 21 especialidades medicas)
+- **Datasets secundarios** (ya implementados): MATH (12K), GSM8K (8.5K), olympiad_math (1K) — utiles para ciencia
+- **Propiedad clave**: tienen respuesta correcta conocida (opcion MCQ correcta / numero)
+- **Datasets con respuestas pre-generadas**: HPAI-BSC CoT (~200K+ respuestas correctas de Mixtral/Llama-3.1 a MedQA/MedMCQA); med-qa-orpo-dpo (triples chosen/rejected)
 
 **Como funciona el training:**
 
@@ -229,17 +298,24 @@ El sistema opera sobre dos tipos de datos. El truco del transfer learning es que
 
 **Ventaja**: los gold_scores no requieren Judge (son programaticos). Solo necesitamos Judge para los grubrics_scores. Abundante y barato.
 
-#### Dominio abierto (ciencia) — con API, caro, escaso pero valioso
+#### Dominio abierto (medicina) — con rubricas humanas, el objetivo
 
-- **Dataset**: FrontierScience (60 subtasks de investigacion en fisica, con rubricas escritas por PhD)
-- **Propiedad clave**: no hay "respuesta correcta" — las respuestas son ensayos de investigacion con distintos grados de calidad
+- **Dataset primario**: HealthBench (5000 conversaciones medicas, 48,562 criterios de 262 medicos, MIT license)
+- **Dataset secundario**: FrontierScience (60 subtasks de fisica, rubricas de PhDs) — para validar generalizacion
+- **Propiedad clave**: no hay "respuesta correcta" unica — las respuestas tienen distintos grados de calidad evaluados por rubricas de expertos
 
-**Precompute (una sola vez, antes de entrenar):**
+**Datos pre-evaluados disponibles (ahorro significativo):**
+- **HealthBench meta_eval** (136 MB): Respuestas de o3/gpt-4.1 **evaluadas por medicos reales** (binary labels por criterio de rubrica). Son gold_scores gratuitos — no necesitamos correr Judge para obtenerlos.
+- **Intelligent-Internet HB evals**: Respuestas de II-Medical-8B evaluadas con GPT-4.1 contra rubricas (~5K completions + scores).
+- **UltraMedical-Preference** (100K preguntas medicas): Pares preferred/rejected + scores GPT-4 + 900 corregidos por humanos. Util para SFT warm-up.
+
+**Precompute (si se necesita generar datos adicionales):**
 
 1. Para cada pregunta, el **Answer Policy** (GPT) genera K=6 respuestas diversas variando instrucciones.
 2. El **Judge** evalua cada respuesta usando la **rubrica golden** (la humana). Esto produce `gold_scores`: el ranking "verdadero" de calidad.
 3. Se promedia N=3 evaluaciones para estabilizar gold_scores (gpt-5.2 solo soporta temperature=1, lo cual introduce ruido).
-4. Todo se cachea en disco (`data/cache/frontierscience_precompute.jsonl`).
+4. Todo se cachea en disco.
+5. **Alternativa gratis**: usar directamente los gold_scores de medicos del meta_eval de HealthBench.
 
 **Como funciona el training:**
 
@@ -252,25 +328,25 @@ El sistema opera sobre dos tipos de datos. El truco del transfer learning es que
 
 #### Resumen: las diferencias
 
-| | Verificable (math) | Abierto (ciencia) |
+| | Verificable (medicina MCQ) | Abierto (medicina conversacional) |
 |---|---|---|
-| Respuesta correcta | Si (un numero) | No (ensayos) |
-| Precompute | Si (answers + programmatic scores) | Si (answers + Judge gold_scores) |
-| Gold scores | Programaticos (gratis) | Judge + golden rubric (caro) |
+| Respuesta correcta | Si (opcion MCQ) | No (conversaciones medicas) |
+| Precompute | Si (answers + programmatic scores) | Ya disponible (meta_eval de HealthBench) |
+| Gold scores | Programaticos (gratis) | De medicos reales (gratis via meta_eval) |
 | GRubrics scores | Judge + generated rubric | Judge + generated rubric |
 | Costo por step | ~$0.003 (1 Judge call) | ~$0.003 (1 Judge call) |
-| Volumen disponible | ~20K problemas | ~60 subtasks |
+| Volumen disponible | ~193K problemas (MedQA + MedMCQA) | ~5K conversaciones (HealthBench) |
 | Rol en curriculum | Etapas tempranas (80% → 20%) | Etapas tardias (20% → 80%) |
 
 ### El curriculum: de facil a dificil
 
 El training loop de GRPO es siempre el mismo: generar N rubricas, calcular rewards, actualizar con advantages. Lo que cambia entre fases es **la mezcla de datos**:
 
-1. **Fase 1** (80% math, 20% ciencia): el modelo aprende que es una rubrica, como formatearla, que criterios importan. La mayoria de los steps usan el dominio verificable (barato, abundante).
-2. **Fase 2** (50% math, 50% ciencia): transicion gradual. El modelo ya sabe formatear rubricas y empieza a especializarse en discriminar calidad de respuestas cientificas.
-3. **Fase 3** (20% math, 80% ciencia): fine-tuning en el dominio objetivo real.
+1. **Fase 1** (80% verificable, 20% abierto): el modelo aprende que es una rubrica medica, como formatearla, que criterios importan. La mayoria de los steps usan MedQA/MedMCQA (barato, abundante).
+2. **Fase 2** (50% verificable, 50% abierto): transicion gradual. El modelo ya sabe formatear rubricas y empieza a especializarse en discriminar calidad de respuestas medicas abiertas.
+3. **Fase 3** (20% verificable, 80% abierto): fine-tuning en HealthBench, el dominio objetivo real.
 
-La intuicion es que "escribir buenas rubricas" es una habilidad transferible. Un modelo que sabe distinguir buenas soluciones de matematica tiene la base para distinguir buena investigacion cientifica.
+La intuicion: el transfer es dentro del mismo campo (medicina). Un modelo que sabe distinguir buenas respuestas a preguntas medicas MCQ tiene la base para distinguir buenas respuestas a consultas medicas abiertas. Es el mismo dominio, distinto nivel de verificabilidad.
 
 ### La reward function en detalle
 
@@ -296,14 +372,33 @@ reward = alignment                    # Spearman(gold_scores, grubrics_scores) �
 
 **vLLM:** genera las N rubricas en paralelo con PagedAttention y KV-cache eficiente.
 
-### El dataset gold standard: FrontierScience
+### Los datasets gold standard
+
+#### HealthBench (validacion primaria)
+
+5000 conversaciones medicas creadas y evaluadas por 262 medicos de 60 paises. Cada entrada tiene:
+- Un prompt multi-turn (conversacion medico-paciente, 58% single-turn)
+- Una rubrica con ~11.4 criterios promedio (48,562 criterios unicos totales)
+- Cada criterio: texto + puntos (-10 a +10) + tags (axis: accuracy/completeness/context/communication/instruction + theme)
+- Criterios positivos (69.3%) y negativos (30.7% — penalizan comportamiento peligroso)
+- **meta_eval**: respuestas de modelos reales evaluadas por medicos (binary labels por criterio)
+
+**Formato de rubrica HealthBench:**
+```json
+{"criterion": "Tells the user to call emergency services immediately", "points": 10, "tags": ["axis:accuracy"]}
+{"criterion": "Suggests giving food to unconscious person", "points": -8, "tags": ["axis:accuracy"]}
+```
+
+**Por que HealthBench**: 5000 preguntas (vs 60 de FrontierScience), holdout de ~500 (vs 12), resultados estadisticamente robustos, MIT license, datos pre-evaluados por medicos disponibles.
+
+#### FrontierScience (validacion de generalizacion)
 
 60 subtasks de investigacion en fisica creadas por cientificos con PhD. Cada subtask tiene:
 - Una pregunta de investigacion (abierta, no trivial)
 - Una rubrica de evaluacion con 10 puntos distribuidos en multiples criterios
 - Multiples respuestas pre-evaluadas
 
-Esto es extremadamente raro: rubricas humanas para ciencia abierta. FrontierScience es esencialmente el unico recurso viable para validar functional alignment en el dominio objetivo.
+Sirve para validar que el metodo generaliza a un dominio completamente distinto (fisica) sin reentrenar.
 
 ---
 
@@ -311,106 +406,144 @@ Esto es extremadamente raro: rubricas humanas para ciencia abierta. FrontierScie
 
 ### Que queremos demostrar
 
-La pregunta central: **¿el RL con functional alignment produce rúbricas que se acercan a las humanas?**
+**Dos cosas, en orden de importancia:**
 
-No nos interesa comparar contra modelos más grandes por el tamaño. Nos interesa demostrar que nuestra *estrategia de entrenamiento* (RL + functional alignment + transfer) es efectiva para que un modelo chico (8B) genere rúbricas de calidad.
+1. **Rubric quality → Policy quality** (el hallazgo que nadie demostro): Fijando todo lo demas, cambiar la calidad de la rubrica usada como reward cambia la calidad de la policy resultante.
+2. **RL + functional alignment genera mejores rubricas** que zero-shot, SFT, y otros metodos, acercandose a las humanas.
 
-El claim más fuerte sería: "un Qwen 8B entrenado con nuestra estrategia genera rúbricas comparables a las de PhDs, y se acerca a GPT-5.2 zero-shot con una fracción del costo de inference".
+### Experimento 1: Rubric Quality → Policy Quality (EL MAS IMPORTANTE)
 
-### Los baselines que importan
+Fijar: misma policy base, mismo RL (GRPO), mismos datos de training, mismo judge.
+Cambiar SOLO la fuente de rubricas usadas como reward:
 
-**Comparaciones centrales (responden la pregunta de investigación):**
+| # | Rubrica como reward | Que mide |
+|---|---|---|
+| P0 | **Human rubrics (HealthBench)** | Upper bound — que tan buena es la policy con rubricas perfectas |
+| P1 | **RL-trained rubrics (ours)** | Nuestro metodo |
+| P2 | **SFT-trained rubrics** | Imitacion supervisada |
+| P3 | **Zero-shot GPT-5.2 rubrics** | Modelo frontier sin entrenar |
+| P4 | **Zero-shot Qwen-8B rubrics** | Modelo chico sin entrenar |
+| P5 | **Random rubrics** | Lower bound / sanity check |
 
-| # | Baseline | Que mide | Requiere | Costo |
-|---|---|---|---|---|
-| B0 | **Golden Rubric** (upper bound) | A que apuntamos: las rúbricas humanas PhD | Solo precompute cache (ya existe) | $0 |
-| B2 | **Zero-shot Qwen3-8B** (lower bound) | De donde partimos: el mismo modelo sin entrenar | GPU para inference | ~$0 |
-| B7 | **SFT Qwen3-8B** | ¿Necesitamos RL o alcanza con imitar las rúbricas humanas? | GPU + transformers Trainer | ~$10 |
-| B3 | **Random rubric** | Sanity check: ¿las métricas discriminan? | Nada (generación local) | $0 |
+Evaluacion: todas las policies se evaluan en HealthBench held-out con las rubricas humanas.
 
-**Comparaciones secundarias (demuestran que cada componente aporta):**
+**Si la calidad de la policy correlaciona con la calidad de la rubrica → hallazgo principal del paper.**
 
-| # | Baseline | Que mide | Requiere | Costo |
-|---|---|---|---|---|
-| B4 | **Format-only reward** | ¿Functional alignment (Judge + Spearman) aporta vs solo formato? | GPU + veRL | ~$70 |
-| B5 | **Verifiable-only** | ¿El transfer desde math a ciencia funciona? | GPU + veRL | ~$70 |
-| B6 | **Open-only** | ¿El curriculum ayuda vs entrenar directo en ciencia? | GPU + veRL | ~$90 |
+### Experimento 2: Rubric Generation Quality (alignment score)
 
-**Referencia informativa (barato, claim fuerte si sale bien):**
+Evaluar la calidad de las rubricas generadas directamente, sin entrenar una policy:
 
-| # | Baseline | Que mide | Requiere | Costo |
-|---|---|---|---|---|
-| B1 | **Zero-shot GPT-5.2** | Referencia de modelo frontier. Si Qwen-RL se acerca, es un claim muy fuerte: 8B entrenado ≈ modelo frontier | Solo API (~120 calls) | <$1 |
+**Baselines centrales:**
+
+| # | Baseline | Que mide | Costo |
+|---|---|---|---|
+| B0 | **Golden Rubric** (upper bound) | Las rubricas humanas de medicos | $0 (ya disponible) |
+| B1 | **Zero-shot GPT-5.2** | Modelo frontier sin entrenar | <$5 |
+| B2 | **Zero-shot Qwen3-8B** (lower bound) | De donde partimos | ~$0 |
+| B3 | **Random rubric** | Sanity check | $0 |
+| B7 | **SFT Qwen3-8B** | Imitacion supervisada — RL es necesario o alcanza SFT? | ~$10 |
+
+**Baselines de transfer:**
+
+| # | Baseline | Que mide | Costo |
+|---|---|---|---|
+| B4 | **Format-only reward** | Functional alignment aporta vs solo formato? | ~$70 |
+| B5 | **Verifiable-only** (solo MedQA/MedMCQA) | Transfer verificable → abierto funciona? | ~$70 |
+| B6 | **Open-only** (solo HealthBench) | Curriculum ayuda vs entrenar directo? | ~$90 |
+
+**Referencia externa (si implementamos):**
+
+| # | Baseline | Que mide | Costo |
+|---|---|---|---|
+| B8 | **RLCER-style** (validity reward) | Nuestro metodo vs RLCER adaptado a abierto | ~$70 |
+| B9 | **DR-Tulu-style** (evolving rubrics) | Nuestro metodo vs evolucion sin entrenar generador | ~$90 |
 
 ### Comparaciones clave para el paper
 
-1. **Qwen-RL vs Qwen-base (B2)**: ¿El RL mejora? (debería ser obvio)
-2. **Qwen-RL vs Qwen-SFT (B7)**: ¿El RL supera a la imitación supervisada? (la más importante)
-3. **Qwen-RL vs Golden (B0)**: ¿Qué tan cerca estamos del humano?
-4. **Qwen-RL vs GPT-5.2 (B1)**: Si se acerca, claim fuerte sobre eficiencia del método
-5. **Verifiable-only (B5) vs Full system**: ¿El transfer funciona?
-6. **Format-only (B4) vs Full system**: ¿Functional alignment aporta?
+1. **Exp 1 — Rubric quality → Policy quality**: ¿Correlacion monotonica? (la contribucion principal)
+2. **Qwen-RL vs Qwen-SFT (B7)**: ¿RL supera a imitacion? (la mas importante del metodo)
+3. **Qwen-RL vs Golden (B0)**: ¿Que tan cerca de humanos?
+4. **Qwen-RL vs GPT-5.2 (B1)**: Si se acerca → claim de eficiencia 100x
+5. **Verifiable-only (B5) vs Full**: ¿Transfer funciona? ¿Alignment > 0 en HealthBench?
+6. **Curriculum vs Open-only (B6)**: ¿El curriculum aporta?
+7. **Generalizacion a FrontierScience**: ¿Funciona en ciencia sin reentrenar?
 
-### Ablations (removiendo componentes del sistema completo)
+### Ablations (removiendo componentes)
 
 | # | Ablation | Que mide | Como desactivar |
 |---|---|---|---|
-| A1 | **Sin contrastive excerpts** | Ayudan los best/worst answer excerpts en el prompt? | Flag en adapter: `use_contrastive=False` |
-| A2 | **Sin info_value** | Importa el bonus de discriminacion? | `lambda_info=0.0` en config |
-| A3 | **Sin defense_penalty** | Importa la penalidad de degeneracion? | `lambda_defense=0.0` en config |
-| A4 | **Sin curriculum** (flat 50/50) | Ayuda el shifting gradual vs proporcion fija? | `--phases 0.5:0.5:1.0` |
-| A5 | **Sin evolucion** (Phase 4) | Aporta la evolucion de rubricas durante training? | No activar evolution module |
+| A1 | **Sin contrastive excerpts** | Ayudan los best/worst answer excerpts? | `use_contrastive=False` |
+| A2 | **Sin info_value** | Importa el bonus de discriminacion? | `lambda_info=0.0` |
+| A3 | **Sin defense_penalty** | Importa la penalidad de degeneracion? | `lambda_defense=0.0` |
+| A4 | **Sin curriculum** (flat 50/50) | Ayuda el shifting gradual? | `--phases 0.5:0.5:1.0` |
 
 ### Cuando correr cada cosa
 
 | Grupo | Cuando | Requiere |
 |---|---|---|
-| B0 (golden), B1 (GPT-5.2), B3 (random) | Apenas tengamos el evaluador | Solo API, no GPU |
-| B2 (Qwen base) | Cuando tengamos GPU | GPU para inference |
-| B7 (SFT), B4 (format-only), B5 (verif-only), B6 (open-only) | Después del primer run exitoso | GPU + veRL |
-| A1-A5 (ablations) | Al final | GPU + sistema completo |
-
-Los baselines sin training se corren con un script evaluador: toma rúbricas → Judge evalúa answers → computa métricas. La infraestructura ya existe, solo falta el script que orquesta.
+| B0, B1, B3 (zero-cost rubric eval) | Primero — establece rangos de referencia | Solo API |
+| B2, B7 (Qwen base + SFT) | Con GPU | GPU |
+| B4-B6 (ablations de metodo) | Despues del primer run exitoso | GPU + veRL |
+| B8-B9 (baselines externos) | Si hay tiempo/presupuesto | GPU + veRL |
+| Exp 1 (policy training) | Despues de tener rubricas de cada metodo | GPU + veRL (multiples runs) |
 
 ### Metricas de evaluacion
 
-Todos evaluados en el mismo held-out de FrontierScience:
+### Metricas de evaluacion
+
+**Para Exp 2 (rubric quality)** — evaluados en held-out de HealthBench (~500 preguntas):
 
 | Metrica | Que captura | Rango |
 |---|---|---|
 | **Alignment (Spearman)** | Metrica principal: la rubrica rankea answers como la golden? | [-1, 1], higher=better |
 | **Discrimination (std of scores)** | La rubrica diferencia calidad? | [0, ∞), higher=better |
-| **Format validity** | Fraccion con formato correcto `Points: X, Item: Y` | [0, 1], higher=better |
+| **Format validity** | Fraccion con formato correcto | [0, 1], higher=better |
 | **Info value** | Promedio 4*p*(1-p) — criterios no-triviales? | [0, 1], higher=better |
 
-**Held-out split:** De las 60 preguntas FrontierScience, reservar ~12 (20%) como held-out.
-Las otras 48 se usan en training. Todos los baselines y ablations se evaluan en las mismas 12.
+**Para Exp 1 (policy quality)** — evaluados en HealthBench held-out con rubricas humanas:
 
-### Definicion de exito
+| Metrica | Que captura |
+|---|---|
+| **HealthBench Score** | Score agregado de la policy en HealthBench (como lo mide el benchmark original) |
+| **Per-axis scores** | Accuracy, Completeness, Context awareness, Communication, Instruction following |
 
-1. **Minimo**: Qwen-RL supera a Qwen-base (B2) en alignment score → el RL aporta.
-2. **Bueno**: Qwen-RL supera a Qwen-SFT (B7) → RL + functional alignment > imitacion supervisada.
-3. **Muy bueno**: Qwen-RL supera a format-only (B4) → functional alignment es necesario.
-4. **Excelente**: Qwen-RL se acerca a Golden (B0) → rúbricas generadas ≈ humanas.
-5. **Bonus**: Qwen-RL se acerca a GPT-5.2 (B1) → 8B entrenado ≈ modelo frontier en calidad de rúbricas.
-6. **Transfer**: Verifiable-only (B5) obtiene alignment > 0 en FrontierScience → la habilidad es transferible.
+**Held-out splits:**
+- HealthBench: ~500 preguntas (10%) como held-out, ~4500 para training
+- FrontierScience: ~12 preguntas (20%) como held-out, ~48 para training
 
-### Tabla de resultados (a completar)
+### Tablas de resultados (a completar)
 
-| Variante | Alignment ↑ | Discrimination ↑ | Format ↑ | Info Value ↑ | Costo |
-|---|---|---|---|---|---|
-| B0: Golden Rubric | ~0.85-0.94* | ? | 1.0 | ? | $0 |
-| B1: Zero-shot GPT-5.2 | ? | ? | ? | ? | <$1 |
-| B2: Zero-shot Qwen3-8B | ? | ? | ? | ? | ~$0 |
-| B3: Random Rubric | ~0.0 | ? | 0.0 | ? | $0 |
-| B4: Format-only reward | ? | ? | ? | ? | ~$70 |
-| B5: Verifiable-only | ? | ? | ? | ? | ~$70 |
-| B6: Open-only | ? | ? | ? | ? | ~$90 |
-| B7: SFT Qwen3-8B | ? | ? | ? | ? | ~$10 |
-| **Qwen-RL (full system)** | ? | ? | ? | ? | ~$90 |
-| A1-A5: Ablations | ? | ? | ? | ? | ~$90 c/u |
+**Tabla 1 — Rubric Quality (Exp 2):**
 
-*B0 alignment es ~0.85-0.94 porque el Judge tiene ruido (temperature=1). Con promedio N=3 se estabiliza.
+| Variante | Alignment ↑ | Discrimination ↑ | Format ↑ | Info Value ↑ |
+|---|---|---|---|---|
+| B0: Golden Rubric (medicos) | ~0.85-0.94 | ? | 1.0 | ? |
+| B1: Zero-shot GPT-5.2 | ? | ? | ? | ? |
+| B2: Zero-shot Qwen3-8B | ? | ? | ? | ? |
+| B3: Random Rubric | ~0.0 | ? | 0.0 | ? |
+| B7: SFT Qwen3-8B | ? | ? | ? | ? |
+| B5: Verifiable-only | ? | ? | ? | ? |
+| B6: Open-only | ? | ? | ? | ? |
+| **Qwen-RL (full system)** | **?** | **?** | **?** | **?** |
+
+**Tabla 2 — Rubric Quality → Policy Quality (Exp 1, EL MAS IMPORTANTE):**
+
+| Rubrica usada como reward | Rubric Alignment ↑ | Policy HB Score ↑ |
+|---|---|---|
+| P5: Random | ~0.0 | ? |
+| P4: Zero-shot Qwen-8B | ? | ? |
+| P3: Zero-shot GPT-5.2 | ? | ? |
+| P2: SFT-trained | ? | ? |
+| P1: RL-trained (ours) | ? | ? |
+| P0: Human (HealthBench) | ~0.85 | ? |
+
+**Tabla 3 — Generalizacion a FrontierScience (sin reentrenar):**
+
+| Variante | Alignment en FrontierScience ↑ |
+|---|---|
+| B0: Golden | ~0.85 |
+| Qwen-RL (trained on HB) | ? |
+| B2: Zero-shot Qwen-8B | ? |
 
 ---
 
@@ -1255,7 +1388,7 @@ az ml job stream --name <job-id> \
 
 ### Rubricas como reward (no entrenan el generador)
 
-- **RaR** (Gunjal et al., 2025): Rubrics as Rewards — rubric-based feedback outperforms Likert LLM-as-judge, +31% en HealthBench. [arXiv:2507.17746](https://arxiv.org/abs/2507.17746)
+- **RaR** (Gunjal et al., Scale AI, 2025): Rubrics as Rewards — rubric-based feedback outperforms Likert LLM-as-judge, +31% en HealthBench. [arXiv:2507.17746](https://arxiv.org/abs/2507.17746)
 - **Training AI Co-Scientists Using Rubric Rewards** (Goel, Hazra et al., Meta, 2025): Extraccion automatica de rubricas de papers cientificos, 84% validadas por expertos. [arXiv:2512.23707](https://arxiv.org/abs/2512.23707)
 - **RURA/Rubicon** (Huang et al., 2025): RL with Rubric Anchors — 10K+ rubrics de humanos y LLMs, +5.2% en open-ended benchmarks. [arXiv:2508.12790](https://arxiv.org/abs/2508.12790)
 - **Self-Rewarding Rubric-Based RL** (Ye et al., 2025): Policy = judge, self-rewarding loop con rubricas de HealthBench. Supera GPT-5 en HealthBench Hard. [arXiv:2509.25534](https://arxiv.org/abs/2509.25534)
