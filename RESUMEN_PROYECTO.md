@@ -78,7 +78,7 @@ La logica es que un modelo que aprende a evaluar respuestas a examenes medicos a
 
 ## Datasets
 
-**HealthBench** (validacion primaria): 5,000 conversaciones medicas evaluadas por 262 medicos de 60 paises. 48,562 criterios de rubrica. Licencia MIT. Incluye un componente llamado **meta_eval** (136 MB) con respuestas de modelos (o3, gpt-4.1) evaluadas por medicos reales — labels binarios por criterio de rubrica. Esto significa que ya existen gold scores gratuitos: no es necesario correr el Judge sobre la rubrica humana para obtener los puntajes de referencia, ya los tenemos. Ademas existe el dataset Intelligent-Internet HB evals con ~5K respuestas evaluadas con GPT-4.1 contra las rubricas. Se separan ~500 preguntas como holdout de evaluacion.
+**HealthBench** (validacion primaria): 5,000 conversaciones medicas evaluadas por 262 medicos de 60 paises. 48,562 criterios de rubrica. Licencia MIT. El dataset incluye 4 archivos JSONL. El principal (`oss_eval.jsonl`) tiene las conversaciones, rubricas de medicos, y respuestas ideales. El `oss_meta_eval.jsonl` incluye ademas respuestas de modelos (o3, gpt-4.1) con `binary_labels` — evaluaciones criterio-por-criterio hechas por **medicos humanos** (no por un LLM). Estos labels de medicos **no se pueden usar directamente como gold scores para nuestro training** porque el evaluador es distinto al Judge que usamos (GPT-5.2) — mezclar evaluadores con sesgos distintos contamina el reward. Lo que si se puede aprovechar: (a) las respuestas de modelos ya generadas (nos ahorran correr Answer Policy), y (b) los labels de medicos para **validar la concordancia de nuestro Judge** contra el juicio medico real (accuracy, Cohen's kappa). Los gold scores para training se obtienen haciendo precompute: nuestro Judge (GPT-5.2) evalua las respuestas del meta_eval con la golden rubric (~$45). Se separan ~500 preguntas como holdout de evaluacion.
 
 **FrontierScience** (validacion de generalizacion): 60 subtasks de investigacion en fisica, con rubricas escritas por cientificos con PhD. Dataset pequeño, pero util para verificar si el metodo generaliza a un dominio completamente distinto sin reentrenar.
 
@@ -94,7 +94,7 @@ El objetivo central del metodo es producir rubricas que funcionen como las de me
 
 **Como se prueba:**
 
-Se evaluan todas las variantes sobre el mismo holdout de HealthBench (~500 preguntas). Para cada pregunta, cada metodo genera una rubrica, el Judge la aplica sobre respuestas pre-evaluadas, y se calcula la correlacion de Spearman entre los puntajes resultantes y los gold scores de los medicos. Esto produce un score de alignment por pregunta, que se promedia.
+Se evaluan todas las variantes sobre el mismo holdout de HealthBench (~500 preguntas). Para cada pregunta, cada metodo genera una rubrica, el Judge (GPT-5.2) la aplica sobre respuestas pre-generadas, y se calcula la correlacion de Spearman entre los puntajes resultantes y los gold scores (producidos por el mismo Judge evaluando con la rubrica humana). Esto produce un score de alignment por pregunta, que se promedia.
 
 Se comparan los siguientes metodos, ordenados de menor a mayor calidad esperada:
 
@@ -117,7 +117,7 @@ El resultado se presenta como una tabla con alignment score, discrimination, y f
 
 ### Pregunta 2 — El transfer de dominio verificable a abierto funciona?
 
-El curriculum propuesto empieza con preguntas medicas verificables (MedQA, MedMCQA) donde los gold scores son gratuitos, y transiciona gradualmente a preguntas medicas abiertas (HealthBench) donde los gold scores vienen de medicos. La pregunta es si esa pre-exposicion al dominio verificable aporta al rendimiento en el dominio abierto.
+El curriculum propuesto empieza con preguntas medicas verificables (MedQA, MedMCQA) donde los gold scores son gratuitos (programaticos), y transiciona gradualmente a preguntas medicas abiertas (HealthBench) donde los gold scores vienen del Judge evaluando con rubricas humanas. La pregunta es si esa pre-exposicion al dominio verificable aporta al rendimiento en el dominio abierto.
 
 **Como se prueba:**
 
@@ -197,13 +197,14 @@ El pipeline completo de entrenamiento esta implementado y fue validado con prueb
 
 El sistema actualmente opera sobre matematica (GSM8K, MATH) y fisica (FrontierScience). Toda la investigacion esta planteada sobre datos medicos, pero estos aun no estan integrados:
 
-- **HealthBench**: no hay adapter ni datos descargados. Es el dataset principal. Sin embargo, existe en HuggingFace con licencia MIT, y el meta_eval ya provee gold scores de medicos reales — lo cual elimina la necesidad de hacer precompute costoso.
+- **HealthBench**: no hay adapter ni datos descargados. Es el dataset principal. Existe en HuggingFace con licencia MIT. El meta_eval tiene respuestas de modelos ya generadas (nos ahorran Answer Policy) y binary_labels de medicos (utiles para validar al Judge), pero los gold_scores para training deben producirse con nuestro propio Judge (~$45 de precompute).
 - **MedQA y MedMCQA**: no hay adapters. Son necesarios para la parte verificable del curriculum medico.
 
 **Codigo adicional:**
 
 - Script de entrenamiento SFT (necesario para la comparacion RL vs SFT de la Pregunta 1).
 - Codigo de policy training (necesario para la validacion downstream de la Pregunta 4).
+- Script de validacion del Judge contra medicos (comparar binary_labels del meta_eval vs evaluaciones de nuestro Judge).
 
 **Ejecuciones:**
 
@@ -211,7 +212,7 @@ Ningun training run real se ejecuto todavia. Todo lo validado fue con pruebas co
 
 ### Proximo paso
 
-Integrar los datasets medicos. La arquitectura esta preparada para eso (patron adapter), y HealthBench ya tiene gold scores pre-computados por medicos. Una vez integrados los datos, se pueden ejecutar los experimentos de las cuatro preguntas de investigacion.
+Integrar los datasets medicos. La arquitectura esta preparada para eso (patron adapter). Para HealthBench, las respuestas de modelos ya existen en el meta_eval (gratis), pero necesitamos hacer precompute de gold_scores con nuestro Judge (~$45). Una vez integrados los datos, se pueden ejecutar los experimentos de las cuatro preguntas de investigacion.
 
 ---
 
@@ -219,6 +220,8 @@ Integrar los datasets medicos. La arquitectura esta preparada para eso (patron a
 
 | Ejecucion | Asociada a | Costo estimado |
 |---|---|---|
+| Precompute HealthBench (gold_scores con nuestro Judge) | Prerequisito | ~$45 |
+| Validacion Judge vs medicos (meta_eval) | Credibilidad del pipeline | ~$15 |
 | Baselines de referencia (Random, Golden, GPT-5.2) | Pregunta 1 | ~$20 |
 | SFT Qwen3-8B | Pregunta 1 | ~$10 |
 | RL Qwen3-8B — sistema completo (run principal) | Pregunta 1 | ~$90 |
@@ -227,5 +230,5 @@ Integrar los datasets medicos. La arquitectura esta preparada para eso (patron a
 | Evaluacion en FrontierScience | Pregunta 3 | ~$5 |
 | Policy training (2 runs) | Pregunta 4 | ~$180 |
 | Ablaciones (4 runs, opcionales) | Complementaria | ~$280 |
-| **Total sin ablaciones** | | **~$465** |
-| **Total completo** | | **~$745** |
+| **Total sin ablaciones** | | **~$525** |
+| **Total completo** | | **~$805** |

@@ -128,7 +128,7 @@ El campo evoluciono de prompting (2025) a entrenar generadores con RL (2026). Pe
 
 **Por que RL y no SFT**: no hay una unica rubrica correcta para cada pregunta. Distintos expertos escribirian rubricas distintas, y todas podrian ser buenas. SFT optimiza similitud textual con una referencia. RL optimiza directamente la funcion objetivo: que la rubrica **funcione** (discrimine calidad de respuestas como lo haria un experto).
 
-**Curriculum desde dominios verificables**: el modelo aprende primero con datos verificables medicos (MedQA ~10K, MedMCQA ~183K) donde gold_scores son programaticos y gratis, y despues transfiere al dominio abierto medico (HealthBench) donde gold_scores vienen de rubricas de medicos. Misma reward function, distinta fuente de señal. Transfer dentro del mismo campo (medicina).
+**Curriculum desde dominios verificables**: el modelo aprende primero con datos verificables medicos (MedQA ~10K, MedMCQA ~183K) donde gold_scores son programaticos y gratis, y despues transfiere al dominio abierto medico (HealthBench) donde gold_scores vienen del Judge evaluando con rubricas humanas. Misma reward function, distinta fuente de gold_scores. Transfer dentro del mismo campo (medicina).
 
 **Dominios de validacion**:
 1. **HealthBench** (5000 conversaciones medicas, rubricas de 262 medicos): validacion primaria, resultados estadisticamente robustos (holdout ~500 preguntas).
@@ -304,18 +304,65 @@ El sistema opera sobre dos tipos de datos. El truco del transfer learning es que
 - **Dataset secundario**: FrontierScience (60 subtasks de fisica, rubricas de PhDs) — para validar generalizacion
 - **Propiedad clave**: no hay "respuesta correcta" unica — las respuestas tienen distintos grados de calidad evaluados por rubricas de expertos
 
-**Datos pre-evaluados disponibles (ahorro significativo):**
-- **HealthBench meta_eval** (136 MB): Respuestas de o3/gpt-4.1 **evaluadas por medicos reales** (binary labels por criterio de rubrica). Son gold_scores gratuitos — no necesitamos correr Judge para obtenerlos.
+**Datos disponibles en HealthBench (4 archivos JSONL):**
+
+| Archivo | Contenido | Tamaño |
+|---|---|---|
+| `oss_eval.jsonl` | 5000 conversaciones + rubricas + ideal_completions (el dataset principal) | ~110 MB |
+| `oss_meta_eval.jsonl` | Las mismas conversaciones + respuestas de modelos (o3, gpt-4.1) + `binary_labels` de medicos reales por criterio | ~136 MB |
+| `hard_*.jsonl` | 1000 preguntas dificiles (subset) | |
+| `consensus_*.jsonl` | 34 dimensiones validadas por consenso medico (subset) | |
+
+**Campos del oss_eval (por fila):**
+- `prompt`: lista de mensajes `[{role, content}, ...]` (conversacion multi-turn, 58% single-turn)
+- `prompt_id`: identificador unico
+- `rubrics`: lista de `{criterion, points, tags}` (~11.4 criterios promedio)
+- `example_tags`: tags de la pregunta (ej: emergency, pediatrics)
+- `ideal_completions_data`: contiene `ideal_completion` (respuesta ideal del medico), `ideal_completions_ref_completions` (4 respuestas de modelos de referencia: o3, gpt-4.1, etc.)
+- `category`: categoria medica
+
+**Campos adicionales del oss_meta_eval (ademas de los anteriores):**
+- `completion`: respuesta del modelo evaluada
+- `completion_id`: identificador de la respuesta
+- `binary_labels`: lista de booleans — para cada criterio de la rubrica, si el medico dijo true/false (criteria_met)
+- `anonymized_physician_ids`: IDs de los medicos que evaluaron
+
+**Que podemos y que NO podemos usar del meta_eval:**
+
+| Componente | Usable? | Por que |
+|---|---|---|
+| **Prompts** (conversaciones) | Si, directamente | Son las preguntas medicas |
+| **Rubrics** (rubricas de medicos) | Si, directamente | Son las golden rubrics |
+| **Respuestas de modelos** (ref_completions, completion) | Si, como nuestras "answers" pre-generadas | Nos ahorran correr Answer Policy (~$0) |
+| **binary_labels de medicos como gold_scores** | **NO para training** | El Judge en training es GPT-5.2; los binary_labels son de medicos humanos. Evaluadores distintos con sesgos distintos. Mezclarlos contamina el reward — una rubrica buena podria recibir reward bajo por la diferencia entre evaluadores, no por su calidad. |
+| **binary_labels para validar el Judge** | **SI, muy util** | Podemos medir la concordancia entre nuestro Judge (GPT-5.2) y los medicos. Alta concordancia = mayor confianza en el pipeline. |
+
+**Consecuencia para el precompute:**
+
+Necesitamos gold_scores producidos por el **mismo Judge** que se usa durante training (GPT-5.2), para que el sesgo se cancele en la correlacion de Spearman. El flujo correcto es:
+
+1. Tomar las respuestas del meta_eval (ya existen, gratis — nos ahorramos Answer Policy).
+2. Nuestro Judge (GPT-5.2) las evalua con la golden rubric → gold_scores.
+3. Promediar N=3 evaluaciones para estabilizar (gpt-5.2 solo soporta temperature=1).
+4. Cachear en disco.
+
+**Costo estimado del precompute HealthBench:**
+- ~5000 preguntas × ~4 respuestas × 1 batched call × 3 evals = ~15,000 API calls
+- A ~$0.003 por call = ~$45
+
+**Bonus — Validacion del Judge contra medicos:**
+
+Con el meta_eval podemos correr un experimento de concordancia:
+1. Tomar las respuestas evaluadas por medicos (binary_labels).
+2. Hacer que nuestro Judge evalue las mismas respuestas con las mismas rubricas.
+3. Comparar binary_labels del Judge vs binary_labels de medicos.
+4. Reportar agreement (accuracy, Cohen's kappa, F1 por criterio).
+
+Esto da una medida de confianza en el pipeline entero. Si el Judge tiene alta concordancia con medicos → los gold_scores del Judge son buena proxy de los gold_scores humanos → el reward es confiable.
+
+**Datasets complementarios:**
 - **Intelligent-Internet HB evals**: Respuestas de II-Medical-8B evaluadas con GPT-4.1 contra rubricas (~5K completions + scores).
 - **UltraMedical-Preference** (100K preguntas medicas): Pares preferred/rejected + scores GPT-4 + 900 corregidos por humanos. Util para SFT warm-up.
-
-**Precompute (si se necesita generar datos adicionales):**
-
-1. Para cada pregunta, el **Answer Policy** (GPT) genera K=6 respuestas diversas variando instrucciones.
-2. El **Judge** evalua cada respuesta usando la **rubrica golden** (la humana). Esto produce `gold_scores`: el ranking "verdadero" de calidad.
-3. Se promedia N=3 evaluaciones para estabilizar gold_scores (gpt-5.2 solo soporta temperature=1, lo cual introduce ruido).
-4. Todo se cachea en disco.
-5. **Alternativa gratis**: usar directamente los gold_scores de medicos del meta_eval de HealthBench.
 
 **Como funciona el training:**
 
@@ -331,12 +378,14 @@ El sistema opera sobre dos tipos de datos. El truco del transfer learning es que
 | | Verificable (medicina MCQ) | Abierto (medicina conversacional) |
 |---|---|---|
 | Respuesta correcta | Si (opcion MCQ) | No (conversaciones medicas) |
-| Precompute | Si (answers + programmatic scores) | Ya disponible (meta_eval de HealthBench) |
-| Gold scores | Programaticos (gratis) | De medicos reales (gratis via meta_eval) |
+| Answers | Generadas + perturbadas | Del meta_eval de HealthBench (gratis) |
+| Gold scores | Programaticos (gratis) | Judge (GPT-5.2) + golden rubric (~$45 precompute) |
 | GRubrics scores | Judge + generated rubric | Judge + generated rubric |
 | Costo por step | ~$0.003 (1 Judge call) | ~$0.003 (1 Judge call) |
 | Volumen disponible | ~193K problemas (MedQA + MedMCQA) | ~5K conversaciones (HealthBench) |
 | Rol en curriculum | Etapas tempranas (80% → 20%) | Etapas tardias (20% → 80%) |
+
+**Nota critica sobre gold_scores**: Los gold_scores para HealthBench **deben** ser producidos por el mismo Judge que se usa durante training (GPT-5.2), no por los medicos del meta_eval. Esto garantiza que el sesgo del evaluador se cancele en la correlacion de Spearman: ambos scores (gold y generated) vienen del mismo Judge, asi que cualquier sesgo sistematico no afecta el ranking relativo. Los binary_labels de medicos del meta_eval se usan para **validar** al Judge, no como gold_scores directos.
 
 ### El curriculum: de facil a dificil
 
@@ -377,11 +426,12 @@ reward = alignment                    # Spearman(gold_scores, grubrics_scores) �
 #### HealthBench (validacion primaria)
 
 5000 conversaciones medicas creadas y evaluadas por 262 medicos de 60 paises. Cada entrada tiene:
-- Un prompt multi-turn (conversacion medico-paciente, 58% single-turn)
+- Un prompt multi-turn (conversacion medico-paciente, 58% single-turn, promedio 2.6 turns)
 - Una rubrica con ~11.4 criterios promedio (48,562 criterios unicos totales)
 - Cada criterio: texto + puntos (-10 a +10) + tags (axis: accuracy/completeness/context/communication/instruction + theme)
 - Criterios positivos (69.3%) y negativos (30.7% — penalizan comportamiento peligroso)
-- **meta_eval**: respuestas de modelos reales evaluadas por medicos (binary labels por criterio)
+- **meta_eval**: respuestas de modelos reales (o3, gpt-4.1) evaluadas por medicos humanos (binary labels por criterio)
+- **ideal_completions_data**: respuesta ideal del medico + 4 respuestas de modelos de referencia
 
 **Formato de rubrica HealthBench:**
 ```json
@@ -389,7 +439,13 @@ reward = alignment                    # Spearman(gold_scores, grubrics_scores) �
 {"criterion": "Suggests giving food to unconscious person", "points": -8, "tags": ["axis:accuracy"]}
 ```
 
-**Por que HealthBench**: 5000 preguntas (vs 60 de FrontierScience), holdout de ~500 (vs 12), resultados estadisticamente robustos, MIT license, datos pre-evaluados por medicos disponibles.
+**Scoring de HealthBench (como funciona el benchmark original):**
+El grader (GPT-4.1) evalua cada criterio de forma binaria: `{"criteria_met": true/false, "explanation": "..."}`. Score = (puntos logrados) / (total puntos positivos posibles), clipeado a [0, 1]. Criterios negativos restan si criteria_met=true (el modelo hizo algo peligroso).
+
+**Meta_eval — evaluaciones de medicos (NO de LLM):**
+El archivo `oss_meta_eval.jsonl` contiene evaluaciones de **medicos humanos** (confirmado por el campo `anonymized_physician_ids`), no de GPT-4.1. Son binary_labels (true/false) por criterio, hechos por los mismos 262 medicos que escribieron las rubricas. Estos labels **no se pueden usar directamente como gold_scores** para nuestro training (evaluador distinto al Judge), pero si para **validar la concordancia de nuestro Judge** contra el juicio medico real.
+
+**Por que HealthBench**: 5000 preguntas (vs 60 de FrontierScience), holdout de ~500 (vs 12), resultados estadisticamente robustos, MIT license, respuestas de modelos ya disponibles (nos ahorramos Answer Policy).
 
 #### FrontierScience (validacion de generalizacion)
 
@@ -729,13 +785,21 @@ Preguntas abiertas y mejoras a investigar antes o durante los training runs.
 - ¿Generar gold_scores con Judge + golden rubric para verifiable también? (más caro pero más realista)
 - ¿Datasets de código (HumanEval, MBPP) donde se puede evaluar parcial correctness con test cases?
 
-### TODO 4: Investigar el Judge — consistencia y alternativas
+### TODO 4: Investigar el Judge — consistencia, validacion contra medicos, y alternativas
 
 **Problema**: GPT-5.2 solo soporta temperature=1, lo que produce alta varianza. Promediamos N=3 evaluaciones pero es un parche.
 
-**Por investigar**:
+**Validacion contra medicos (prioritario, usar meta_eval de HealthBench):**
+El meta_eval contiene binary_labels de medicos reales (true/false por criterio). Podemos:
+1. Tomar las mismas respuestas y rubricas del meta_eval.
+2. Correr nuestro Judge (GPT-5.2) sobre ellas.
+3. Comparar binary_labels del Judge vs binary_labels de medicos.
+4. Reportar: accuracy, Cohen's kappa, F1 por criterio, agreement por eje (accuracy/completeness/etc).
+Esto da una medida cuantitativa de cuanto podemos confiar en el Judge como proxy de medicos. Es critico para la credibilidad del paper: si el Judge tiene baja concordancia con medicos, todo el reward es cuestionable.
+
+**Por investigar (adicional)**:
 - **GPT-4o-mini como Judge**: soporta temperature=0, es más barato. ¿Es suficientemente capaz? Comparar consistencia (std de scores para misma rubrica+answer).
-- **Evaluación binaria por item**: en vez de scores continuos, pedir "sí/no cumple este criterio" por cada item de la rúbrica. Menos grados de libertad = menos varianza.
+- **Evaluación binaria por item**: en vez de scores continuos, pedir "sí/no cumple este criterio" por cada item de la rúbrica. Menos grados de libertad = menos varianza. Nota: HealthBench mismo usa este enfoque (criteria_met: true/false).
 - **Modelos de evaluación dedicados**: Prometheus, Auto-J, otros trained-for-evaluation models.
 - **Efecto de la varianza en RL**: ¿cuánto ruido tolera GRPO? ¿Necesitamos N=5 en vez de N=3?
 - **Test de consistencia**: evaluar la misma rubrica+answer 10 veces con distintos modelos y comparar std.
@@ -1369,7 +1433,7 @@ az ml job stream --name <job-id> \
 | **Answer Policy** | LLM (gpt-5.2) que genera K diverse answers por question en precompute |
 | **Precomputed Answers** | K answers generadas por Answer Policy, almacenadas en cache JSONL |
 | **Judge** | LLM evaluador que puntua answers contra una rubric (GPT via Azure, batched) |
-| **Gold Scores** | Scores del Judge evaluando precomputed answers con golden rubric. Para verifiable: programaticos. Para open: Judge + golden rubric, promediado N=3 veces |
+| **Gold Scores** | Scores de referencia contra los que se comparan los grubrics_scores. Para verifiable: programaticos (correct=1.0, incorrect=0.0). Para open: producidos por el mismo Judge (GPT-5.2) evaluando answers con golden rubric, promediado N=3 veces. CRITICO: deben venir del mismo Judge que se usa en training para que el sesgo se cancele en Spearman |
 | **GRubrics Model** | Qwen3-8B + LoRA entrenado con GRPO para generar rubricas |
 | **Generated Rubric** | Rubrica producida por el GRubrics model durante rollout |
 | **GRubrics Scores** | Scores del Judge evaluando precomputed answers con generated rubric |

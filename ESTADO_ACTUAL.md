@@ -134,13 +134,34 @@ RESEARCH.md describe HealthBench (5000 conversaciones medicas, 48,562 criterios 
 - La evaluacion solo funciona sobre FrontierScience (60 preguntas)
 - El `scripts/run_baselines.py` solo evalua en FrontierScience
 
-**Que falta:**
+**Que hay disponible en HealthBench (HuggingFace `openai/healthbench`, MIT license):**
+
+4 archivos JSONL:
+- `oss_eval.jsonl`: 5000 conversaciones + rubricas de medicos + ideal_completions_data (respuestas de referencia)
+- `oss_meta_eval.jsonl`: las mismas conversaciones + respuestas de modelos (o3, gpt-4.1) + `binary_labels` de medicos humanos por criterio + `anonymized_physician_ids`
+- `hard_*.jsonl`: 1000 preguntas dificiles
+- `consensus_*.jsonl`: 34 dimensiones de consenso
+
+**Clarificacion critica sobre el meta_eval:**
+
+Los `binary_labels` del meta_eval son evaluaciones de **medicos humanos** (no de un Judge LLM). Esto tiene dos implicaciones:
+
+1. **NO se pueden usar como gold_scores para training**: Nuestro Judge es GPT-5.2. Mezclar gold_scores de medicos con grubrics_scores de GPT-5.2 contamina el reward (evaluadores con sesgos distintos). Los gold_scores deben venir del **mismo Judge** que se usa en training.
+
+2. **SI se pueden usar para validar al Judge**: Comparar las evaluaciones de nuestro Judge contra las de los medicos da una medida cuantitativa de concordancia (accuracy, Cohen's kappa). Esto es critico para la credibilidad del paper.
+
+**Lo que SI se puede aprovechar gratis del meta_eval:**
+- Las **respuestas de modelos** (completion, ref_completions): ya existen, nos ahorran correr Answer Policy.
+- Los **prompts y rubricas**: directamente usables.
+
+**Que falta implementar:**
 
 - Descargar HealthBench desde HuggingFace (`openai/healthbench`)
 - Crear `HealthBenchAdapter` siguiendo el patron DatasetAdapter
-- Integrar el meta_eval (respuestas pre-evaluadas por medicos = gold_scores gratis)
+- Precompute: tomar respuestas del meta_eval, evaluarlas con nuestro Judge (GPT-5.2) + golden rubric → gold_scores (~$45)
 - Crear holdout split (~500 preguntas test, ~4500 train)
 - Extender `run_baselines.py` para evaluar en HealthBench
+- (Bonus) Script de validacion del Judge: comparar binary_labels de medicos vs Judge
 
 ### GAP 2: MedQA / MedMCQA — CURRICULUM VERIFICABLE NO IMPLEMENTADO
 
@@ -211,6 +232,7 @@ El Experimento 1 ("rubric quality → policy quality") requiere entrenar una pol
 | "Transfer dentro del mismo campo (medicina)" | Transfer actual: matematica (GSM8K/MATH) → fisica (FrontierScience) |
 | "Datasets primarios: MedQA-USMLE, MedMCQA"   | Solo GSM8K y MATH implementados                                     |
 | "HealthBench (5000 conversaciones medicas)"  | No integrado                                                        |
+| ~~"gold_scores gratis via meta_eval"~~       | **CORREGIDO**: gold_scores del meta_eval son de medicos, no del Judge. NO usables como gold_scores para training. Se necesita precompute con nuestro Judge (~$45). El meta_eval SI sirve para: (a) respuestas pre-generadas gratis, (b) validar concordancia Judge vs medicos. |
 | "B7: SFT — script separado"                  | No existe                                                           |
 | "Experiment 1: policy training"              | No existe                                                           |
 
