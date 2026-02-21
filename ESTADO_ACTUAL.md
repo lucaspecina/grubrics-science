@@ -204,75 +204,85 @@ Ningun training run real se ejecuto todavia. Todo lo validado fue con pruebas co
 
 ## 5. Preguntas de investigacion y como se prueban
 
-### Pregunta 1 — Functional alignment genera rubricas que se acercan a las humanas?
+Las preguntas se organizan en 3 niveles. El Nivel 1 es la contribucion principal. El Nivel 2 es el metodo que la habilita. El Nivel 3 valida la senal de reward.
 
-El objetivo central del metodo es producir rubricas que funcionen como las de medicos, sin copiarlas textualmente.
+### NIVEL 1 — Rubric quality → Policy quality (EL MAS IMPORTANTE)
 
-**Como se prueba:**
+**Pregunta:** La calidad de las rubricas usadas como reward impacta directamente la calidad de la policy entrenada?
 
-Se evaluan todas las variantes sobre el mismo holdout de HealthBench (~500 preguntas). Para cada pregunta, cada metodo genera una rubrica, el Judge (GPT-5.2) la aplica sobre respuestas pre-generadas, y se calcula la correlacion de Spearman entre los puntajes resultantes y los gold scores. Se comparan:
+Todos los papers del campo (RaR/Scale AI, Rubric Anchors, RIFL) asumen que mejores rubricas = mejor policy. Nadie lo aislo experimentalmente. Nosotros fijamos todo (modelo base, GRPO, datos, Judge) y cambiamos SOLO la rubrica usada como reward.
 
-
-| Variante | Que es | Que mide |
-|---|---|---|
-| **Random** | Rubrica generada al azar | Piso. Si algo no supera esto, no funciona. |
-| **Zero-shot Qwen3-8B** | El modelo base sin entrenar | Punto de partida. |
-| **SFT Qwen3-8B** | Modelo entrenado por imitacion supervisada | RL es necesario o alcanza copiar? |
-| **RL Qwen3-8B (nuestro metodo)** | Modelo entrenado con GRPO + functional alignment | Nuestro sistema. |
-| **Zero-shot GPT-5.2** | Modelo frontier, sin entrenar | Si nuestro 8B se acerca, hay argumento de eficiencia. |
-| **Golden (medicos)** | Rubricas humanas de HealthBench | Techo. |
-
-
-**Runs necesarios:**
-- Baselines sin entrenamiento (Random, Golden, GPT-5.2): solo API, ~$20.
-- Zero-shot Qwen3-8B: inferencia local, ~$0.
-- SFT Qwen3-8B: entrenamiento con transformers Trainer, ~$10.
-- RL Qwen3-8B (sistema completo con curriculum): run principal, ~$90.
-
-### Pregunta 2 — El transfer de dominio verificable a abierto funciona?
-
-El curriculum empieza con preguntas medicas verificables (MedQA, MedMCQA) y transiciona a preguntas abiertas (HealthBench).
-
-**Como se prueba:**
-
-
-| Variante | Datos de entrenamiento | Que mide |
-|---|---|---|
-| **Verifiable-only** | Solo MedQA/MedMCQA (0% HealthBench) | Hay transfer? Si alignment > 0 en HealthBench, si. |
-| **Open-only** | Solo HealthBench (0% verificable) | Que pasa sin curriculum? |
-| **Curriculum (nuestro metodo)** | Mezcla gradual 80/20 → 50/50 → 20/80 | El curriculum aporta vs entrenar directo? |
-
-
-**Runs necesarios:** Verifiable-only (~$70), Open-only (~$90), Curriculum (ya contado en P1).
-
-### Pregunta 3 — El metodo generaliza a otro dominio (ciencia)?
-
-El modelo se entrena exclusivamente con datos medicos. Se evalua directamente sobre FrontierScience (~12 preguntas de fisica) sin reentrenar.
-
-**Costo:** Solo inferencia y evaluacion con API del Judge. ~$5.
-
-### Pregunta 4 — Mejores rubricas producen mejores modelos? (exploratoria)
-
-Se entrenan dos policies de respuestas medicas. Todo identico excepto la fuente de rubricas como reward:
-
+**Como se prueba:** Entrenar N policies identicas, cada una con rubricas de distinta calidad. Evaluar todas en HealthBench held-out con rubricas humanas (HealthBench Score).
 
 | Policy | Rubrica como reward | Que representa |
 |---|---|---|
-| **Policy A** | Rubricas humanas de HealthBench | Upper bound |
-| **Policy B** | Rubricas de nuestro modelo RL | Nuestro metodo |
+| P0 | Rubricas humanas (HealthBench) | Upper bound — las mejores posibles |
+| P1 | Rubricas de nuestro modelo RL (GRubrics) | Nuestro metodo |
+| P2 | Rubricas SFT Qwen3-8B | Imitacion supervisada |
+| P3 | Rubricas zero-shot GPT-5.2 | Modelo frontier sin entrenar |
+| P4 | Rubricas zero-shot Qwen3-8B | Modelo chico sin entrenar |
+| P5 | Rubricas random | Lower bound / sanity check |
 
+**Resultado esperado:** Correlacion monotonica P0 > P1 > P2 > P3 > P4 > P5.
 
-Si Policy A > Policy B → la calidad de la rubrica importa. Si Policy A ≈ Policy B → nuestras rubricas ya son suficientemente buenas.
+**Nota:** Si P3 (GPT-5.2) ~ P0 (humanos), no mata el proyecto — refuerza el argumento de eficiencia: nuestro 8B logra resultados similares a 100x menos costo.
 
-**Costo:** 2 runs × ~$90 = ~$180.
+**Version minima viable:** Solo P0 + P1 (2 runs x ~$90 = ~$180). Si P0 > P1, ya hay hallazgo.
+
+**GAP:** Falta script de policy training (entrenar un modelo que *responde* preguntas medicas usando rubricas como reward).
+
+### NIVEL 2 — El metodo: RL + functional alignment
+
+#### P2a — RL genera mejores rubricas que SFT y zero-shot?
+
+Se evaluan rubricas directamente (sin entrenar policy) sobre holdout de HealthBench (~500 preguntas). Metricas: Alignment (Spearman), Discrimination, Format validity, Info value.
+
+| Metodo | Que es |
+|---|---|
+| Random | Piso — sanity check |
+| Zero-shot Qwen3-8B (few-shot) | Punto de partida |
+| SFT Qwen3-8B | RL es necesario o alcanza copiar? |
+| **RL Qwen3-8B (nuestro)** | **Nuestro metodo** |
+| Zero-shot GPT-5.2 (few-shot) | Si nos acercamos → eficiencia 100x |
+| Golden (medicos) | Techo |
+
+**Costo:** Baselines ~$25, SFT ~$10, RL run ~$90.
+
+#### P2b — Curriculum verificable → abierto funciona?
+
+| Variante | Datos | Que mide |
+|---|---|---|
+| Verifiable-only | Solo MedQA/MedMCQA | Hay transfer? Alignment > 0 en HB? |
+| Open-only | Solo HealthBench | Que pasa sin curriculum? |
+| Curriculum (nuestro) | 80/20 → 50/50 → 20/80 | Curriculum aporta? |
+
+**Optimizacion:** El checkpoint intermedio del run de curriculum sirve como evaluacion de verifiable-only. Asi son 2 runs en vez de 3.
+
+**Costo:** ~$160 (2 runs).
+
+#### P2c — Generaliza cross-domain sin reentrenar?
+
+Evaluar el modelo entrenado en medicina directamente en FrontierScience holdout (~12 preguntas de fisica). **Costo:** ~$5.
+
+### NIVEL 3 — Robustez del Judge (seccion de analisis)
+
+El Judge (GPT-5.2) es la senal de reward de todo el sistema. No es una pregunta de investigacion central sino una seccion de validacion. Hay literatura extensa: TrustJudge (2509.21117), "Can You Trust LLM Judgments?" (2412.12509), "Are We on the Right Way?" (2512.16041).
+
+**Analisis a reportar:**
+
+1. **Variabilidad intra-juez:** std de scores del mismo Judge sobre misma pregunta+rubrica (ya tenemos num_evals=3 en precompute).
+2. **Concordancia Judge vs medicos:** accuracy, Cohen's kappa, F1 por criterio (ya implementado en `scripts/validate_judge.py`).
+3. **Consistencia inter-juez (opcional):** correr el mismo eval con 2-3 modelos como juez (GPT-5.2, Claude, open-source). Si rankings son consistentes, el metodo es robusto.
+
+**Costo:** ~$30 (variabilidad + concordancia + opcional inter-juez).
 
 ---
 
 ## 6. Plan de Ejecuciones
 
-### Fase A: Establecer referencias (ANTES de cualquier training)
+### Fase A: Fundamentos — datos y referencias (ANTES de cualquier training)
 
-No requieren GPU. Establecen los rangos de referencia.
+No requieren GPU. Establecen rangos de referencia y validan la senal de reward.
 
 #### RUN A1: Precompute completo FrontierScience
 
@@ -290,20 +300,14 @@ python scripts/run_baselines.py --baselines B0 B1 B3 --num_eval_runs 3 --output 
 
 **Costo:** ~$5 | **Tiempo:** ~1h
 
----
-
-### Fase B: Datos medicos + baselines HealthBench
-
-#### RUN B1: Descargar HealthBench + precompute gold_scores
+#### RUN A3: Descargar HealthBench + precompute gold_scores
 
 ```bash
-# Descargar datos (requiere huggingface-cli o blobfile)
-# Luego precompute:
 python -m grubrics_science.data.precompute_healthbench --limit 10  # validar
 python -m grubrics_science.data.precompute_healthbench              # full (~$45)
 ```
 
-#### RUN B2: Precompute MedQA/MedMCQA
+#### RUN A4: Precompute MedQA/MedMCQA
 
 ```bash
 python -m grubrics_science.data.precompute_verifiable --dataset medqa --limit 10    # validar
@@ -312,14 +316,7 @@ python -m grubrics_science.data.precompute_verifiable --dataset medqa           
 python -m grubrics_science.data.precompute_verifiable --dataset medmcqa             # full
 ```
 
-#### RUN B3: Validar Judge vs medicos
-
-```bash
-python scripts/validate_judge.py --limit 50    # validar
-python scripts/validate_judge.py --output data/results/judge_validation.json  # full (~$15)
-```
-
-#### RUN B4: Baselines zero-cost en HealthBench
+#### RUN A5: Baselines zero-cost en HealthBench
 
 ```bash
 python scripts/run_baselines.py --dataset_name healthbench --baselines B0 B1 B3 --num_eval_runs 3 --output data/results/baselines_hb.json
@@ -329,19 +326,42 @@ python scripts/run_baselines.py --dataset_name healthbench --baselines B0 B1 B3 
 
 ---
 
-### Fase C: Training runs del generador de rubricas (Experimento 2)
+### Fase B: Robustez del Judge (NIVEL 3 — validar ANTES de gastar en training)
 
+Valida que la senal de reward es confiable. Si el Judge no concuerda con medicos, hay que replantear antes de gastar en training.
+
+#### RUN B1: Concordancia Judge vs medicos
+
+```bash
+python scripts/validate_judge.py --limit 50    # validar
+python scripts/validate_judge.py --output data/results/judge_validation.json  # full
+```
+
+**Costo:** ~$15 | **Metricas:** accuracy, Cohen's kappa, F1 por criterio
+
+#### RUN B2: Variabilidad intra-juez
+
+Reportar std de scores del precompute (ya disponible con num_evals=3 de A3). No requiere run adicional.
+
+#### RUN B3: Consistencia inter-juez (opcional)
+
+Correr el mismo eval de A5 con Claude y/o un modelo open-source como juez. Comparar rankings.
+
+**Costo:** ~$15
+
+---
+
+### Fase C: Training del generador de rubricas (NIVEL 2 — Exp 2)
 
 | Run | Que | Costo | Prioridad |
 | --- | --- | ----- | --------- |
 | C1 | Zero-shot Qwen3-8B (B2) — lower bound | $0 | ALTA |
 | C2 | SFT Qwen3-8B (B7) — RL vs SFT | $10 | ALTA |
 | C3 | **Sistema completo RL con curriculum** | $90 | CRITICO |
-| C4 | Verifiable-only (B5) — transfer funciona? | $70 | MEDIA |
-| C5 | Open-only (B6) — curriculum ayuda? | $90 | MEDIA |
-| C6 | Format-only (B4) — FA aporta? | $70 | MEDIA |
-| C7-C10 | Ablations (A1-A4) | $70 c/u | BAJA |
+| C4 | Open-only (B6) — curriculum ayuda? | $90 | MEDIA |
+| C5 | Ablations (A1-A4) | $70 c/u | BAJA |
 
+Nota: Verifiable-only se obtiene del checkpoint intermedio de C3 (no requiere run separado).
 
 Ablations disponibles via env vars:
 
@@ -354,11 +374,11 @@ REWARD_LAMBDA_DEFENSE=0.0         # A3: sin defense_penalty
 
 ---
 
-### Fase D: Policy training (Experimento 1 — EL MAS IMPORTANTE)
+### Fase D: Policy training (NIVEL 1 — Exp 1, EL MAS IMPORTANTE)
 
 Responde: **"mejores rubricas producen mejores policies?"**
 
-**Requiere:** Implementar script de policy training (GAP 2).
+**Requiere:** Implementar script de policy training (GAP principal).
 
 Dos runs minimos:
 
@@ -383,96 +403,98 @@ Opcionalmente 4 runs adicionales (Random, Qwen zero-shot, GPT zero-shot, SFT) pa
 
 ## 7. Tabla resumen de ejecuciones
 
+| #         | Run                          | Nivel | Que mide                            | Costo   | Prioridad      |
+| --------- | ---------------------------- | ----- | ----------------------------------- | ------- | -------------- |
+| **A1**    | Precompute FS completo       | -     | -                                   | $5      | **INMEDIATO**  |
+| **A2**    | Baselines FS (B0, B1, B3)   | 2     | Rangos de referencia                | $5      | **INMEDIATO**  |
+| **A3**    | Precompute HealthBench       | -     | -                                   | $45     | **BLOQUEANTE** |
+| **A4**    | Precompute MedQA/MedMCQA     | -     | -                                   | $0      | **BLOQUEANTE** |
+| **A5**    | Baselines HealthBench        | 2     | Rangos de referencia HB             | $10     | **ALTA**       |
+| **B1**    | Judge vs medicos             | 3     | Concordancia Judge/medicos          | $15     | **ALTA**       |
+| B2        | Variabilidad intra-juez      | 3     | std scores (de A3)                  | $0      | ALTA           |
+| B3        | Consistencia inter-juez      | 3     | Rankings entre modelos              | $15     | OPCIONAL       |
+| **C1**    | Zero-shot Qwen3-8B (B2)     | 2     | Lower bound                         | $0      | **ALTA**       |
+| **C2**    | SFT Qwen3-8B (B7)           | 2     | RL vs SFT                           | $10     | **ALTA**       |
+| **C3**    | **Sistema completo (RL)**    | 2     | **Nuestro metodo**                  | $90     | **CRITICO**    |
+| C4        | Open-only (B6)               | 2     | Curriculum ayuda?                   | $90     | MEDIA          |
+| C5        | Ablations (A1-A4)            | 2     | Componentes del reward              | $70 c/u | BAJA           |
+| **D1-D2** | **Policy training (minimo)** | **1** | **Rubric quality → Policy quality** | $180    | **CRITICO**    |
+| D3-D6     | Policy training (completo)   | 1     | Barrido exhaustivo                  | $360    | MEDIA          |
+| E1        | Generalizacion a FS          | 2     | Cross-domain transfer               | $5      | BONUS          |
 
-| #         | Run                         | Que mide                            | Requiere            | Costo   | Prioridad      |
-| --------- | --------------------------- | ----------------------------------- | ------------------- | ------- | -------------- |
-| **A1**    | Precompute FS completo      | -                                   | API                 | $5      | **INMEDIATO**  |
-| **A2**    | Baselines FS (B0, B1, B3)   | Rangos de referencia                | API + A1            | $5      | **INMEDIATO**  |
-| **B1**    | Precompute HealthBench      | -                                   | API + datos HF      | $45     | **BLOQUEANTE** |
-| **B2**    | Precompute MedQA/MedMCQA    | -                                   | datos HF            | $0      | **BLOQUEANTE** |
-| **B3**    | Validar Judge vs medicos    | Concordancia Judge/medicos          | API + B1            | $15     | **ALTA**       |
-| **B4**    | Baselines HealthBench       | Rangos de referencia HB             | API + B1            | $10     | **ALTA**       |
-| **C1**    | Zero-shot Qwen3-8B (B2)     | Lower bound                         | GPU                 | $0      | **ALTA**       |
-| **C2**    | SFT Qwen3-8B (B7)           | RL vs SFT                           | GPU + SFT code      | $10     | **ALTA**       |
-| **C3**    | **Sistema completo (RL)**   | **Nuestro metodo**                  | GPU + API + B1 + B2 | $90     | **CRITICO**    |
-| C4        | Verifiable-only (B5)        | Transfer funciona?                  | GPU + API           | $70     | MEDIA          |
-| C5        | Open-only (B6)              | Curriculum ayuda?                   | GPU + API           | $90     | MEDIA          |
-| C6        | Format-only (B4)            | FA aporta?                          | GPU                 | $70     | MEDIA          |
-| C7-C10    | Ablations (A1-A4)           | Componentes del reward              | GPU + API           | $70 c/u | BAJA           |
-| **D1-D2** | **Policy training (minimo)**| **Rubric quality → Policy quality** | GPU + API + C3      | $180    | **CRITICO**    |
-| D3-D6     | Policy training (completo)  | Barrido exhaustivo                  | GPU + API           | $360    | MEDIA          |
-| E1        | Generalizacion a FS         | Cross-domain transfer               | C3                  | $5      | BONUS          |
+Nota: Verifiable-only se obtiene del checkpoint intermedio de C3 (no requiere run separado).
 
 
 ---
 
 ## 8. Presupuesto estimado
 
-
-| Concepto                                   | Costo       |
-| ------------------------------------------ | ----------- |
-| Precompute HealthBench (gold_scores)       | ~$45        |
-| Validacion Judge vs medicos                | ~$15        |
-| Baselines de referencia (FS + HB)          | ~$20        |
-| SFT Qwen3-8B                              | ~$10        |
-| RL Qwen3-8B — sistema completo             | ~$90        |
-| Verifiable-only + Open-only                | ~$160       |
-| Evaluacion en FrontierScience              | ~$5         |
-| Policy training (2 runs minimos)           | ~$180       |
-| Ablaciones (4 runs, opcionales)            | ~$280       |
-| **Total minimo viable**                    | **~$365**   |
-| **Total sin ablaciones**                   | **~$525**   |
-| **Total completo**                         | **~$805**   |
+| Concepto                                   | Nivel | Costo       |
+| ------------------------------------------ | ----- | ----------- |
+| Precompute (FS + HealthBench + MedQA)      | -     | ~$50        |
+| Baselines de referencia (FS + HB)          | 2     | ~$20        |
+| Robustez del Judge (concordancia + inter)  | 3     | ~$30        |
+| SFT Qwen3-8B                              | 2     | ~$10        |
+| RL Qwen3-8B — sistema completo             | 2     | ~$90        |
+| Open-only                                  | 2     | ~$90        |
+| Evaluacion en FrontierScience              | 2     | ~$5         |
+| Policy training (2 runs minimos)           | 1     | ~$180       |
+| Ablaciones (4 runs, opcionales)            | 2     | ~$280       |
+| Policy training adicional (4 runs)         | 1     | ~$360       |
+| **Total minimo viable**                    |       | **~$475**   |
+| **Total sin ablaciones**                   |       | **~$575**   |
+| **Total completo**                         |       | **~$835**   |
 
 
 ---
 
 ## 9. Orden de ejecucion recomendado
 
-### Semana 1: Fundamentos
+### Semana 1: Fundamentos + validar Judge
 
 1. **Correr A1** (precompute FS 60 preguntas) — inmediato, solo API
 2. **Correr A2** (baselines FS) — inmediato despues de A1
 3. **Descargar HealthBench, MedQA, MedMCQA** desde HuggingFace
-4. **Correr B1** (precompute HealthBench) — ~$45
+4. **Correr A3** (precompute HealthBench) — ~$45
+5. **Correr B1** (validar Judge vs medicos) — CRITICO: si kappa < 0.3, replantear antes de seguir
+6. **Correr B2** (reportar variabilidad intra-juez de A3)
 
 ### Semana 2: Baselines + SFT
 
-1. **Correr B2** (precompute MedQA/MedMCQA)
-2. **Correr B3** (validar Judge vs medicos)
-3. **Correr B4** (baselines HealthBench)
-4. **Implementar SFT script** — necesario para C2
-5. **Correr C1** (Qwen zero-shot) — GPU
-6. **Correr C2** (SFT) — GPU
+1. **Correr A4** (precompute MedQA/MedMCQA)
+2. **Correr A5** (baselines HealthBench)
+3. **Implementar SFT script** — necesario para C2
+4. **Correr C1** (Qwen zero-shot) — GPU
+5. **Correr C2** (SFT) — GPU
 
 ### Semana 3: Training principal
 
-1. **Correr C3** (sistema completo RL) — GPU + API, ~10h
-2. **Correr C4** (verifiable-only) — GPU + API
-3. **Correr C5** (open-only) — GPU + API
+1. **Correr C3** (sistema completo RL con curriculum) — GPU + API, ~10h
+2. Evaluar checkpoint intermedio como verifiable-only
+3. **Correr C4** (open-only) — GPU + API
 
-### Semana 4: Policy training + ablations
+### Semana 4: Policy training
 
-1. **Implementar policy training** — codigo para Experiment 1
-2. **Correr D1-D2** (policy training minimo) — GPU + API
-3. **Correr C6-C10** (ablations) — GPU + API
+1. **Implementar policy training** — codigo para Experiment 1 (GAP principal)
+2. **Correr D1-D2** (policy training minimo: human + RL) — GPU + API
 
 ### Semana 5: Finalizacion
 
 1. **Correr E1** (generalizacion a FrontierScience) — solo evaluacion
-2. **Compilar tablas finales**
-3. **Escribir paper**
+2. Opcionalmente: D3-D6 (policy training completo), C5 (ablations), B3 (inter-juez)
+3. **Compilar tablas finales**
+4. **Escribir paper**
 
 ---
 
 ## 10. Riesgos y mitigaciones
 
-
 | Riesgo                                             | Probabilidad | Impacto  | Mitigacion                                        |
 | -------------------------------------------------- | ------------ | -------- | ------------------------------------------------- |
+| Judge no concuerda con medicos (kappa < 0.3)       | Media        | MUY ALTO | Se valida en Semana 1 (B1) ANTES de gastar en training. Si falla, probar otro Judge o ajustar rubricas |
+| Policy training no muestra correlacion monotonica  | Baja         | MUY ALTO | Este es el resultado clave (NIVEL 1) — si falla, replantear |
 | RL no supera SFT                                   | Media        | Alto     | Ajustar hiperparametros, probar mas epochs        |
-| Transfer verificable → abierto no funciona         | Media        | Medio    | El paper puede funcionar sin contribucion 3       |
-| Policy training no muestra correlacion monotonica  | Baja         | MUY ALTO | Este es el resultado clave — si falla, replantear |
+| Transfer verificable → abierto no funciona         | Media        | Medio    | El paper puede funcionar sin NIVEL 2b             |
 | Costos API exceden presupuesto                     | Baja         | Medio    | Priorizar runs criticos (C3, D1, D2)              |
-| Judge noise demasiado alto (temp=1)                | Conocido     | Medio    | Promediar N=3 evaluaciones (ya implementado)      |
+| Judge noise demasiado alto                         | Conocido     | Medio    | Promediar N=3 evaluaciones (ya implementado). Literatura confirma que rubricas explicitas reducen inconsistencia |
 

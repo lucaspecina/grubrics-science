@@ -184,38 +184,50 @@ Esto cambia la narrativa: ya no es solo "generamos mejores rubricas" (incrementa
 
 4. **El valor practico real**: El generador permite **RL en dominios nuevos sin rubricas humanas**. Con un generador que produce rubricas de calidad HealthBench para cualquier pregunta medica, se puede tomar 1M preguntas medicas de internet, generar rubricas, entrenar una policy con RL, y obtener un mejor modelo medico. Sin el generador, estas limitado a las 5K preguntas con rubricas humanas.
 
-### Subpreguntas de investigacion
+### Preguntas de investigacion (3 niveles)
 
-**Pregunta principal (contribucion 1 — hallazgo empirico):**
-- La calidad de las rubricas impacta la calidad de la policy entrenada con ellas? (el experimento downstream)
+Las preguntas se organizan en 3 niveles. El Nivel 1 es la contribucion principal del paper. El Nivel 2 es el metodo que la habilita. El Nivel 3 valida que la senal de reward es confiable.
 
-**Preguntas sobre el metodo (contribucion 2 — como generar mejores rubricas):**
-- Functional alignment (ranking consistency via Spearman) es una señal de reward viable para RL?
-- RL supera a SFT para generacion de rubricas? (dado que no hay una unica rubrica correcta)
-- Las rubricas generadas se acercan en calidad funcional a las de medicos?
-- Un 8B entrenado se acerca a GPT-5.2 zero-shot? (argumento de costo)
+**NIVEL 1 — Hallazgo empirico (la contribucion principal):**
 
-**Preguntas sobre transfer (contribucion 3 — curriculum verificable → abierto):**
-- El curriculum desde dominios verificables medicos (MedQA/MedMCQA) ayuda?
-- La habilidad de generar rubricas transfiere de verificable a abierto?
-- El metodo generaliza entre campos? (entrenado en medicina, funciona en ciencia?)
+- **P1: La calidad de las rubricas impacta la calidad de la policy entrenada con ellas?**
+  Todos los papers del campo (RaR/Scale AI, Rubric Anchors, RIFL) asumen que mejores rubricas = mejor policy. Nadie lo aislo experimentalmente. Rubric Anchors (2508.12790) compara rubricas humanas vs LLM vs hibridas, pero cambia multiples variables a la vez (contenido, cantidad, formato, cobertura). No es un experimento controlado. Nosotros fijamos todo (modelo base, GRPO, datos, Judge) y cambiamos SOLO la rubrica usada como reward.
+
+**NIVEL 2 — El metodo (como generar mejores rubricas):**
+
+- **P2a: RL con functional alignment genera mejores rubricas que SFT y zero-shot?**
+  Functional alignment (ranking consistency via Spearman) como senal de reward para RL. Las rubricas generadas se acercan en calidad funcional a las de medicos? Un 8B entrenado se acerca a GPT-5.2 zero-shot? (argumento de costo 100x).
+- **P2b: El curriculum verificable → abierto funciona?**
+  El curriculum desde dominios verificables medicos (MedQA/MedMCQA) ayuda? La habilidad de generar rubricas transfiere de verificable a abierto?
+- **P2c: El metodo generaliza cross-domain sin reentrenar?**
+  Entrenado en medicina, funciona en ciencia (FrontierScience)?
+
+**NIVEL 3 — Robustez del Judge (seccion de analisis):**
+
+- **P3: Que tan confiable es el LLM Judge como senal de reward?**
+  El Judge (GPT-5.2) es la senal de reward de todo el sistema. Si no es confiable, nada lo es. Hay literatura extensa sobre limitaciones de LLM-as-judge: TrustJudge (2509.21117) reporta ~23% inconsistencia score-comparacion; "Can You Trust LLM Judgments?" (2412.12509) muestra baja intra-rater reliability; "Are We on the Right Way?" (2512.16041) encuentra que modelos SOTA fallan en ~25% de casos dificiles. Pero tambien: las rubricas explicitas mejoran la consistencia (lo cual favorece nuestro enfoque), multiples evaluaciones reducen el ruido (ya lo hacemos con num_evals=3), y los humanos tambien son inconsistentes. Reportamos metricas de robustez, no como pregunta central sino como validacion.
 
 ### Criterio de exito
 
-**Contribucion 1 — Rubric quality → Policy quality:**
+**NIVEL 1 — Rubric quality → Policy quality:**
 1. **Minimo**: Policy entrenada con rubricas RL > policy con rubricas random.
 2. **Bueno**: La calidad de la policy correlaciona monotonicamente con la calidad de la rubrica usada.
 3. **Excelente**: Policy con rubricas RL se acerca a policy con rubricas humanas.
 
-**Contribucion 2 — Metodo de generacion:**
+**NIVEL 2 — Metodo de generacion:**
 1. **Minimo**: RL supera a zero-shot y SFT en alignment score.
 2. **Bueno**: RL se acerca a rubricas humanas en HealthBench.
 3. **Excelente**: 8B-RL se acerca a GPT-5.2 zero-shot (eficiencia 100x).
 
-**Contribucion 3 — Transfer:**
+**NIVEL 2 — Transfer:**
 1. **Minimo**: Verifiable-only obtiene alignment > 0 en HealthBench (hay transfer).
 2. **Bueno**: Curriculum > verifiable-only y > open-only.
 3. **Bonus**: Generaliza a FrontierScience sin reentrenar.
+
+**NIVEL 3 — Robustez del Judge:**
+1. **Minimo**: Concordancia Judge vs medicos (Cohen's kappa) > 0.4 (moderada).
+2. **Bueno**: Variabilidad intra-juez (std con num_evals=3) < 0.15 del rango.
+3. **Bonus**: Rankings consistentes entre 2+ modelos como juez.
 
 ---
 
@@ -507,22 +519,17 @@ Evaluar la calidad de las rubricas generadas directamente, sin entrenar una poli
 | B5 | **Verifiable-only** (solo MedQA/MedMCQA) | Transfer verificable → abierto funciona? | ~$70 |
 | B6 | **Open-only** (solo HealthBench) | Curriculum ayuda vs entrenar directo? | ~$90 |
 
-**Referencia externa (si implementamos):**
-
-| # | Baseline | Que mide | Costo |
-|---|---|---|---|
-| B8 | **RLCER-style** (validity reward) | Nuestro metodo vs RLCER adaptado a abierto | ~$70 |
-| B9 | **DR-Tulu-style** (evolving rubrics) | Nuestro metodo vs evolucion sin entrenar generador | ~$90 |
-
 ### Comparaciones clave para el paper
 
-1. **Exp 1 — Rubric quality → Policy quality**: ¿Correlacion monotonica? (la contribucion principal)
-2. **Qwen-RL vs Qwen-SFT (B7)**: ¿RL supera a imitacion? (la mas importante del metodo)
-3. **Qwen-RL vs Golden (B0)**: ¿Que tan cerca de humanos?
+1. **Exp 1 — Rubric quality → Policy quality**: Correlacion monotonica? (la contribucion principal, NIVEL 1)
+2. **Qwen-RL vs Qwen-SFT (B7)**: RL supera a imitacion? (la mas importante del metodo)
+3. **Qwen-RL vs Golden (B0)**: Que tan cerca de humanos?
 4. **Qwen-RL vs GPT-5.2 (B1)**: Si se acerca → claim de eficiencia 100x
-5. **Verifiable-only (B5) vs Full**: ¿Transfer funciona? ¿Alignment > 0 en HealthBench?
-6. **Curriculum vs Open-only (B6)**: ¿El curriculum aporta?
-7. **Generalizacion a FrontierScience**: ¿Funciona en ciencia sin reentrenar?
+5. **Verifiable-only (B5) vs Full**: Transfer funciona? Alignment > 0 en HealthBench?
+6. **Curriculum vs Open-only (B6)**: El curriculum aporta?
+7. **Generalizacion a FrontierScience**: Funciona en ciencia sin reentrenar?
+
+Nota: No implementamos baselines de evolving rubrics (DR-Tulu, RLCER). Son proyectos completos en si mismos y la comparacion no seria justa sin su codigo original. Se citan en Related Work con sus resultados reportados.
 
 ### Ablations (removiendo componentes)
 
@@ -545,9 +552,7 @@ Evaluar la calidad de las rubricas generadas directamente, sin entrenar una poli
 
 ### Metricas de evaluacion
 
-### Metricas de evaluacion
-
-**Para Exp 2 (rubric quality)** — evaluados en held-out de HealthBench (~500 preguntas):
+**Para Exp 2 — rubric quality (NIVEL 2):** evaluados en held-out de HealthBench (~500 preguntas):
 
 | Metrica | Que captura | Rango |
 |---|---|---|
@@ -556,12 +561,22 @@ Evaluar la calidad de las rubricas generadas directamente, sin entrenar una poli
 | **Format validity** | Fraccion con formato correcto | [0, 1], higher=better |
 | **Info value** | Promedio 4*p*(1-p) — criterios no-triviales? | [0, 1], higher=better |
 
-**Para Exp 1 (policy quality)** — evaluados en HealthBench held-out con rubricas humanas:
+**Para Exp 1 — policy quality (NIVEL 1):** evaluados en HealthBench held-out con rubricas humanas:
 
 | Metrica | Que captura |
 |---|---|
 | **HealthBench Score** | Score agregado de la policy en HealthBench (como lo mide el benchmark original) |
 | **Per-axis scores** | Accuracy, Completeness, Context awareness, Communication, Instruction following |
+
+**Para robustez del Judge (NIVEL 3):**
+
+| Metrica | Que captura | Fuente |
+|---|---|---|
+| **Variabilidad intra-juez** | std de scores del mismo Judge sobre misma pregunta+rubrica con num_evals=3 | Precompute pipeline |
+| **Concordancia Judge vs medicos** | Accuracy, Cohen's kappa, F1 por criterio | `scripts/validate_judge.py` vs HealthBench meta_eval |
+| **Consistencia inter-juez** (opcional) | Correlacion de rankings entre 2+ modelos como juez | Correr eval con GPT-5.2, Claude, modelo open-source |
+
+Contexto de la literatura: TrustJudge (2509.21117) reporta ~23% inconsistencia en LLM judges. Sin embargo, rubricas explicitas mejoran significativamente la consistencia (favorable para nuestro enfoque), y multiples evaluaciones reducen el ruido (ya implementado). Los humanos tambien muestran inconsistencia sustancial en evaluacion (2512.16041).
 
 **Held-out splits:**
 - HealthBench: ~500 preguntas (10%) como held-out, ~4500 para training
@@ -600,6 +615,16 @@ Evaluar la calidad de las rubricas generadas directamente, sin entrenar una poli
 | B0: Golden | ~0.85 |
 | Qwen-RL (trained on HB) | ? |
 | B2: Zero-shot Qwen-8B | ? |
+
+**Tabla 4 — Robustez del Judge (NIVEL 3):**
+
+| Metrica | Valor | Referencia literatura |
+|---|---|---|
+| Variabilidad intra-juez (std, num_evals=3) | ? | TrustJudge: ~23% inconsistencia sin rubricas |
+| Concordancia Judge vs medicos (Cohen's kappa) | ? | Objetivo: > 0.4 (moderada) |
+| Concordancia Judge vs medicos (accuracy) | ? | - |
+| Concordancia Judge vs medicos (F1) | ? | - |
+| Consistencia inter-juez (Spearman entre GPT-5.2 y Claude) | ? (opcional) | - |
 
 ---
 
