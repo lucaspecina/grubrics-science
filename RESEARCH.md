@@ -646,10 +646,12 @@ Evaluar la calidad de las rubricas generadas directamente, sin entrenar una poli
 
 ### Conclusiones sobre datos
 
-1. **D_verif**: MATH (Hendrycks) es la mejor opcion primaria (12K, step-by-step, multiple difficulty levels). GSM8K como warm-up.
-2. **D_open**: FrontierScience es esencialmente la unica opcion viable con rubricas humanas cientificas.
-3. **synthetic-2 NO sirve** — es instruction following con rewards de modelos, no problemas verificables.
-4. **Potencial futuro**: Dr. SCI (1M questions) podria ser util cuando se publique. Codigo flexible para incorporarlo.
+1. **D_verif medico**: MedQA-USMLE (~10K) y MedMCQA (~183K) son los datasets verificables primarios para el curriculum medico. Adapters implementados.
+2. **D_verif math**: MATH (12K) y GSM8K (8.5K) como warm-up y validacion cruzada. Adapters implementados.
+3. **D_open medico**: HealthBench (5000 conversaciones, rubricas de 262 medicos) es el dataset principal. Adapter implementado.
+4. **D_open ciencia**: FrontierScience (60 subtasks, rubricas de PhDs) para validacion de generalizacion. Adapter implementado.
+5. **synthetic-2 NO sirve** — es instruction following con rewards de modelos, no problemas verificables.
+6. **Potencial futuro**: Dr. SCI (1M questions) podria ser util cuando se publique. Codigo flexible para incorporarlo.
 
 ### Arquitectura de datos flexible
 
@@ -665,7 +667,7 @@ class DatasetAdapter(ABC):
     def to_parquet(self, output_dir, tokenizer): ...
 ```
 
-Adapters: `GSM8KAdapter`, `MATHAdapter`, `FrontierScienceAdapter`, `VerifiableMathAdapter`.
+Adapters: `GSM8KAdapter`, `MATHAdapter`, `FrontierScienceAdapter`, `VerifiableMathAdapter`, `HealthBenchAdapter`, `MedQAAdapter`, `MedMCQAAdapter`.
 
 ---
 
@@ -947,12 +949,11 @@ Ventajas: gratis (sin API extra), determinista, garantiza varianza en gold_score
 
 **Archivos creados/modificados (hecho):**
 
-1. **`grubrics_science/data/precompute_verifiable.py`** — CREADO
-   - Genera 1 respuesta + 3 perturbaciones por pregunta
-   - Perturbaciones: cambio de numero final, truncado, swap de respuesta
-   - Gold_scores programaticos (1.0 correct, 0.0 incorrect)
+1. **`grubrics_science/data/precompute_verifiable.py`** — CREADO (extendido para MedQA/MedMCQA)
+   - Math (GSM8K/MATH): genera 1 respuesta + 3 perturbaciones por pregunta
+   - MCQ (MedQA/MedMCQA): usa las 4 opciones como answers, gold_scores programaticos (correcta=1.0, incorrectas=0.0)
    - Cache JSONL compatible con adapters
-   - CLI: `python -m grubrics_science.data.precompute_verifiable --dataset gsm8k --limit 5`
+   - CLI: `python -m grubrics_science.data.precompute_verifiable --dataset gsm8k|math|medqa|medmcqa --limit 5`
    - Validado: 5 preguntas GSM8K, cada una con 4 answers [1.0, 0.0, 0.0, 0.0]
 
 2. **`grubrics_science/rewards/grubrics_reward.py`** — MODIFICADO
@@ -1003,7 +1004,7 @@ Ventajas: gratis (sin API extra), determinista, garantiza varianza en gold_score
     - `TestCurriculumScheduler`: 10 tests (phases, boundaries, phase_index, data_file, switch, lr, summary, normalization, ratios)
     - `TestParsePhases`: 3 tests (3-value, 4-value with lr, invalid format)
 
-**Tests totales: 137 (29 Phase 0 + 30 Phase 1 + 19 Phase 2 + 13 Curriculum + 29 Evaluation + 17 Phase 3), todos pasan.**
+**Tests totales: 181 (29 Phase 0 + 30 Phase 1 + 19 Phase 2 + 13 Curriculum + 29 Evaluation + 17 Phase 3 + 28 HealthBench + 16 MedQA), todos pasan.**
 
 **Validacion realizada:**
 - Reward end-to-end con Judge API (`scripts/test_verifiable_reward_e2e.py`):
@@ -1039,18 +1040,28 @@ Ventajas: gratis (sin API extra), determinista, garantiza varianza en gold_score
    - `evaluate_rubric_on_question(rubric, question, answers, gold_scores, judge)` → dict de metricas
    - `evaluate_on_holdout(rubric_generator_fn, holdout_data, judge, num_eval_runs)` → per-question + aggregated
    - Soporta multiples Judge eval runs para promediar ruido (num_eval_runs)
-4. **`grubrics_science/evaluation/holdout.py`** — CREADO
+4. **`grubrics_science/evaluation/holdout.py`** — CREADO (generalizado para FrontierScience + HealthBench)
    - `load_frontierscience_with_cache(dataset_path, cache_path)` → solo questions con cache
-   - `split_holdout(data, holdout_size=12, seed=42)` → (train, holdout) deterministic
+   - `load_healthbench_with_cache(dataset_path, cache_path)` → idem para HealthBench
+   - `load_dataset_with_cache(dataset_name, ...)` → dispatch unificado
+   - `split_holdout(data, holdout_size, seed=42)` → (train, holdout) deterministic
+   - `DEFAULT_HOLDOUT_SIZES`: 12 para FrontierScience, 500 para HealthBench
 5. **`grubrics_science/evaluation/baselines.py`** — CREADO
    - `golden_rubric(entry)` — B0: retorna la rubrica humana
    - `GPTZeroShotBaseline(model)` — B1: genera rubrica con GPT zero-shot
    - `QwenZeroShotBaseline(model_name)` — B2: genera con Qwen base (requiere GPU)
    - `SeededRandomBaseline(base_seed)` — B3: rubrica random deterministic
-6. **`scripts/run_baselines.py`** — CREADO
-   - CLI: `python scripts/run_baselines.py --baselines B0 B1 B3`
+6. **`scripts/run_baselines.py`** — CREADO (soporta multiples datasets)
+   - CLI: `python scripts/run_baselines.py --dataset_name healthbench --baselines B0 B1 B3`
+   - `--dataset_name`: `frontierscience` (default) o `healthbench`
    - Soporta `--num_eval_runs`, `--holdout_size`, `--output results.json`
+   - Holdout size automatico por dataset (12 FS, 500 HB)
    - Genera tabla markdown con resultados
+7. **`scripts/validate_judge.py`** — CREADO
+   - Valida nuestro Judge contra binary_labels de medicos del meta_eval
+   - Metricas: accuracy, precision, recall, F1, Cohen's kappa
+   - Breakdown por tag (accuracy/completeness/safety/etc)
+   - CLI: `python scripts/validate_judge.py --limit 50 --output results.json`
 7. **`tests/test_evaluation.py`** — CREADO (29 tests, todos pasan)
    - `TestAlignmentScore` (5), `TestDiscriminationScore` (3), `TestFormatValidity` (4)
    - `TestPointsSum` (2), `TestInfoValue` (2), `TestComputeAllMetrics` (1)
@@ -1193,13 +1204,17 @@ grubrics-science/
       base.py                      (DatasetAdapter ABC) ✓
       prepare.py                   (CLI entry point) ✓
       precompute.py                (precompute FrontierScience) ✓
-      precompute_verifiable.py     (precompute GSM8K/MATH + perturbaciones) ✓
+      precompute_verifiable.py     (precompute GSM8K/MATH/MedQA/MedMCQA + perturbaciones) ✓
+      precompute_healthbench.py    (precompute HealthBench: meta_eval answers + Judge) ✓
       adapters/
-        __init__.py                (registry) ✓
+        __init__.py                (registry, 7 adapters) ✓
         gsm8k.py                   ✓
         math_hendrycks.py          ✓
         frontierscience.py         (+ cache + contrastive) ✓
         verifiable_math.py         ✓
+        healthbench.py             (open_rubric, meta_eval answers, cache) ✓
+        medqa.py                   (verifiable, HuggingFace, MCQ 4 opciones) ✓
+        medmcqa.py                 (verifiable, HuggingFace, 21 especialidades) ✓
     evolution/                     — PENDIENTE Phase 4
       __init__.py
       adaptive_rubrics.py
@@ -1210,7 +1225,7 @@ grubrics-science/
       __init__.py                  ✓
       metrics.py                   (alignment, discrimination, format, info_value, points_sum) ✓
       eval_rubrics.py              (evaluate_rubric_on_question, evaluate_on_holdout) ✓
-      holdout.py                   (load_frontierscience_with_cache, split_holdout) ✓
+      holdout.py                   (load_frontierscience/healthbench_with_cache, split_holdout) ✓
       baselines.py                 (golden, GPTZeroShot, QwenZeroShot, SeededRandom) ✓
     judge/
       judge.py                     (rate limiting, retry, cache, batched) ✓
@@ -1237,12 +1252,19 @@ grubrics-science/
 
   evolving_rubrics/                # Referencia para Phase 4
 
+  scripts/
+    run_baselines.py               (--dataset_name healthbench/frontierscience) ✓
+    validate_judge.py              (Judge vs medicos: accuracy, kappa, F1) ✓
+
   tests/
-    test_phase1.py                 (29 tests) ✓
+    test_phase0.py                 (29 tests) ✓
+    test_phase1.py                 (30 tests) ✓
     test_phase2.py                 (19 tests) ✓
     test_curriculum.py             (13 tests) ✓
     test_evaluation.py             (29 tests) ✓
     test_phase3.py                 (17 tests) ✓
+    test_healthbench.py            (28 tests) ✓
+    test_medqa.py                  (16 tests) ✓
 
   data/
     cache/
@@ -1301,20 +1323,31 @@ python -m grubrics_science.data.precompute \
 python -m grubrics_science.data.precompute_verifiable \
     --dataset gsm8k --model gpt-5.2-chat --limit 5
 
-# Datasets disponibles: olympiad_math, gsm8k, math, frontierscience
+# Precompute de MedQA/MedMCQA (MCQ: opciones como answers, gold_scores programaticos):
+python -m grubrics_science.data.precompute_verifiable --dataset medqa --limit 10
+python -m grubrics_science.data.precompute_verifiable --dataset medmcqa --limit 10
+
+# Precompute de HealthBench (answers del meta_eval, Judge evalua con golden rubric):
+python -m grubrics_science.data.precompute_healthbench --limit 10 --num_evals 3
+
+# Datasets disponibles: olympiad_math, gsm8k, math, frontierscience, healthbench, medqa, medmcqa
 ```
 
 #### Evaluacion y Baselines
 
 ```bash
-# Correr baselines zero-cost (B0=golden, B1=GPT, B3=random):
-python scripts/run_baselines.py --baselines B0 B1 B3 --output data/results/baselines.json
+# Correr baselines zero-cost en FrontierScience (B0=golden, B1=GPT, B3=random):
+python scripts/run_baselines.py --baselines B0 B1 B3 --output data/results/baselines_fs.json
 
-# Solo golden rubric (sin costo de API para generacion):
-python scripts/run_baselines.py --baselines B0
+# Correr baselines en HealthBench:
+python scripts/run_baselines.py --dataset_name healthbench --baselines B0 B1 B3 --output data/results/baselines_hb.json
 
 # Con multiples evaluaciones para reducir ruido del Judge:
-python scripts/run_baselines.py --baselines B0 B1 B3 --num_eval_runs 3
+python scripts/run_baselines.py --dataset_name healthbench --baselines B0 B1 B3 --num_eval_runs 3
+
+# Validar Judge contra medicos (concordancia con binary_labels del meta_eval):
+python scripts/validate_judge.py --limit 50    # quick validation
+python scripts/validate_judge.py --output data/results/judge_validation.json  # full
 ```
 
 #### Setup
@@ -1346,7 +1379,9 @@ az ml job stream --name <job-id> \
 - **`base.py`**: DatasetAdapter ABC.
 - **`prepare.py`**: CLI que genera parquets.
 - **`precompute.py`**: Precompute answers + gold_scores para FrontierScience. Usa Answer Policy (GPT) + Judge batched. Promedia N evaluaciones.
-- **`adapters/`**: un archivo por dataset. FrontierScienceAdapter integra cache de precompute y genera contrastive excerpts.
+- **`precompute_verifiable.py`**: Precompute para GSM8K/MATH/MedQA/MedMCQA. Para MCQ (MedQA/MedMCQA): las 4 opciones son las answers, gold_scores programaticos (correcta=1.0, incorrectas=0.0). Para math: genera 1 answer + 3 perturbaciones.
+- **`precompute_healthbench.py`**: Precompute para HealthBench. NO genera answers (las toma del meta_eval). Nuestro Judge evalua con golden rubric → gold_scores.
+- **`adapters/`**: 7 adapters registrados. HealthBenchAdapter (open_rubric, meta_eval answers, cache), MedQAAdapter y MedMCQAAdapter (verifiable, HuggingFace, MCQ).
 
 #### `rewards/` — Funciones de reward
 - **`gsm8k_reward.py`**: reward local para verifiable. Chequea formato + coherencia. Sin API.
@@ -1416,11 +1451,12 @@ az ml job stream --name <job-id> \
 
 1. **Phase 0** ✓: veRL corre en workstation (debug), pipeline unificado validado
 2. **Phase 1** ✓: Judge API funciona, rewards discriminan, flujo GRPO simulado valida suficiente varianza
-3. **Phase 2** ✓ (codigo completo): precompute_verifiable, reward unificado, adapters con cache, curriculum, run_grpo, validación e2e con API. Falta: smoke test en workstation con GPU
-4. **Phase 2.5** ✓ (codigo completo): evaluador + baselines zero-cost (B0, B1, B3). Falta: precompute 60 preguntas + correr
+3. **Phase 2** ✓ (codigo completo): precompute_verifiable (GSM8K/MATH/MedQA/MedMCQA), reward unificado, adapters con cache, curriculum, run_grpo, validación e2e con API. Falta: smoke test en workstation con GPU
+4. **Phase 2.5** ✓ (codigo completo): evaluador + baselines zero-cost (B0, B1, B3), generalizado para FrontierScience + HealthBench. Falta: descargar datos + precompute + correr
 5. **Phase 3** ✓: Reward configurable via YAML/env + flags para ablations (B4, A1-A3)
-6. **Phase 4**: Evolucion de rubricas (bonus, no bloquea)
-7. **Phase 5**: Training runs completos + tabla final (GPU)
+6. **Datasets medicos** ✓ (codigo completo): HealthBenchAdapter, MedQAAdapter, MedMCQAAdapter, precompute_healthbench, validate_judge, holdout generalizado, baselines con --dataset_name. 181 tests pasan. Falta: descargar datos de HuggingFace + ejecutar precompute
+7. **Phase 4**: Evolucion de rubricas (bonus, no bloquea)
+8. **Phase 5**: Training runs completos + tabla final (GPU)
 
 ---
 
@@ -1445,6 +1481,9 @@ az ml job stream --name <job-id> \
 | **Batched Judge** | Evalua N answers contra 1 rubric en 1 sola API call |
 | **Curriculum** | Training schedule que va de 80% verifiable / 20% open hacia 20% / 80% |
 | **Contrastive Excerpts** | Fragmentos de best/worst answers incluidos en el prompt para guiar la generacion |
+| **Meta_eval** | Archivo de HealthBench con respuestas de modelos evaluadas por medicos (binary_labels). NO usable como gold_scores para training, SI para validar al Judge |
+| **Binary Labels** | Evaluaciones true/false por criterio hechas por medicos humanos en el meta_eval de HealthBench |
+| **Judge Validation** | Comparacion de evaluaciones de nuestro Judge vs binary_labels de medicos (accuracy, Cohen's kappa, F1) |
 
 ---
 

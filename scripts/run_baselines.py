@@ -1,18 +1,20 @@
-"""Run baseline evaluations on FrontierScience holdout.
+"""Run baseline evaluations on holdout data.
 
 Evaluates zero-cost baselines (B0, B1, B3) and optionally GPU-based
-baselines (B2) against the holdout set.
+baselines (B2) against the holdout set. Supports both FrontierScience
+and HealthBench datasets.
 
 Usage:
-    # Run all zero-cost baselines (needs API keys for Judge + GPT):
+    # Run on FrontierScience (default):
     python scripts/run_baselines.py --baselines B0 B1 B3
 
-    # Run only golden rubric (no API cost beyond Judge):
-    python scripts/run_baselines.py --baselines B0
+    # Run on HealthBench:
+    python scripts/run_baselines.py --dataset_name healthbench --baselines B0 B1 B3
 
     # Run with custom paths:
     python scripts/run_baselines.py \
-        --dataset data/frontierscience-research/test.jsonl \
+        --dataset_name frontierscience \
+        --dataset_path data/frontierscience-research/test.jsonl \
         --cache data/cache/frontierscience_precompute.jsonl \
         --baselines B0 B1 B3
 
@@ -32,7 +34,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from grubrics_science.evaluation.holdout import (
     load_frontierscience_with_cache,
+    load_healthbench_with_cache,
+    load_dataset_with_cache,
     split_holdout,
+    DEFAULT_HOLDOUT_SIZES,
 )
 from grubrics_science.evaluation.eval_rubrics import evaluate_on_holdout
 from grubrics_science.evaluation.baselines import (
@@ -81,9 +86,15 @@ def main():
         choices=["B0", "B1", "B2", "B3"],
         help="Baselines to run (B0=golden, B1=GPT, B2=Qwen, B3=random)",
     )
-    parser.add_argument("--dataset", default=None, help="FrontierScience test.jsonl path")
+    parser.add_argument(
+        "--dataset_name", default="frontierscience",
+        choices=["frontierscience", "healthbench"],
+        help="Dataset to evaluate on",
+    )
+    parser.add_argument("--dataset_path", default=None, help="Dataset file path (overrides default)")
     parser.add_argument("--cache", default=None, help="Precompute cache JSONL path")
-    parser.add_argument("--holdout_size", type=int, default=12, help="Holdout set size")
+    parser.add_argument("--holdout_size", type=int, default=None,
+                        help="Holdout set size (default: 12 for FS, 500 for HB)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for holdout split")
     parser.add_argument(
         "--num_eval_runs", type=int, default=1,
@@ -95,25 +106,33 @@ def main():
 
     args = parser.parse_args()
 
+    ds_name = args.dataset_name
+    holdout_size = args.holdout_size or DEFAULT_HOLDOUT_SIZES.get(ds_name, 12)
+
     # Load data
-    logger.info("Loading FrontierScience data with cache...")
-    data = load_frontierscience_with_cache(
-        dataset_path=args.dataset,
+    logger.info("Loading %s data with cache...", ds_name)
+    data = load_dataset_with_cache(
+        dataset_name=ds_name,
+        dataset_path=args.dataset_path,
         cache_path=args.cache,
     )
 
     if not data:
-        logger.error(
-            "No questions with cache data found. "
-            "Run precompute first:\n"
+        precompute_hint = (
             "  python -m grubrics_science.data.precompute --limit 60 --num_evals 3"
+            if ds_name == "frontierscience"
+            else "  python -m grubrics_science.data.precompute_healthbench --limit 10"
+        )
+        logger.error(
+            "No questions with cache data found for %s. "
+            "Run precompute first:\n%s", ds_name, precompute_hint,
         )
         sys.exit(1)
 
     logger.info("Found %d questions with cache data.", len(data))
 
     # Split holdout
-    _, holdout = split_holdout(data, holdout_size=args.holdout_size, seed=args.seed)
+    _, holdout = split_holdout(data, holdout_size=holdout_size, seed=args.seed)
 
     if not holdout:
         logger.error("Holdout set is empty. Need more cached questions.")

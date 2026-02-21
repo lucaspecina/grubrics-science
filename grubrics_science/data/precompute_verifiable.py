@@ -319,6 +319,12 @@ async def precompute_verifiable(
     elif dataset == "math":
         from ..data.adapters.math_hendrycks import MATHAdapter
         adapter = MATHAdapter()
+    elif dataset == "medqa":
+        from ..data.adapters.medqa import MedQAAdapter
+        adapter = MedQAAdapter()
+    elif dataset == "medmcqa":
+        from ..data.adapters.medmcqa import MedMCQAAdapter
+        adapter = MedMCQAAdapter()
     else:
         raise ValueError(f"Unknown verifiable dataset: {dataset}")
 
@@ -350,9 +356,11 @@ async def precompute_verifiable(
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     stats = {"total": 0, "correct": 0, "incorrect": 0, "skipped": 0}
 
+    is_mcq = dataset in ("medqa", "medmcqa")
+
     with open(cache_path, "a", encoding="utf-8") as f_out:
         for i, item in enumerate(items):
-            qid = f"{dataset}_{i}"
+            qid = item.get("question_id", f"{dataset}_{i}")
 
             if qid in existing:
                 stats["skipped"] += 1
@@ -361,60 +369,89 @@ async def precompute_verifiable(
                 continue
 
             question = item["question"]
-            gold_answer = item["final_answer"]
+            gold_answer = item.get("final_answer", "") or item.get("correct_text", "")
 
             if not gold_answer:
                 logger.warning("[%d/%d] %s — no gold answer, skipping", i + 1, len(items), qid)
                 continue
 
-            # Generate 1 answer
-            try:
-                response = await generate_answer(client, question, max_tokens)
-            except Exception as exc:
-                logger.error("[%d/%d] %s — generation failed: %s", i + 1, len(items), qid, exc)
-                continue
+            if is_mcq:
+                # MCQ: use the 4 options as answers directly
+                options = item.get("options", {})
+                answer_letter = item.get("answer_letter", "")
+                answers = []
+                gold_scores_list: List[float] = []
+                for letter in sorted(options.keys()):
+                    opt_text = options[letter]
+                    if opt_text:
+                        answers.append(f"{letter}. {opt_text}")
+                        gold_scores_list.append(1.0 if letter == answer_letter else 0.0)
 
-            is_correct, extracted = check_correct(response, gold_answer, dataset)
-            stats["total"] += 1
-            stats["correct" if is_correct else "incorrect"] += 1
+                if len(answers) < 2:
+                    logger.warning("[%d/%d] %s — fewer than 2 options, skipping", i + 1, len(items), qid)
+                    continue
 
-            # Create perturbations
-            perturbations = create_perturbations(
-                response, gold_answer, is_correct, dataset, num_perturbations
-            )
+                stats["total"] += 1
+                stats["correct"] += 1
 
-            # Build answers list: original + perturbations
-            answers = [response]
-            gold_scores = [1.0 if is_correct else 0.0]
+                entry = {
+                    "question_id": qid,
+                    "question": question,
+                    "gold_answer": gold_answer,
+                    "dataset": dataset,
+                    "answers": answers,
+                    "gold_scores": gold_scores_list,
+                    "original_correct": True,
+                    "extracted_answer": answer_letter,
+                    "answer_letter": answer_letter,
+                    "subject": item.get("subject", ""),
+                    "topic": item.get("topic", ""),
+                }
+            else:
+                # Math: generate answer + perturbations
+                try:
+                    response = await generate_answer(client, question, max_tokens)
+                except Exception as exc:
+                    logger.error("[%d/%d] %s — generation failed: %s", i + 1, len(items), qid, exc)
+                    continue
 
-            for p_answer, p_score in perturbations:
-                answers.append(p_answer)
-                gold_scores.append(p_score)
+                is_correct, extracted = check_correct(response, gold_answer, dataset)
+                stats["total"] += 1
+                stats["correct" if is_correct else "incorrect"] += 1
 
-            entry = {
-                "question_id": qid,
-                "question": question,
-                "gold_answer": gold_answer,
-                "dataset": dataset,
-                "answers": answers,
-                "gold_scores": gold_scores,
-                "original_correct": is_correct,
-                "extracted_answer": extracted,
-                "level": item.get("level", ""),
-                "subject": item.get("subject", ""),
-            }
+                perturbations = create_perturbations(
+                    response, gold_answer, is_correct, dataset, num_perturbations
+                )
+
+                answers = [response]
+                gold_scores_list = [1.0 if is_correct else 0.0]
+
+                for p_answer, p_score in perturbations:
+                    answers.append(p_answer)
+                    gold_scores_list.append(p_score)
+
+                entry = {
+                    "question_id": qid,
+                    "question": question,
+                    "gold_answer": gold_answer,
+                    "dataset": dataset,
+                    "answers": answers,
+                    "gold_scores": gold_scores_list,
+                    "original_correct": is_correct,
+                    "extracted_answer": extracted,
+                    "level": item.get("level", ""),
+                    "subject": item.get("subject", ""),
+                }
 
             f_out.write(json.dumps(entry, ensure_ascii=False) + "\n")
             f_out.flush()
 
             if (i + 1) % 10 == 0 or (i + 1) <= 5:
                 logger.info(
-                    "[%d/%d] %s — %s (extracted=%s, gold=%s) | %d answers (%.0f correct)",
+                    "[%d/%d] %s — %d answers (%.0f correct)",
                     i + 1, len(items), qid,
-                    "CORRECT" if is_correct else "WRONG",
-                    extracted, gold_answer,
                     len(answers),
-                    sum(gold_scores),
+                    sum(gold_scores_list),
                 )
 
     logger.info(
@@ -432,7 +469,8 @@ def main():
     parser = argparse.ArgumentParser(
         description="Precompute answers + perturbations + gold scores for verifiable domains"
     )
-    parser.add_argument("--dataset", default="gsm8k", choices=["gsm8k", "math"],
+    parser.add_argument("--dataset", default="gsm8k",
+                        choices=["gsm8k", "math", "medqa", "medmcqa"],
                         help="Verifiable dataset to precompute")
     parser.add_argument("--output_cache", default=None,
                         help="Output cache path (default: data/cache/{dataset}_precompute.jsonl)")

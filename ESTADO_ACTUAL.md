@@ -18,6 +18,20 @@ GRubrics entrena un modelo de lenguaje (Qwen3-8B) para que **genere rubricas de 
 - **Judge** (GPT via Azure API) — evalua respuestas con la rubrica. FIJO.
 - **Answer Policy** (GPT) — genera respuestas diversas. FIJO.
 
+### Por que RL en lugar de supervised learning
+
+No existe una unica rubrica correcta para cada pregunta. Distintos expertos escribirian rubricas distintas, y varias podrian ser igualmente validas. Supervised learning (SFT) optimiza la similitud textual con UNA referencia, lo cual es restrictivo. RL optimiza directamente la funcion objetivo funcional: que la rubrica discrimine calidad de respuestas de la misma forma que lo haria un experto.
+
+### Posicionamiento en la literatura
+
+Solo existen tres trabajos previos que entrenan un generador de rubricas con RL:
+
+- **RLCER** (ByteDance, 2026): correlacion entre cumplir rubrica y responder correctamente. Solo dominios verificables.
+- **Rubric-ARM** (Emory, 2026): prediccion de preferencias humanas (A > B). Necesita pares anotados.
+- **Query-Specific Rubrics** (Tencent, 2026): señal hibrida de preferencias + evaluacion LLM. Especifico para reportes.
+
+GRubrics usa functional alignment contra rubricas humanas existentes. Mide directamente la calidad funcional, funciona en dominios abiertos, y aprovecha datasets existentes (HealthBench: 5,000 rubricas de medicos, FrontierScience: 60 de fisicos con PhD).
+
 ---
 
 ## 2. Que hay implementado (codigo que existe y funciona)
@@ -28,8 +42,9 @@ GRubrics entrena un modelo de lenguaje (Qwen3-8B) para que **genere rubricas de 
 | Componente              | Archivos                                                                             | Estado   | Tests        |
 | ----------------------- | ------------------------------------------------------------------------------------ | -------- | ------------ |
 | **DatasetAdapter ABC**  | `data/base.py`                                                                       | Completo | 29 (Phase 0) |
-| **Adapters**            | `adapters/gsm8k.py`, `math_hendrycks.py`, `frontierscience.py`, `verifiable_math.py` | Completo | -            |
-| **Adapter registry**    | `adapters/__init__.py`                                                               | Completo | -            |
+| **Adapters existentes** | `adapters/gsm8k.py`, `math_hendrycks.py`, `frontierscience.py`, `verifiable_math.py` | Completo | -            |
+| **Adapters medicos**    | `adapters/healthbench.py`, `medqa.py`, `medmcqa.py`                                  | Completo | 44 (HB+MedQA)|
+| **Adapter registry**    | `adapters/__init__.py` (7 adapters registrados)                                      | Completo | -            |
 | **Parquet CLI**         | `data/prepare.py`                                                                    | Completo | -            |
 | **Azure OpenAI client** | `llm/client.py`                                                                      | Completo | -            |
 | **Prompts**             | `llm/prompts.py`                                                                     | Completo | -            |
@@ -59,10 +74,11 @@ GRubrics entrena un modelo de lenguaje (Qwen3-8B) para que **genere rubricas de 
 ### Precompute
 
 
-| Componente                     | Archivos                                                         | Estado   | Tests        |
-| ------------------------------ | ---------------------------------------------------------------- | -------- | ------------ |
-| **Precompute FrontierScience** | `data/precompute.py`                                             | Completo | -            |
-| **Precompute verifiable**      | `data/precompute_verifiable.py` (perturbaciones deterministicas) | Completo | 19 (Phase 2) |
+| Componente                     | Archivos                                                                   | Estado   | Tests        |
+| ------------------------------ | -------------------------------------------------------------------------- | -------- | ------------ |
+| **Precompute FrontierScience** | `data/precompute.py`                                                       | Completo | -            |
+| **Precompute verifiable**      | `data/precompute_verifiable.py` (GSM8K, MATH, **MedQA, MedMCQA**)         | Completo | 19 (Phase 2) |
+| **Precompute HealthBench**     | `data/precompute_healthbench.py` (toma answers del meta_eval, Judge evalua)| Completo | -            |
 
 
 ### Training
@@ -83,12 +99,13 @@ GRubrics entrena un modelo de lenguaje (Qwen3-8B) para que **genere rubricas de 
 | ------------------ | ----------------------------------------------------------------------- | -------- | ----- |
 | **Metricas**       | `evaluation/metrics.py` (alignment, discrimination, format, info_value) | Completo | 29    |
 | **Eval pipeline**  | `evaluation/eval_rubrics.py`                                            | Completo | -     |
-| **Holdout splits** | `evaluation/holdout.py`                                                 | Completo | -     |
+| **Holdout splits** | `evaluation/holdout.py` (**soporta FrontierScience + HealthBench**)     | Completo | -     |
 | **Baselines**      | `evaluation/baselines.py` (B0, B1, B2, B3)                              | Completo | -     |
-| **Baselines CLI**  | `scripts/run_baselines.py`                                              | Completo | -     |
+| **Baselines CLI**  | `scripts/run_baselines.py` (**--dataset_name healthbench/frontierscience**)| Completo | -   |
+| **Judge validation**| `scripts/validate_judge.py` (Judge vs medicos, Cohen's kappa, F1)       | Completo | -     |
 
 
-### Tests totales: 137 (todos pasan)
+### Tests totales: 181 (todos pasan)
 
 
 | Suite                               | Tests |
@@ -99,6 +116,8 @@ GRubrics entrena un modelo de lenguaje (Qwen3-8B) para que **genere rubricas de 
 | Phase 3 (reward config + ablations) | 17    |
 | Curriculum                          | 13    |
 | Evaluation                          | 29    |
+| HealthBench adapter + holdout       | 28    |
+| MedQA/MedMCQA adapters + veRL fmt   | 16    |
 
 
 ### Datos generados (prueba)
@@ -121,68 +140,9 @@ GRubrics entrena un modelo de lenguaje (Qwen3-8B) para que **genere rubricas de 
 
 ---
 
-## 3. Que NO hay implementado (gaps criticos)
+## 3. Que NO hay implementado (gaps restantes)
 
-### GAP 1: HealthBench — EL DATASET PRINCIPAL NO ESTA INTEGRADO
-
-**Impacto: BLOQUEANTE para la investigacion.**
-
-RESEARCH.md describe HealthBench (5000 conversaciones medicas, 48,562 criterios de 262 medicos) como el dataset primario de validacion. Todo el paper gira alrededor de HealthBench. Pero:
-
-- No existe `adapters/healthbench.py`
-- No hay datos de HealthBench descargados
-- La evaluacion solo funciona sobre FrontierScience (60 preguntas)
-- El `scripts/run_baselines.py` solo evalua en FrontierScience
-
-**Que hay disponible en HealthBench (HuggingFace `openai/healthbench`, MIT license):**
-
-4 archivos JSONL:
-- `oss_eval.jsonl`: 5000 conversaciones + rubricas de medicos + ideal_completions_data (respuestas de referencia)
-- `oss_meta_eval.jsonl`: las mismas conversaciones + respuestas de modelos (o3, gpt-4.1) + `binary_labels` de medicos humanos por criterio + `anonymized_physician_ids`
-- `hard_*.jsonl`: 1000 preguntas dificiles
-- `consensus_*.jsonl`: 34 dimensiones de consenso
-
-**Clarificacion critica sobre el meta_eval:**
-
-Los `binary_labels` del meta_eval son evaluaciones de **medicos humanos** (no de un Judge LLM). Esto tiene dos implicaciones:
-
-1. **NO se pueden usar como gold_scores para training**: Nuestro Judge es GPT-5.2. Mezclar gold_scores de medicos con grubrics_scores de GPT-5.2 contamina el reward (evaluadores con sesgos distintos). Los gold_scores deben venir del **mismo Judge** que se usa en training.
-
-2. **SI se pueden usar para validar al Judge**: Comparar las evaluaciones de nuestro Judge contra las de los medicos da una medida cuantitativa de concordancia (accuracy, Cohen's kappa). Esto es critico para la credibilidad del paper.
-
-**Lo que SI se puede aprovechar gratis del meta_eval:**
-- Las **respuestas de modelos** (completion, ref_completions): ya existen, nos ahorran correr Answer Policy.
-- Los **prompts y rubricas**: directamente usables.
-
-**Que falta implementar:**
-
-- Descargar HealthBench desde HuggingFace (`openai/healthbench`)
-- Crear `HealthBenchAdapter` siguiendo el patron DatasetAdapter
-- Precompute: tomar respuestas del meta_eval, evaluarlas con nuestro Judge (GPT-5.2) + golden rubric → gold_scores (~$45)
-- Crear holdout split (~500 preguntas test, ~4500 train)
-- Extender `run_baselines.py` para evaluar en HealthBench
-- (Bonus) Script de validacion del Judge: comparar binary_labels de medicos vs Judge
-
-### GAP 2: MedQA / MedMCQA — CURRICULUM VERIFICABLE NO IMPLEMENTADO
-
-**Impacto: BLOQUEANTE para la contribucion 3 (transfer verificable → abierto).**
-
-El curriculum propuesto va de MedQA/MedMCQA (verificable medico) a HealthBench (abierto medico). Pero:
-
-- No existe `adapters/medqa.py`
-- No existe `adapters/medmcqa.py`
-- Los adapters actuales son GSM8K y MATH (matematica, no medicina)
-- El curriculum actual mezcla matematica con FrontierScience (fisica), NO medicina
-
-**Que falta:**
-
-- Descargar MedQA-USMLE (~10K, HuggingFace: `GBaker/MedQA-USMLE-4-options`)
-- Descargar MedMCQA (~183K, HuggingFace: `openlifescienceai/medmcqa`)
-- Crear adapters para ambos
-- Precompute de respuestas + perturbaciones para ambos
-- Actualizar el curriculum scheduler para usar estos datasets
-
-### GAP 3: Entrenamiento SFT (Baseline B7)
+### GAP 1: Entrenamiento SFT (Baseline B7)
 
 **Impacto: NECESARIO para comparar RL vs SFT.**
 
@@ -197,7 +157,7 @@ La comparacion "RL supera a SFT" es central al paper. Pero:
 - Datos de SFT: pares (pregunta, rubrica_humana) de HealthBench
 - Training + evaluacion del modelo SFT
 
-### GAP 4: Entrenamiento de Policy (Experimento 1)
+### GAP 2: Entrenamiento de Policy (Experimento 1)
 
 **Impacto: NECESARIO para la contribucion principal del paper.**
 
@@ -210,16 +170,17 @@ El Experimento 1 ("rubric quality → policy quality") requiere entrenar una pol
 **Que falta:**
 
 - Script de policy training (rubrica → reward → GRPO → policy)
-- Configuracion para 6 runs (P0-P5: human, RL, SFT, GPT-5.2, Qwen-8B, random)
+- Configuracion para runs con distintas fuentes de rubricas
 - Evaluacion de cada policy en HealthBench held-out
 
-### GAP 5: Evaluacion sobre HealthBench (no solo FrontierScience)
+### GAP 3: Ejecuciones reales
 
-**Impacto: NECESARIO para resultados estadisticamente robustos.**
+Ningun training run real se ejecuto todavia. Todo lo validado fue con pruebas controladas para verificar que el pipeline funciona. Falta:
 
-- FrontierScience tiene 60 preguntas (12 holdout) — insuficiente para significancia estadistica
-- HealthBench tiene 5000 preguntas (500 holdout) — resultados robustos
-- Toda la evaluacion actual esta hardcodeada para FrontierScience
+- Descargar HealthBench desde HuggingFace
+- Correr precompute de gold_scores con nuestro Judge (~$45)
+- Correr baselines en HealthBench
+- Ejecutar training runs
 
 ---
 
@@ -228,212 +189,187 @@ El Experimento 1 ("rubric quality → policy quality") requiere entrenar una pol
 
 | Lo que dice RESEARCH.md                      | La realidad                                                         |
 | -------------------------------------------- | ------------------------------------------------------------------- |
-| "Validado en medicina (HealthBench)"         | Validado solo en FrontierScience (fisica, 60 preguntas)             |
-| "Transfer dentro del mismo campo (medicina)" | Transfer actual: matematica (GSM8K/MATH) → fisica (FrontierScience) |
-| "Datasets primarios: MedQA-USMLE, MedMCQA"   | Solo GSM8K y MATH implementados                                     |
-| "HealthBench (5000 conversaciones medicas)"  | No integrado                                                        |
-| ~~"gold_scores gratis via meta_eval"~~       | **CORREGIDO**: gold_scores del meta_eval son de medicos, no del Judge. NO usables como gold_scores para training. Se necesita precompute con nuestro Judge (~$45). El meta_eval SI sirve para: (a) respuestas pre-generadas gratis, (b) validar concordancia Judge vs medicos. |
+| "Validado en medicina (HealthBench)"         | Codigo listo, pero no ejecutado. Validado solo en FrontierScience (60 preguntas) |
+| "Transfer dentro del mismo campo (medicina)" | Adapters listos (MedQA/MedMCQA → HealthBench). No ejecutado aun    |
+| "Datasets primarios: MedQA-USMLE, MedMCQA"   | Adapters implementados y testeados. Datos no descargados aun       |
+| "HealthBench (5000 conversaciones medicas)"  | Adapter + precompute + holdout implementados. Datos no descargados  |
+| "gold_scores del meta_eval"                  | **CORREGIDO**: gold_scores del meta_eval son de medicos, no del Judge. Se necesita precompute con nuestro Judge (~$45). El meta_eval SI sirve para: (a) respuestas pre-generadas gratis, (b) validar concordancia Judge vs medicos. |
 | "B7: SFT — script separado"                  | No existe                                                           |
 | "Experiment 1: policy training"              | No existe                                                           |
 
 
-**El sistema actual es un prototipo funcional que opera sobre matematica (GSM8K/MATH) y fisica (FrontierScience).** Todo el framing medico del paper (HealthBench, MedQA, MedMCQA) esta descrito pero no implementado.
+**Resumen:** El pipeline de datos medicos (adapters, precompute, holdout, baselines, validacion Judge) esta implementado y testeado. Falta descargar los datos y ejecutar. Los gaps restantes son SFT y policy training.
 
 ---
 
-## 5. Plan de Ejecuciones: Que hay que correr y por que
+## 5. Preguntas de investigacion y como se prueban
+
+### Pregunta 1 — Functional alignment genera rubricas que se acercan a las humanas?
+
+El objetivo central del metodo es producir rubricas que funcionen como las de medicos, sin copiarlas textualmente.
+
+**Como se prueba:**
+
+Se evaluan todas las variantes sobre el mismo holdout de HealthBench (~500 preguntas). Para cada pregunta, cada metodo genera una rubrica, el Judge (GPT-5.2) la aplica sobre respuestas pre-generadas, y se calcula la correlacion de Spearman entre los puntajes resultantes y los gold scores. Se comparan:
+
+
+| Variante | Que es | Que mide |
+|---|---|---|
+| **Random** | Rubrica generada al azar | Piso. Si algo no supera esto, no funciona. |
+| **Zero-shot Qwen3-8B** | El modelo base sin entrenar | Punto de partida. |
+| **SFT Qwen3-8B** | Modelo entrenado por imitacion supervisada | RL es necesario o alcanza copiar? |
+| **RL Qwen3-8B (nuestro metodo)** | Modelo entrenado con GRPO + functional alignment | Nuestro sistema. |
+| **Zero-shot GPT-5.2** | Modelo frontier, sin entrenar | Si nuestro 8B se acerca, hay argumento de eficiencia. |
+| **Golden (medicos)** | Rubricas humanas de HealthBench | Techo. |
+
+
+**Runs necesarios:**
+- Baselines sin entrenamiento (Random, Golden, GPT-5.2): solo API, ~$20.
+- Zero-shot Qwen3-8B: inferencia local, ~$0.
+- SFT Qwen3-8B: entrenamiento con transformers Trainer, ~$10.
+- RL Qwen3-8B (sistema completo con curriculum): run principal, ~$90.
+
+### Pregunta 2 — El transfer de dominio verificable a abierto funciona?
+
+El curriculum empieza con preguntas medicas verificables (MedQA, MedMCQA) y transiciona a preguntas abiertas (HealthBench).
+
+**Como se prueba:**
+
+
+| Variante | Datos de entrenamiento | Que mide |
+|---|---|---|
+| **Verifiable-only** | Solo MedQA/MedMCQA (0% HealthBench) | Hay transfer? Si alignment > 0 en HealthBench, si. |
+| **Open-only** | Solo HealthBench (0% verificable) | Que pasa sin curriculum? |
+| **Curriculum (nuestro metodo)** | Mezcla gradual 80/20 → 50/50 → 20/80 | El curriculum aporta vs entrenar directo? |
+
+
+**Runs necesarios:** Verifiable-only (~$70), Open-only (~$90), Curriculum (ya contado en P1).
+
+### Pregunta 3 — El metodo generaliza a otro dominio (ciencia)?
+
+El modelo se entrena exclusivamente con datos medicos. Se evalua directamente sobre FrontierScience (~12 preguntas de fisica) sin reentrenar.
+
+**Costo:** Solo inferencia y evaluacion con API del Judge. ~$5.
+
+### Pregunta 4 — Mejores rubricas producen mejores modelos? (exploratoria)
+
+Se entrenan dos policies de respuestas medicas. Todo identico excepto la fuente de rubricas como reward:
+
+
+| Policy | Rubrica como reward | Que representa |
+|---|---|---|
+| **Policy A** | Rubricas humanas de HealthBench | Upper bound |
+| **Policy B** | Rubricas de nuestro modelo RL | Nuestro metodo |
+
+
+Si Policy A > Policy B → la calidad de la rubrica importa. Si Policy A ≈ Policy B → nuestras rubricas ya son suficientemente buenas.
+
+**Costo:** 2 runs × ~$90 = ~$180.
+
+---
+
+## 6. Plan de Ejecuciones
 
 ### Fase A: Establecer referencias (ANTES de cualquier training)
 
-Estas ejecuciones no requieren GPU. Establecen los rangos de referencia.
+No requieren GPU. Establecen los rangos de referencia.
 
 #### RUN A1: Precompute completo FrontierScience
-
-**Que:** Precomputar answers + gold_scores para las 60 preguntas de FrontierScience (actualmente solo 2).
-
-**Por que:** Sin esto no se puede evaluar nada. Los baselines y el training necesitan gold_scores para todas las preguntas.
-
-**Comando:**
 
 ```bash
 python -m grubrics_science.data.precompute --limit 60 --num_evals 3
 ```
 
-**Costo:** ~$5 (API calls para Judge)
-**Tiempo:** ~30 min
+**Costo:** ~$5 | **Tiempo:** ~30 min
 
 #### RUN A2: Baselines zero-cost en FrontierScience
-
-**Que:** Correr B0 (Golden), B1 (GPT-5.2 zero-shot), B3 (Random) en holdout de FrontierScience.
-
-**Por que:** Establece el rango [random, golden] que necesitamos superar. Sin estos numeros, no sabemos si un training run esta funcionando.
-
-**Comando:**
 
 ```bash
 python scripts/run_baselines.py --baselines B0 B1 B3 --num_eval_runs 3 --output data/results/baselines_fs.json
 ```
 
-**Costo:** ~$5 (API para B1)
-**Tiempo:** ~1h
-**Output esperado:** Tabla con alignment, discrimination, format, info_value para cada baseline.
+**Costo:** ~$5 | **Tiempo:** ~1h
 
 ---
 
-### Fase B: Integracion HealthBench + MedQA/MedMCQA (BLOQUEANTE)
+### Fase B: Datos medicos + baselines HealthBench
 
-Estas implementaciones son necesarias antes de los training runs reales.
+#### RUN B1: Descargar HealthBench + precompute gold_scores
 
-#### RUN B1: Implementar HealthBench adapter + descargar datos
+```bash
+# Descargar datos (requiere huggingface-cli o blobfile)
+# Luego precompute:
+python -m grubrics_science.data.precompute_healthbench --limit 10  # validar
+python -m grubrics_science.data.precompute_healthbench              # full (~$45)
+```
 
-**Que:** Crear `adapters/healthbench.py`, descargar HealthBench, integrar meta_eval.
+#### RUN B2: Precompute MedQA/MedMCQA
 
-**Por que:** Es el dataset principal del paper. Sin esto, todos los resultados son sobre FrontierScience (60 preguntas, insuficiente para un paper).
+```bash
+python -m grubrics_science.data.precompute_verifiable --dataset medqa --limit 10    # validar
+python -m grubrics_science.data.precompute_verifiable --dataset medmcqa --limit 10  # validar
+python -m grubrics_science.data.precompute_verifiable --dataset medqa               # full
+python -m grubrics_science.data.precompute_verifiable --dataset medmcqa             # full
+```
 
-**Resultado:** Adapter funcional, holdout split (500 test / 4500 train), gold_scores de meta_eval integrados.
+#### RUN B3: Validar Judge vs medicos
 
-#### RUN B2: Implementar MedQA + MedMCQA adapters
+```bash
+python scripts/validate_judge.py --limit 50    # validar
+python scripts/validate_judge.py --output data/results/judge_validation.json  # full (~$15)
+```
 
-**Que:** Crear adapters para MedQA-USMLE (~~10K) y MedMCQA (~~183K).
+#### RUN B4: Baselines zero-cost en HealthBench
 
-**Por que:** Son el componente verificable del curriculum medico. Sin ellos, el curriculum usa matematica (GSM8K/MATH) que no es del mismo dominio.
+```bash
+python scripts/run_baselines.py --dataset_name healthbench --baselines B0 B1 B3 --num_eval_runs 3 --output data/results/baselines_hb.json
+```
 
-**Resultado:** Adapters funcionales, precompute de respuestas + perturbaciones.
-
-#### RUN B3: Baselines zero-cost en HealthBench
-
-**Que:** Correr B0, B1, B3 en holdout de HealthBench (~500 preguntas).
-
-**Por que:** Establece los rangos de referencia en el dataset principal.
-
-**Costo:** ~$10 (API para B1 sobre 500 preguntas)
+**Costo:** ~$10
 
 ---
 
 ### Fase C: Training runs del generador de rubricas (Experimento 2)
 
-Estos son los runs principales que entrenan el generador de rubricas GRubrics.
 
-#### RUN C1: Baseline B2 — Zero-shot Qwen3-8B
+| Run | Que | Costo | Prioridad |
+| --- | --- | ----- | --------- |
+| C1 | Zero-shot Qwen3-8B (B2) — lower bound | $0 | ALTA |
+| C2 | SFT Qwen3-8B (B7) — RL vs SFT | $10 | ALTA |
+| C3 | **Sistema completo RL con curriculum** | $90 | CRITICO |
+| C4 | Verifiable-only (B5) — transfer funciona? | $70 | MEDIA |
+| C5 | Open-only (B6) — curriculum ayuda? | $90 | MEDIA |
+| C6 | Format-only (B4) — FA aporta? | $70 | MEDIA |
+| C7-C10 | Ablations (A1-A4) | $70 c/u | BAJA |
 
-**Que:** Evaluar Qwen3-8B base (sin entrenar) generando rubricas en HealthBench holdout.
 
-**Por que:** Es el lower bound — de donde partimos. Si RL no supera esto, no hay contribucion.
-
-**Costo:** ~$0 (modelo local)
-**Requiere:** GPU
-
-#### RUN C2: Baseline B7 — SFT Qwen3-8B
-
-**Que:** Entrenar Qwen3-8B con SFT sobre pares (pregunta, rubrica_humana) de HealthBench train, evaluar en holdout.
-
-**Por que:** LA comparacion mas importante del metodo. Si RL no supera a SFT, no hay argumento para usar RL. SFT es mas simple y barato. RL solo se justifica si produce mejores rubricas.
-
-**Requiere:** Implementar script SFT + datos
-**Costo:** ~$10 (GPU, pocas horas)
-
-#### RUN C3: Sistema completo — RL con curriculum medico
-
-**Que:** Entrenar GRubrics con GRPO, curriculum de 3 fases:
-
-- Fase 1 (80% MedQA/MedMCQA, 20% HealthBench)
-- Fase 2 (50/50)
-- Fase 3 (20% verificable, 80% HealthBench)
-
-**Por que:** Es nuestro metodo propuesto. El run principal.
-
-**Requiere:** HealthBench + MedQA/MedMCQA integrados
-**Costo:** ~$90 (GPU + API)
-**Tiempo:** ~10h en H100
-
-#### RUN C4: Ablation B5 — Verifiable-only
-
-**Que:** Entrenar solo con MedQA/MedMCQA (0% HealthBench), evaluar en HealthBench holdout.
-
-**Por que:** Mide si el transfer verificable → abierto funciona. Si alignment > 0 en HealthBench → hay transfer. Es la contribucion 3.
-
-**Comando:**
+Ablations disponibles via env vars:
 
 ```bash
-python -m grubrics_science.training.run_grpo --config ... --phases 1.0:0.0:1.0
+USE_CONTRASTIVE=0                 # A1: sin contrastive excerpts
+REWARD_LAMBDA_INFO=0.0            # A2: sin info_value bonus
+REWARD_LAMBDA_DEFENSE=0.0         # A3: sin defense_penalty
+# A4: sin curriculum shifting     # --phases 0.5:0.5:1.0
 ```
-
-**Costo:** ~$70
-
-#### RUN C5: Ablation B6 — Open-only
-
-**Que:** Entrenar solo con HealthBench (0% verificable).
-
-**Por que:** Mide si el curriculum aporta vs entrenar directo. Si C3 > C5 → el curriculum ayuda.
-
-**Comando:**
-
-```bash
-python -m grubrics_science.training.run_grpo --config ... --phases 0.0:1.0:1.0
-```
-
-**Costo:** ~$90
-
-#### RUN C6: Ablation B4 — Format-only reward
-
-**Que:** Entrenar sin functional alignment (solo reward de formato).
-
-**Por que:** Mide si functional alignment (Spearman) aporta vs solo premiar formato correcto.
-
-**Comando:**
-
-```bash
-REWARD_USE_FUNCTIONAL=0 python -m grubrics_science.training.run_grpo --config ...
-```
-
-**Costo:** ~$70
-
-#### RUN C7-C10: Ablations de componentes del reward
-
-
-| Run | Ablation                      | Config                      | Que mide                                  |
-| --- | ----------------------------- | --------------------------- | ----------------------------------------- |
-| C7  | Sin contrastive excerpts (A1) | `USE_CONTRASTIVE=0`         | Ayudan los excerpts de best/worst answer? |
-| C8  | Sin info_value (A2)           | `REWARD_LAMBDA_INFO=0.0`    | Importa el bonus de discriminacion?       |
-| C9  | Sin defense_penalty (A3)      | `REWARD_LAMBDA_DEFENSE=0.0` | Importa la penalidad de degeneracion?     |
-| C10 | Sin curriculum (A4)           | `--phases 0.5:0.5:1.0`      | Ayuda el shifting gradual?                |
-
-
-**Costo:** ~$70 cada uno
 
 ---
 
-### Fase D: Training de policy (Experimento 1 — EL MAS IMPORTANTE)
+### Fase D: Policy training (Experimento 1 — EL MAS IMPORTANTE)
 
-Este experimento responde la pregunta central: **"mejores rubricas producen mejores policies?"**
+Responde: **"mejores rubricas producen mejores policies?"**
 
-#### Setup: implementar policy training
+**Requiere:** Implementar script de policy training (GAP 2).
 
-**Que falta:** Script que tome un modelo base, lo entrene con GRPO usando una rubrica especifica como reward, y lo evalue en HealthBench con rubricas humanas.
+Dos runs minimos:
 
-#### RUN D1-D6: Seis policies con seis fuentes de rubricas
+| Run | Rubrica como reward | Que demuestra |
+| --- | ------------------- | ------------- |
+| D1 | **Human (HealthBench)** | Upper bound |
+| D2 | **RL-trained (ours)** | Nuestro metodo |
 
+Opcionalmente 4 runs adicionales (Random, Qwen zero-shot, GPT zero-shot, SFT) para el barrido completo.
 
-| Run     | Rubrica como reward     | Que demuestra                     |
-| ------- | ----------------------- | --------------------------------- |
-| D1 (P5) | **Random**              | Lower bound — sanity check        |
-| D2 (P4) | **Zero-shot Qwen-8B**   | Modelo chico sin entrenar         |
-| D3 (P3) | **Zero-shot GPT-5.2**   | Modelo frontier sin entrenar      |
-| D4 (P2) | **SFT-trained**         | Rubricas de imitacion supervisada |
-| D5 (P1) | **RL-trained (ours)**   | Nuestro metodo                    |
-| D6 (P0) | **Human (HealthBench)** | Upper bound — rubricas perfectas  |
-
-
-**Evaluacion:** Todas las policies se evaluan en HealthBench held-out con rubricas humanas.
-
-**Resultado esperado:** Si la calidad de la policy correlaciona monotonicamente con la calidad de la rubrica usada → **hallazgo principal del paper.**
-
-```
-D1 (random) < D2 (Qwen) < D3 (GPT) ≤ D4 (SFT) < D5 (RL) ≤ D6 (Human)
-```
-
-**Costo:** ~$90 por run × 6 runs = ~$540
-**Tiempo:** ~60h de GPU total
+**Costo:** 2 runs × ~$90 = ~$180 (minimo) | 6 runs × ~$90 = ~$540 (completo)
 
 ---
 
@@ -441,24 +377,21 @@ D1 (random) < D2 (Qwen) < D3 (GPT) ≤ D4 (SFT) < D5 (RL) ≤ D6 (Human)
 
 #### RUN E1: Evaluar GRubrics (entrenado en medicina) en FrontierScience (fisica)
 
-**Que:** Tomar el modelo entrenado en C3 y evaluar sus rubricas en FrontierScience holdout sin reentrenar.
-
-**Por que:** Si funciona → el metodo generaliza entre dominios. Contribucion bonus.
-
 **Costo:** ~$5 (solo evaluacion)
 
 ---
 
-## 6. Tabla resumen de todas las ejecuciones
+## 7. Tabla resumen de ejecuciones
 
 
 | #         | Run                         | Que mide                            | Requiere            | Costo   | Prioridad      |
 | --------- | --------------------------- | ----------------------------------- | ------------------- | ------- | -------------- |
 | **A1**    | Precompute FS completo      | -                                   | API                 | $5      | **INMEDIATO**  |
 | **A2**    | Baselines FS (B0, B1, B3)   | Rangos de referencia                | API + A1            | $5      | **INMEDIATO**  |
-| **B1**    | HealthBench adapter         | -                                   | Codigo              | $0      | **BLOQUEANTE** |
-| **B2**    | MedQA/MedMCQA adapters      | -                                   | Codigo              | $0      | **BLOQUEANTE** |
-| **B3**    | Baselines HealthBench       | Rangos de referencia HB             | API + B1            | $10     | **ALTA**       |
+| **B1**    | Precompute HealthBench      | -                                   | API + datos HF      | $45     | **BLOQUEANTE** |
+| **B2**    | Precompute MedQA/MedMCQA    | -                                   | datos HF            | $0      | **BLOQUEANTE** |
+| **B3**    | Validar Judge vs medicos    | Concordancia Judge/medicos          | API + B1            | $15     | **ALTA**       |
+| **B4**    | Baselines HealthBench       | Rangos de referencia HB             | API + B1            | $10     | **ALTA**       |
 | **C1**    | Zero-shot Qwen3-8B (B2)     | Lower bound                         | GPU                 | $0      | **ALTA**       |
 | **C2**    | SFT Qwen3-8B (B7)           | RL vs SFT                           | GPU + SFT code      | $10     | **ALTA**       |
 | **C3**    | **Sistema completo (RL)**   | **Nuestro metodo**                  | GPU + API + B1 + B2 | $90     | **CRITICO**    |
@@ -466,89 +399,51 @@ D1 (random) < D2 (Qwen) < D3 (GPT) ≤ D4 (SFT) < D5 (RL) ≤ D6 (Human)
 | C5        | Open-only (B6)              | Curriculum ayuda?                   | GPU + API           | $90     | MEDIA          |
 | C6        | Format-only (B4)            | FA aporta?                          | GPU                 | $70     | MEDIA          |
 | C7-C10    | Ablations (A1-A4)           | Componentes del reward              | GPU + API           | $70 c/u | BAJA           |
-| **D1-D6** | **Policy training (P0-P5)** | **Rubric quality → Policy quality** | GPU + API + C2 + C3 | $540    | **CRITICO**    |
+| **D1-D2** | **Policy training (minimo)**| **Rubric quality → Policy quality** | GPU + API + C3      | $180    | **CRITICO**    |
+| D3-D6     | Policy training (completo)  | Barrido exhaustivo                  | GPU + API           | $360    | MEDIA          |
 | E1        | Generalizacion a FS         | Cross-domain transfer               | C3                  | $5      | BONUS          |
 
 
-**Costo total estimado:**
+---
 
-- Minimo viable (A1+A2+B1-B3+C1-C3+D5+D6): ~$200
-- Paper completo (todo): ~$1,200
+## 8. Presupuesto estimado
+
+
+| Concepto                                   | Costo       |
+| ------------------------------------------ | ----------- |
+| Precompute HealthBench (gold_scores)       | ~$45        |
+| Validacion Judge vs medicos                | ~$15        |
+| Baselines de referencia (FS + HB)          | ~$20        |
+| SFT Qwen3-8B                              | ~$10        |
+| RL Qwen3-8B — sistema completo             | ~$90        |
+| Verifiable-only + Open-only                | ~$160       |
+| Evaluacion en FrontierScience              | ~$5         |
+| Policy training (2 runs minimos)           | ~$180       |
+| Ablaciones (4 runs, opcionales)            | ~$280       |
+| **Total minimo viable**                    | **~$365**   |
+| **Total sin ablaciones**                   | **~$525**   |
+| **Total completo**                         | **~$805**   |
+
 
 ---
 
-## 7. Que hay que demostrar y como
-
-### Demostracion 1: Rubric quality → Policy quality (EL PRINCIPAL)
-
-**Claim:** La calidad de la rubrica impacta directamente la calidad del modelo entrenado con ella.
-
-**Como se demuestra:** Runs D1-D6. Misma policy base, mismo RL, mismos datos. Solo cambia la rubrica. Si la calidad de la policy sube monotonicamente → demostrado.
-
-**Tabla objetivo:**
-
-
-| Rubrica como reward   | Rubric Alignment ↑ | Policy HB Score ↑ |
-| --------------------- | ------------------ | ----------------- |
-| Random                | ~0.0               | ? (peor)          |
-| Zero-shot Qwen-8B     | ?                  | ?                 |
-| Zero-shot GPT-5.2     | ?                  | ?                 |
-| SFT-trained           | ?                  | ?                 |
-| **RL-trained (ours)** | **?**              | **?**             |
-| Human (HealthBench)   | ~0.85              | ? (mejor)         |
-
-
-**Por que importa:** Todo el campo asume que mejores rubricas → mejor policy, pero NADIE lo testeo experimentalmente. Si lo demostramos, es el hallazgo principal.
-
-### Demostracion 2: RL supera a SFT para generar rubricas
-
-**Claim:** RL con functional alignment genera mejores rubricas que imitacion supervisada (SFT).
-
-**Como se demuestra:** Comparar C3 (RL) vs C2 (SFT) en alignment score sobre HealthBench holdout.
-
-**Por que importa:** Si SFT es suficiente, RL es innecesario. RL se justifica porque no hay una unica rubrica correcta — distintos expertos escribirian rubricas distintas. SFT optimiza similitud textual con UNA referencia. RL optimiza funcion objetivo directa.
-
-### Demostracion 3: Modelo chico + RL se acerca a modelo frontier
-
-**Claim:** Qwen-8B entrenado con RL se acerca a GPT-5.2 zero-shot en calidad de rubricas.
-
-**Como se demuestra:** Comparar alignment score de C3 (Qwen-8B RL) vs A2/B3 baseline B1 (GPT-5.2).
-
-**Por que importa:** Si un 8B entrenado iguala a un modelo frontier → eficiencia 100x en costo de inferencia ($0.0001 vs $0.01 por rubrica).
-
-### Demostracion 4: Transfer verificable → abierto funciona
-
-**Claim:** Entrenar con datos verificables medicos (MedQA/MedMCQA) transfiere a dominios abiertos medicos (HealthBench).
-
-**Como se demuestra:** Run C4 (verifiable-only). Si alignment > 0 en HealthBench holdout → hay transfer.
-
-**Refuerzo:** Si C3 (curriculum) > C5 (open-only) → el curriculum con verificable aporta.
-
-### Demostracion 5: Generalizacion cross-domain
-
-**Claim:** Un generador entrenado en medicina funciona en ciencia (fisica) sin reentrenar.
-
-**Como se demuestra:** Run E1. Evaluar modelo de C3 en FrontierScience holdout.
-
-**Por que importa:** Si generaliza → la "receta" es replicable a cualquier dominio con rubricas humanas.
-
----
-
-## 8. Orden de ejecucion recomendado
+## 9. Orden de ejecucion recomendado
 
 ### Semana 1: Fundamentos
 
 1. **Correr A1** (precompute FS 60 preguntas) — inmediato, solo API
 2. **Correr A2** (baselines FS) — inmediato despues de A1
-3. **Implementar B1** (HealthBench adapter) — codigo, alta prioridad
-4. **Implementar B2** (MedQA/MedMCQA adapters) — codigo, alta prioridad
+3. **Descargar HealthBench, MedQA, MedMCQA** desde HuggingFace
+4. **Correr B1** (precompute HealthBench) — ~$45
 
 ### Semana 2: Baselines + SFT
 
-1. **Correr B3** (baselines HealthBench) — necesita B1
-2. **Implementar SFT script** — necesario para C2
-3. **Correr C1** (Qwen zero-shot) — GPU
-4. **Correr C2** (SFT) — GPU
+1. **Correr B2** (precompute MedQA/MedMCQA)
+2. **Correr B3** (validar Judge vs medicos)
+3. **Correr B4** (baselines HealthBench)
+4. **Implementar SFT script** — necesario para C2
+5. **Correr C1** (Qwen zero-shot) — GPU
+6. **Correr C2** (SFT) — GPU
 
 ### Semana 3: Training principal
 
@@ -559,7 +454,7 @@ D1 (random) < D2 (Qwen) < D3 (GPT) ≤ D4 (SFT) < D5 (RL) ≤ D6 (Human)
 ### Semana 4: Policy training + ablations
 
 1. **Implementar policy training** — codigo para Experiment 1
-2. **Correr D1-D6** (policy training con 6 fuentes de rubricas) — GPU + API, ~60h total
+2. **Correr D1-D2** (policy training minimo) — GPU + API
 3. **Correr C6-C10** (ablations) — GPU + API
 
 ### Semana 5: Finalizacion
@@ -570,7 +465,7 @@ D1 (random) < D2 (Qwen) < D3 (GPT) ≤ D4 (SFT) < D5 (RL) ≤ D6 (Human)
 
 ---
 
-## 9. Riesgos y mitigaciones
+## 10. Riesgos y mitigaciones
 
 
 | Riesgo                                             | Probabilidad | Impacto  | Mitigacion                                        |
@@ -578,23 +473,6 @@ D1 (random) < D2 (Qwen) < D3 (GPT) ≤ D4 (SFT) < D5 (RL) ≤ D6 (Human)
 | RL no supera SFT                                   | Media        | Alto     | Ajustar hiperparametros, probar mas epochs        |
 | Transfer verificable → abierto no funciona         | Media        | Medio    | El paper puede funcionar sin contribucion 3       |
 | Policy training no muestra correlacion monotonica  | Baja         | MUY ALTO | Este es el resultado clave — si falla, replantear |
-| Costos API exceden presupuesto                     | Baja         | Medio    | Priorizar runs criticos (C3, D5, D6)              |
-| HealthBench meta_eval no tiene el formato esperado | Baja         | Medio    | Generar gold_scores con Judge + golden rubric     |
+| Costos API exceden presupuesto                     | Baja         | Medio    | Priorizar runs criticos (C3, D1, D2)              |
 | Judge noise demasiado alto (temp=1)                | Conocido     | Medio    | Promediar N=3 evaluaciones (ya implementado)      |
-
-
----
-
-## 10. Presupuesto estimado
-
-
-| Concepto                                   | Costo       |
-| ------------------------------------------ | ----------- |
-| Baselines zero-cost (API para Judge)       | ~$20        |
-| Training runs (GPU H100, ~100h × $7/h)     | ~$700       |
-| API Judge durante training (~6 runs × $20) | ~$120       |
-| Policy training (6 runs × $90)             | ~$540       |
-| **Total estimado**                         | **~$1,400** |
-| **Minimo viable (runs criticos)**          | **~$300**   |
-
 

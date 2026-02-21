@@ -1,6 +1,21 @@
-# DR-Tulu Evolving Rubrics
+# DR-Tulu Evolving Rubrics (Legacy)
 
-A modular package for evolving rubrics through iterative refinement using LLMs.
+> **Nota:** Este paquete es un prototipo inicial que exploraba la evolucion iterativa de rubricas con LLMs. El sistema principal del proyecto ahora vive en `grubrics_science/` y usa un enfoque diferente basado en RL (GRPO) con functional alignment. Este paquete se conserva como referencia historica.
+
+## Relacion con GRubrics
+
+Este paquete implementaba un loop de evolucion heuristica:
+1. Generar rubricas iniciales con un LLM
+2. Generar respuestas de modelos
+3. Evaluar respuestas con las rubricas
+4. Generar rubricas adaptativas basadas en las diferencias entre buenas/malas respuestas
+5. Repetir
+
+El sistema GRubrics (`grubrics_science/`) reemplaza este enfoque con entrenamiento RL:
+- En vez de iterar heuristicamente, entrena un modelo (Qwen3-8B) con GRPO para generar rubricas
+- La señal de reward es **functional alignment** (Spearman correlation con gold scores)
+- Soporta curriculum learning (verificable → abierto)
+- Escala a miles de preguntas via precompute + cache
 
 ## Structure
 
@@ -19,15 +34,11 @@ evolving_rubrics/
 
 ## Installation
 
-Make sure you have the required dependencies:
-
 ```bash
 pip install openai python-dotenv
 ```
 
 ## Configuration
-
-Set environment variables (or use a `.env` file):
 
 ```bash
 # For Azure OpenAI
@@ -46,159 +57,23 @@ RUBRIC_JUDGE_MODEL=gpt-4o-mini
 
 ## Usage
 
-### Basic Usage
-
 ```python
 from evolving_rubrics import evolve_rubrics_for_example
 
-# Evolve rubrics for a single example with multiple iterations
-result = await evolve_rubrics_for_example(
-    question="Your question here...",
-    num_iterations=3,  # Iterate 3 times for the same example
-    num_responses_per_iteration=4  # Generate 4 responses per iteration
-)
-
-# Access results
-print(result['initial_ground_truth'])
-print(result['iterations'])  # List with results from each iteration
-print(result['final_ground_truth'])
-```
-
-### Using Golden Answer (Optional)
-
-You can provide a golden answer (as plain text) to guide initial rubric generation. The rubrics will be generalized to work for any well-formed hypothesis, not just the specific one:
-
-```python
-from evolving_rubrics import evolve_rubrics_for_example
-
-# Create golden answer as text (any format you want)
-golden_answer = """
-Main Hypothesis: The hypothesis is that integrating guanidine sulfate...
-Experiments: The experiments include thermoelectric performance tests...
-Reasoning Process: bkg + insp1 + insp2 = hyp
-Note: Additional context...
-"""
-
-# Use golden answer to guide initial rubric generation
 result = await evolve_rubrics_for_example(
     question="Your question here...",
     num_iterations=3,
-    golden_answer=golden_answer  # Optional: will be used to create better initial rubrics
+    num_responses_per_iteration=4
 )
 ```
-
-The golden answer can be any text format you want - it's just passed as a string to help the model understand what makes a good response.
-
-### Advanced Usage
-
-You can also use individual functions:
-
-```python
-from evolving_rubrics import (
-    generate_original_rubrics,
-    generate_model_responses,
-    generate_adaptive_rubrics,
-    evaluate_complete_response
-)
-
-# Generate initial rubrics
-initial_rubrics = await generate_original_rubrics("Your question...")
-
-# Generate model responses
-responses = await generate_model_responses("Your question...", num_responses=4)
-
-# Generate adaptive rubrics
-adaptive = await generate_adaptive_rubrics(
-    "Your question...",
-    responses,
-    existing_rubrics=initial_rubrics['rubrics']
-)
-
-# Evaluate responses
-evaluation = await evaluate_complete_response(
-    responses[0],
-    initial_rubrics
-)
-```
-
-## Output and History
-
-The evolution process automatically saves a complete history to a JSON file in the `outputs/` directory. This file contains:
-
-- **Initial rubrics**: Starting rubrics for the question
-- **Each iteration**:
-  - All responses generated
-  - Scores from Judge evaluation
-  - Good vs bad response classification
-  - Adaptive rubrics generated
-  - Rubrics before and after the iteration
-- **Final rubrics**: Complete rubric set after all iterations
-- **Rubrics evolution**: Easy-to-compare rubric sets across iterations
-
-### Loading and Analyzing Output
-
-```python
-from evolving_rubrics import load_evolution_history, compare_rubrics_across_iterations
-
-# Load a saved history file
-history = load_evolution_history("outputs/evolution_history_20250112_101530.json")
-
-# Compare rubrics across iterations
-comparison = compare_rubrics_across_iterations(history)
-
-# Access specific data
-print(f"Initial rubrics: {history['initial_rubrics']['total_count']}")
-print(f"Final rubrics: {history['final_rubrics']['total_count']}")
-
-# See rubrics evolution
-for iter_key, iter_data in history['rubrics_evolution'].items():
-    print(f"{iter_key}: {iter_data['rubrics']['total_count']} rubrics")
-```
-
-See `example_analyze_output.py` for a complete example of analyzing evolution history files.
 
 ## Module Descriptions
 
-### `config.py`
-Handles environment variables, API configuration, and client initialization for OpenAI/Azure OpenAI.
-
-### `prompts.py`
-Contains all prompt templates used throughout the package:
-- Original rubric generation prompts
-- Adaptive rubric generation prompts
-- Response generation prompts
-- Evaluation prompts
-
-### `helpers.py`
-Utility functions for JSON extraction from LLM responses and asynchronous LLM calls.
-
-### `rubric_generation.py`
-Functions for:
-- Generating initial rubrics from questions
-- Generating adaptive rubrics based on response differences
-- Updating ground truth with new rubrics
-
-### `response_generation.py`
-Functions for:
-- Generating model responses with varied instructions
-
-### `evaluation.py`
-Functions for:
-- Evaluating responses against individual rubric criteria
-- Evaluating complete responses against all rubrics
-- Calculating weighted reward scores
-
-### `evolution.py`
-Main workflow function that orchestrates the entire evolution process through multiple iterations.
-
-
-## Example Workflow
-
-1. **Initial Rubrics**: Generate base rubrics for a question
-2. **Iteration Loop** (repeats `num_iterations` times):
-   - Generate model responses
-   - Analyze differences and generate adaptive rubrics
-   - Update ground truth with new rubrics
-   - Evaluate all responses with updated rubrics
-3. **Final Results**: Return complete evolution history
-
+- **`config.py`** — Environment variables, API configuration, client initialization
+- **`prompts.py`** — All prompt templates (rubric generation, evaluation, response generation)
+- **`helpers.py`** — JSON extraction from LLM responses, async LLM calls
+- **`rubric_generation.py`** — Initial and adaptive rubric generation
+- **`response_generation.py`** — Model response generation with varied instructions
+- **`evaluation.py`** — Response evaluation against rubric criteria
+- **`evolution.py`** — Main evolution workflow orchestration
+- **`output.py`** — Output and history management

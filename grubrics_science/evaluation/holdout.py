@@ -1,8 +1,9 @@
 """Holdout data management for evaluation.
 
-Loads FrontierScience data + precompute cache and splits into
-train/holdout. All baselines and ablations are evaluated on the
-same holdout set.
+Loads dataset data + precompute cache and splits into train/holdout.
+All baselines and ablations are evaluated on the same holdout set.
+
+Supports: FrontierScience, HealthBench.
 """
 
 import json
@@ -12,8 +13,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-# Default: reserve 12 questions (~20%) as holdout
-DEFAULT_HOLDOUT_SIZE = 12
+DEFAULT_HOLDOUT_SIZES = {
+    "frontierscience": 12,
+    "healthbench": 500,
+}
 DEFAULT_SEED = 42
 
 
@@ -82,9 +85,96 @@ def load_frontierscience_with_cache(
     return merged
 
 
+def load_healthbench_with_cache(
+    dataset_path: Optional[str] = None,
+    cache_path: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Load HealthBench questions with precomputed answers + gold_scores.
+
+    Returns only questions that have cache data (answers + gold_scores).
+
+    Args:
+        dataset_path: Path to oss_eval.jsonl. Defaults to repo standard location.
+        cache_path: Path to precompute cache JSONL. Defaults to repo standard.
+
+    Returns:
+        List of dicts with keys: question_id, question, golden_rubric,
+        category, answers, gold_scores, rubrics_json.
+    """
+    repo_root = Path(__file__).parent.parent.parent
+
+    if dataset_path is None:
+        dataset_path = str(
+            repo_root / "data" / "healthbench" / "2025-05-07-06-14-12_oss_eval.jsonl"
+        )
+    if cache_path is None:
+        cache_path = str(repo_root / "data" / "cache" / "healthbench_precompute.jsonl")
+
+    from ..data.adapters.healthbench import _rubrics_to_text, _extract_question_text
+
+    dataset = {}
+    with open(dataset_path, "r", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            pid = record.get("prompt_id", "")
+            if pid:
+                rubrics = record.get("rubrics", [])
+                dataset[pid] = {
+                    "question_id": pid,
+                    "question": _extract_question_text(record.get("prompt", [])),
+                    "golden_rubric": _rubrics_to_text(rubrics),
+                    "rubrics_json": rubrics,
+                    "category": record.get("category", ""),
+                }
+
+    cache = {}
+    if Path(cache_path).exists():
+        with open(cache_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                entry = json.loads(line)
+                pid = entry.get("prompt_id", "")
+                if pid:
+                    cache[pid] = entry
+
+    merged = []
+    for pid, data in dataset.items():
+        cached = cache.get(pid)
+        if cached and cached.get("answers") and cached.get("gold_scores"):
+            data["answers"] = cached["answers"]
+            data["gold_scores"] = cached["gold_scores"]
+            merged.append(data)
+
+    logger.info(
+        "Loaded %d/%d HealthBench questions with cache data.",
+        len(merged), len(dataset),
+    )
+    return merged
+
+
+def load_dataset_with_cache(
+    dataset_name: str,
+    dataset_path: Optional[str] = None,
+    cache_path: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Unified loader: dispatch to the right function by dataset name."""
+    if dataset_name == "frontierscience":
+        return load_frontierscience_with_cache(dataset_path, cache_path)
+    elif dataset_name == "healthbench":
+        return load_healthbench_with_cache(dataset_path, cache_path)
+    else:
+        raise ValueError(
+            f"Unknown dataset '{dataset_name}'. "
+            f"Available: frontierscience, healthbench"
+        )
+
+
 def split_holdout(
     data: List[Dict[str, Any]],
-    holdout_size: int = DEFAULT_HOLDOUT_SIZE,
+    holdout_size: int = 12,
     seed: int = DEFAULT_SEED,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Split data into train and holdout sets.
@@ -109,7 +199,7 @@ def split_holdout(
         return [], list(data)
 
     # Sort by question_id for reproducibility before shuffling
-    sorted_data = sorted(data, key=lambda d: int(d["question_id"]))
+    sorted_data = sorted(data, key=lambda d: str(d["question_id"]))
 
     rng = _random.Random(seed)
     indices = list(range(len(sorted_data)))
