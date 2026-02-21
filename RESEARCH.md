@@ -943,6 +943,8 @@ Flujo completo funciona: rubrica -> Judge batched -> scores -> Spearman vs gold_
    - Cache dict para evitar llamadas duplicadas
    - **`evaluate_answers_batched()`**: evalua N answers contra 1 rubric en 1 API call
    - `_parse_batched_response()`: parsea `{"evaluations": [{"answer_id": "a1", "total_score": 0.65}, ...]}`
+   - **Fix:** `max_tokens` subido de 2000→4000 para batched eval (evita truncamiento con 6+ answers)
+   - **Fix:** `extract_json_from_response()` mejorado con reparación de JSON truncado (cierre incremental de brackets)
 
 3. **`grubrics_science/rewards/alignment.py`** — MODIFICADO
    - `compute_info_value(scores)`: `4*p*(1-p)`, maximizado en p=0.5
@@ -1147,13 +1149,21 @@ Ventajas: gratis (sin API extra), determinista, garantiza varianza en gold_score
 9. **`scripts/validate_data_integration.py`** — CREADO
    - Valida integracion de datos reales: adapters, fields, holdout split
    - 30/30 tests pasan con datos reales de HuggingFace
-10. **`scripts/analyze_precompute.py`** — CREADO
+10. **`scripts/analyze_precompute.py`** — CREADO y MEJORADO
     - Analisis offline ($0) de precompute: Judge gold_scores stats, distribuciones, zero-variance detection
     - Cross-reference con physician scores de meta_eval: Spearman, Pearson, MAE, pairwise ranking
+    - **Nuevo:** Training signal quality (parse failures, zero/low variance, effective data %)
+    - **Nuevo:** Per-prompt Spearman (ranking agreement por pregunta individual)
+    - **Nuevo:** Score pattern classification (all_high, all_low, mixed)
     - Soporta HealthBench, MedQA, MedMCQA (y `--dataset all`)
     - Puede correr precompute automaticamente con `--run-precompute --limit N`
     - CLI: `python scripts/analyze_precompute.py --output data/results/analysis.json`
-    - Resultado (19 preguntas, 63 pares): Spearman=0.461 (p=0.0001), pairwise accuracy=0.681
+    - **Resultado (43 preguntas, 232 scores, 151 pares):**
+      - Spearman global=0.431 (p<0.0001), Pearson=0.405, MAE=0.306
+      - Pairwise accuracy=0.725 (87 concordant, 33 discordant)
+      - Per-prompt Spearman: median=0.670, 75% positivo, 59% fuerte (>0.5)
+      - Training signal: 93% datos útiles (0% parse failures post-fix, 2.3% zero variance)
+      - Score patterns: 65% mixed (ideal), 16% all_high, 16% all_low
 7. **`tests/test_evaluation.py`** — CREADO (29 tests, todos pasan)
    - `TestAlignmentScore` (5), `TestDiscriminationScore` (3), `TestFormatValidity` (4)
    - `TestPointsSum` (2), `TestInfoValue` (2), `TestComputeAllMetrics` (1)

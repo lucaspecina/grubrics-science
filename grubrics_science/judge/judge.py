@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 def extract_json_from_response(response: str) -> Optional[Dict[str, Any]]:
-    """Extract JSON from LLM response."""
+    """Extract JSON from LLM response, handling truncation and extra text."""
     # Try to find JSON in code blocks
     json_match = re.search(r'```json\s*(\{.*?\})\s*```', response, re.DOTALL)
     if json_match:
@@ -39,6 +39,17 @@ def extract_json_from_response(response: str) -> Optional[Dict[str, Any]]:
             return json.loads(json_match.group(0))
         except json.JSONDecodeError:
             pass
+
+    # Handle truncated JSON: find opening brace and try to repair
+    brace_pos = response.find('{')
+    if brace_pos >= 0:
+        fragment = response[brace_pos:]
+        # Try closing truncated arrays/objects incrementally
+        for suffix in (']]}', ']}', '}'):
+            try:
+                return json.loads(fragment + suffix)
+            except json.JSONDecodeError:
+                continue
 
     return None
 
@@ -275,7 +286,7 @@ class Judge:
         response = await self._call_with_retry(
             prompt,
             system_prompt=JUDGE_BATCHED_SYSTEM_PROMPT,
-            max_tokens=2000,
+            max_tokens=4000,
         )
 
         scores = self._parse_batched_response(response, len(answers))

@@ -279,11 +279,92 @@ def analyze_healthbench(
                 len(judge_matched),
             )
 
+    # --- Part 3: Training signal quality ---
+    parse_failures = sum(
+        1 for e in cache if all(s == 0.0 for s in e.get("gold_scores", []))
+    )
+    zero_var_only = zero_variance - parse_failures
+    low_var = sum(
+        1 for e in cache
+        if 0 < np.std(e.get("gold_scores", [0])) < 0.05
+    )
+    good_signal = len(cache) - parse_failures - zero_var_only - low_var
+
+    signal_quality = {
+        "total": len(cache),
+        "parse_failures": parse_failures,
+        "zero_variance": zero_var_only,
+        "low_variance": low_var,
+        "good_signal": good_signal,
+        "effective_pct": good_signal / len(cache) if cache else 0,
+    }
+
+    # Score pattern classification
+    patterns = {"all_high": 0, "all_low": 0, "mixed": 0, "all_same": 0}
+    for entry in cache:
+        scores = entry.get("gold_scores", [])
+        if not scores:
+            continue
+        arr = np.array(scores)
+        mean_s, std_s = float(arr.mean()), float(arr.std())
+        if std_s == 0:
+            patterns["all_same"] += 1
+        elif mean_s > 0.7 and float(arr.min()) > 0.4:
+            patterns["all_high"] += 1
+        elif mean_s < 0.3 and float(arr.max()) < 0.5:
+            patterns["all_low"] += 1
+        else:
+            patterns["mixed"] += 1
+    signal_quality["patterns"] = patterns
+
+    # --- Part 4: Per-prompt Spearman (Judge vs Physician) ---
+    per_prompt_spearman = []
+    if cross_ref and cross_ref.get("details"):
+        from scipy.stats import spearmanr as _spearmanr
+
+        by_prompt = defaultdict(list)
+        for d in cross_ref["details"]:
+            by_prompt[d["prompt_id"]].append(d)
+
+        for pid, items in by_prompt.items():
+            if len(items) < 3:
+                continue
+            j_s = [it["judge_score"] for it in items]
+            p_s = [it["physician_score"] for it in items]
+            if np.std(j_s) > 0 and np.std(p_s) > 0:
+                sp, _ = _spearmanr(j_s, p_s)
+                if not np.isnan(sp):
+                    per_prompt_spearman.append({
+                        "prompt_id": pid,
+                        "spearman": float(sp),
+                        "n_pairs": len(items),
+                    })
+
+    per_prompt_stats = None
+    if per_prompt_spearman:
+        sps = [x["spearman"] for x in per_prompt_spearman]
+        positive = sum(1 for s in sps if s > 0)
+        strong = sum(1 for s in sps if s > 0.5)
+        negative = sum(1 for s in sps if s < 0)
+        per_prompt_stats = {
+            "n_prompts": len(sps),
+            "mean": float(np.mean(sps)),
+            "median": float(np.median(sps)),
+            "min": float(min(sps)),
+            "max": float(max(sps)),
+            "positive_pct": positive / len(sps),
+            "strong_pct": strong / len(sps),
+            "negative_pct": negative / len(sps),
+            "details": sorted(per_prompt_spearman, key=lambda x: -x["spearman"]),
+        }
+
     return {
         "dataset": "healthbench",
         "judge_stats": judge_stats,
         "physician_stats": physician_stats,
         "cross_reference": cross_ref,
+        "signal_quality": signal_quality,
+        "per_prompt_spearman": per_prompt_stats,
         "entries_detail": entries_detail,
     }
 
@@ -430,6 +511,43 @@ def print_healthbench_results(results: Dict[str, Any]) -> None:
                           "rubrics while physicians evaluated cluster-level criteria.")
                 else:
                     print(f"    Spearman={sp:.3f}: VERY WEAK / no agreement. Investigate further.")
+
+    # Signal quality
+    sq = results.get("signal_quality")
+    if sq:
+        print(f"\n--- Training Signal Quality ---")
+        print(f"  Total entries:     {sq['total']}")
+        print(f"  Parse failures:    {sq['parse_failures']} ({sq['parse_failures']/sq['total']:.1%}) -> reward=0, WASTED")
+        print(f"  Zero variance:     {sq['zero_variance']} ({sq['zero_variance']/sq['total']:.1%}) -> reward=0, WASTED")
+        print(f"  Low variance:      {sq['low_variance']} ({sq['low_variance']/sq['total']:.1%}) -> noisy Spearman")
+        print(f"  Good signal:       {sq['good_signal']} ({sq['effective_pct']:.1%}) -> USEFUL")
+        pat = sq.get("patterns", {})
+        if pat:
+            print(f"\n  Score patterns:")
+            print(f"    All same:  {pat.get('all_same', 0)}")
+            print(f"    All high:  {pat.get('all_high', 0)}")
+            print(f"    All low:   {pat.get('all_low', 0)}")
+            print(f"    Mixed:     {pat.get('mixed', 0)} (best for training)")
+
+    # Per-prompt Spearman
+    pps = results.get("per_prompt_spearman")
+    if pps:
+        print(f"\n--- Per-Prompt Judge vs Physician Ranking ({pps['n_prompts']} prompts) ---")
+        print(f"  Mean Spearman:   {pps['mean']:.3f}")
+        print(f"  Median Spearman: {pps['median']:.3f}")
+        print(f"  Range:           [{pps['min']:.3f}, {pps['max']:.3f}]")
+        print(f"  Positive (>0):   {pps['positive_pct']:.0%}")
+        print(f"  Strong (>0.5):   {pps['strong_pct']:.0%}")
+        print(f"  Negative (<0):   {pps['negative_pct']:.0%}")
+
+        details = pps.get("details", [])
+        if details:
+            print(f"\n  Top 5 best agreement:")
+            for d in details[:5]:
+                print(f"    {d['prompt_id'][:25]}... r={d['spearman']:.3f} (n={d['n_pairs']})")
+            print(f"  Worst 5:")
+            for d in details[-5:]:
+                print(f"    {d['prompt_id'][:25]}... r={d['spearman']:.3f} (n={d['n_pairs']})")
 
     print("\n" + "=" * 70)
 

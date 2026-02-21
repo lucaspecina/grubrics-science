@@ -160,6 +160,13 @@ Fuente: HuggingFace (`openai/healthbench`, `GBaker/MedQA-USMLE-4-options`, `open
 8. **Precompute MedQA** (10 preguntas, programatico): gold_scores [1,0,0,0] correctos
 9. **Precompute MedMCQA** (15 preguntas, programatico): gold_scores correctos, 5 skipped por falta de gold_answer
 10. **Judge vs Physician cross-reference** (63 pares matched): Spearman=0.461 (p=0.0001), Pearson=0.515, pairwise accuracy=0.681. Acuerdo moderado, estadisticamente significativo. Esperado dado que Judge evalua con example-level rubrics y medicos evaluaron con cluster-level criteria
+11. **Validación ampliada (43 preguntas, 232 scores, 151 pares matched):**
+    - Parse failures: 0% (fix aplicado: max_tokens 2000→4000, parser con reparación de JSON truncado)
+    - Training signal: 93% datos útiles (40/43), solo 1 zero-variance, 2 low-variance
+    - Spearman global=0.431 (p<0.0001), Pearson=0.405, MAE=0.306, pairwise accuracy=0.725
+    - Per-prompt Spearman: median=0.670, 75% positivo, 59% fuerte (>0.5)
+    - Score patterns: 65% mixed (ideal para training), 16% all_high, 16% all_low
+    - Distribución de scores bien balanceada: mean=0.537, std=0.332, rango completo [0, 1]
 11. **Precompute paralelo validado**: 19 preguntas en ~1 min (vs ~8 min secuencial), speedup ~8x
 
 ---
@@ -344,6 +351,10 @@ python -m grubrics_science.data.precompute_verifiable --dataset medmcqa
 # 4b. Analisis de precompute + cross-reference con medicos — HECHO
 python scripts/analyze_precompute.py --dataset healthbench --output data/results/healthbench_analysis.json
 
+# 4c. Validación ampliada (43 preguntas) — HECHO
+python -m grubrics_science.data.precompute_healthbench --limit 50 --num_evals 1 --max_concurrent 10
+python scripts/analyze_precompute.py --dataset healthbench --output data/results/healthbench_analysis_50.json
+
 # 5. Precompute HealthBench completo con example-level rubrics (~$45, ~4h con paralelizacion)
 python -m grubrics_science.data.precompute_healthbench --num_evals 1 --max_concurrent 10
 
@@ -406,6 +417,7 @@ REWARD_LAMBDA_DEFENSE=0.0         # A3: sin defense_penalty
 | 3 | Mini precompute HB (19 preguntas) | 1 | Pipeline OK, paralelo validado | $0.50 | 1 min | **HECHO** |
 | 3b | Precompute MedQA/MedMCQA | 1 | gold_scores programaticos | $0 | ~1 min | **HECHO** |
 | 3c | Analisis precompute + physician cross-ref | 1 | Spearman=0.461, acuerdo moderado | $0 | offline | **HECHO** |
+| 3d | Validación ampliada (43 preguntas) | 1 | 93% signal útil, 0% parse fail, Spearman=0.431 | ~$1.50 | ~2.5 min | **HECHO** |
 | **5** | **Precompute HealthBench full** | **1** | **gold_scores con example-level rubrics** | **$45** | **~4h (paralelo)** | **SIGUIENTE** |
 | 6 | Precompute FS | 1 | - | $5 | ~1h | PENDIENTE |
 | 7 | Baselines FS | 1 | Rangos de referencia | $5 | ~1h | PENDIENTE |
@@ -450,7 +462,9 @@ REWARD_LAMBDA_DEFENSE=0.0         # A3: sin defense_penalty
 5. ~~Paralelizar precompute_healthbench~~ HECHO (speedup ~8x)
 6. ~~Analisis precompute + physician cross-reference~~ HECHO (Spearman=0.461)
 7. ~~Filtrar rubrics a example-level~~ HECHO (ahorra 46% de tokens)
-8. **Precompute HealthBench completo con example-level rubrics** (~$45, ~4h paralelo)
+8. ~~Fix parse failures (max_tokens 2000→4000, JSON repair)~~ HECHO (0% parse failures)
+9. ~~Validación ampliada (43 preguntas, 232 scores)~~ HECHO (93% signal útil, Spearman=0.431)
+10. **Precompute HealthBench completo con example-level rubrics** (~$45, ~4h paralelo)
 9. Precompute FS (~$5)
 10. (En paralelo, opcional) Benchmark de Judges con cluster-level items
 
