@@ -282,7 +282,7 @@ El sistema opera sobre dos tipos de datos. El truco del transfer learning es que
 #### Dominio verificable (medicina) — barato, abundante
 
 - **Datasets primarios**: MedQA-USMLE (~10K, USMLE Steps 1/2/3), MedMCQA (~183K, 21 especialidades medicas)
-- **Datasets secundarios** (ya implementados): MATH (12K), GSM8K (8.5K), olympiad_math (1K) — utiles para ciencia
+- **Datasets secundarios** (ya implementados): MATH (12K), GSM8K (8.5K) — utiles para ciencia
 - **Propiedad clave**: tienen respuesta correcta conocida (opcion MCQ correcta / numero)
 - **Datasets con respuestas pre-generadas**: HPAI-BSC CoT (~200K+ respuestas correctas de Mixtral/Llama-3.1 a MedQA/MedMCQA); med-qa-orpo-dpo (triples chosen/rejected)
 
@@ -607,19 +607,11 @@ Evaluar la calidad de las rubricas generadas directamente, sin entrenar una poli
 
 ### Datasets en el Repositorio
 
-| Dataset | Ubicacion | Tipo | Rubrics? | Humanas? | Ciencia? | Verdict |
+| Dataset | Ubicacion | Tipo | Rubrics? | Humanas? | Dominio | Rol |
 |---|---|---|---|---|---|---|
-| verifiable-math-problems | `primeintellect-synthetic-1/` | Math olimpiada con soluciones gold | No | N/A | Math | **D_verif OK** |
-| stackexchange-QA | `primeintellect-synthetic-1/` | Q&A con respuestas gold, dominios mixtos | No | N/A | Mixto | D_verif parcial (filtrar) |
-| synthetic-1-subsample | `primeintellect-synthetic-1/` | Pares preferencia (preferred/rejected) | No | N/A | Mixto | No util directamente |
-| synthetic-2 | `primeintellect-synthetic-2/` | Instruction following con rewards de modelos | No | N/A | No | **No sirve para D_verif** |
-| FrontierScience Research | `frontierscience-research/` | 60 subtasks de investigacion fisica, PhD-authored | **Si, 10pts** | **Si (PhD)** | **Fisica** | **D_open GOLD STANDARD** |
-| rurl-science | `rubrichub/` | Preguntas ciencia con rubricas criterio/puntos | Si | No (LLM) | Ciencia basica | Suplementario |
-| rurl-medical | `rubrichub/` | Preguntas medicas con rubricas | Si | No (LLM) | Medicina | Suplementario |
-| researchrubrics | `scaleai/` | Rubricas detalladas criterio/peso/eje | Si | **Si (humanas)** | **No (general)** | Util para formato |
-| moose-chem | `moose-chem/` | Papers quimica con hipotesis/experimentos | No | N/A | Quimica | Sin rubricas |
-| research-plan-gen | `research-plan-gen/` | Planes de investigacion arxiv/pubmed con rubricas | Si | No (LLM) | CS/Med | Suplementario |
-| ruft-bestof6 | `rubrichub/` | Muestras best-of-6, dominio general | Si | No | No | No relevante |
+| FrontierScience Research | `data/frontierscience-research/` | 60 subtasks de investigacion fisica, PhD-authored | **Si, 10pts** | **Si (PhD)** | **Fisica** | **D_open — cross-domain generalization** |
+
+Nota: Los datasets verificables (GSM8K, MATH, MedQA, MedMCQA) y HealthBench se descargan de HuggingFace en runtime. Ver "Datasets Externos" abajo.
 
 ### Datasets Externos Relevantes
 
@@ -667,7 +659,7 @@ class DatasetAdapter(ABC):
     def to_parquet(self, output_dir, tokenizer): ...
 ```
 
-Adapters: `GSM8KAdapter`, `MATHAdapter`, `FrontierScienceAdapter`, `VerifiableMathAdapter`, `HealthBenchAdapter`, `MedQAAdapter`, `MedMCQAAdapter`.
+Adapters: `GSM8KAdapter`, `MATHAdapter`, `FrontierScienceAdapter`, `HealthBenchAdapter`, `MedQAAdapter`, `MedMCQAAdapter`.
 
 ---
 
@@ -815,7 +807,7 @@ Esto da una medida cuantitativa de cuanto podemos confiar en el Judge como proxy
 **Objetivo:** veRL corriendo con GRPO + LoRA, pipeline verificado.
 
 **Hecho:**
-- Adapters de datos (GSM8K, MATH, FrontierScience, olympiad_math)
+- Adapters de datos (GSM8K, MATH, FrontierScience, MedQA, MedMCQA, HealthBench)
 - Reward local (formato + coherencia)
 - CLI para generar parquets (`python -m grubrics_science.data.prepare`)
 - Debug training script + launch configs
@@ -832,8 +824,7 @@ Esto da una medida cuantitativa de cuanto podemos confiar en el Judge como proxy
 2. `grubrics_science/data/adapters/gsm8k.py` — GSM8KAdapter
 3. `grubrics_science/data/adapters/math_hendrycks.py` — MATHAdapter
 4. `grubrics_science/data/adapters/frontierscience.py` — FrontierScienceAdapter
-5. `grubrics_science/data/adapters/verifiable_math.py` — VerifiableMathAdapter
-6. `grubrics_science/data/adapters/__init__.py` — Registry
+5. `grubrics_science/data/adapters/__init__.py` — Registry
 7. `grubrics_science/data/prepare.py` — CLI entry point
 8. `grubrics_science/rewards/gsm8k_reward.py` — Reward local simple
 9. `grubrics_science/configs/verl_grpo.yaml` — Config produccion (H100)
@@ -853,7 +844,7 @@ Flujo completo funciona: rubrica -> Judge batched -> scores -> Spearman vs gold_
 
 1. **`grubrics_science/rewards/grubrics_reward.py`** — CREADO
    - `compute_score()`: entry point para veRL, rutea por `data_source`
-   - Verifiable (gsm8k, math, olympiad_math) -> reward local (formato + coherencia)
+   - Verifiable (gsm8k, math, medqa, medmcqa) -> reward local (formato + coherencia)
    - Open (frontierscience) -> Judge API batched -> functional alignment reward
    - Reward formula: `alignment - 0.1*len_pen + 0.3*info_val - 0.3*defense_pen`
    - Length penalty: solo penaliza exceso sobre 3000 chars
@@ -1141,7 +1132,7 @@ USE_CONTRASTIVE=0 python -m grubrics_science.training.run_grpo --config ...
 
 ---
 
-### Phase 4: Evolucion de Rubricas (merge evolving_rubrics/) -- PENDIENTE (BONUS)
+### Phase 4: Evolucion de Rubricas -- PENDIENTE (BONUS)
 
 **Objetivo:** Refinamiento periodico de rubricas durante training.
 
@@ -1149,15 +1140,13 @@ USE_CONTRASTIVE=0 python -m grubrics_science.training.run_grpo --config ...
 
 **Es necesario para la investigacion?** No. El sistema funciona sin esto. Es un BONUS que podria mejorar resultados y aporta una contribucion adicional al paper. La ablation A5 (con vs sin evolucion) mide su impacto.
 
-**Archivos a crear (portados de evolving_rubrics/):**
+**Archivos a crear:**
 
 1. `grubrics_science/evolution/__init__.py`
-2. `grubrics_science/evolution/adaptive_rubrics.py` — portar `generate_adaptive_rubrics()`, `update_ground_truth()`
-3. `grubrics_science/evolution/prompts.py` — portar prompts adaptativos
+2. `grubrics_science/evolution/adaptive_rubrics.py` — `generate_adaptive_rubrics()`, `update_ground_truth()`
+3. `grubrics_science/evolution/prompts.py` — prompts adaptativos
 4. `grubrics_science/evolution/evolution_manager.py` — `RubricEvolutionManager`
 5. `grubrics_science/evolution/output.py` — save/load evolution history
-
-Post-merge: `evolving_rubrics/` se marca deprecated.
 
 ---
 
@@ -1211,7 +1200,6 @@ grubrics-science/
         gsm8k.py                   ✓
         math_hendrycks.py          ✓
         frontierscience.py         (+ cache + contrastive) ✓
-        verifiable_math.py         ✓
         healthbench.py             (open_rubric, meta_eval answers, cache) ✓
         medqa.py                   (verifiable, HuggingFace, MCQ 4 opciones) ✓
         medmcqa.py                 (verifiable, HuggingFace, 21 especialidades) ✓
@@ -1250,8 +1238,6 @@ grubrics-science/
       logging.py                   ✓
       seeding.py                   ✓
 
-  evolving_rubrics/                # Referencia para Phase 4
-
   scripts/
     run_baselines.py               (--dataset_name healthbench/frontierscience) ✓
     validate_judge.py              (Judge vs medicos: accuracy, kappa, F1) ✓
@@ -1273,9 +1259,6 @@ grubrics-science/
     processed/
       frontierscience_train.parquet     (60 rows, 2 con cache) ✓
     frontierscience-research/      # FrontierScience (60 subtasks, rubricas PhD)
-    primeintellect-synthetic-1/    # Math olimpiada + StackExchange
-    rubrichub/                     # RubricHub (rubricas LLM-generated)
-    scaleai/                       # ResearchRubrics (rubricas humanas, general)
 ```
 
 ### Comandos de ejecucion
@@ -1313,7 +1296,7 @@ python -m grubrics_science.training.run_grpo \
 ```bash
 # Generar parquet de un dataset:
 python -m grubrics_science.data.prepare single \
-    --dataset olympiad_math --output_dir ./data/processed/test/
+    --dataset gsm8k --output_dir ./data/processed/test/
 
 # Precompute de FrontierScience (answers + gold_scores):
 python -m grubrics_science.data.precompute \
@@ -1330,7 +1313,7 @@ python -m grubrics_science.data.precompute_verifiable --dataset medmcqa --limit 
 # Precompute de HealthBench (answers del meta_eval, Judge evalua con golden rubric):
 python -m grubrics_science.data.precompute_healthbench --limit 10 --num_evals 3
 
-# Datasets disponibles: olympiad_math, gsm8k, math, frontierscience, healthbench, medqa, medmcqa
+# Datasets disponibles: gsm8k, math, frontierscience, healthbench, medqa, medmcqa
 ```
 
 #### Evaluacion y Baselines

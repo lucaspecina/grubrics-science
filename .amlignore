@@ -27,10 +27,3 @@ wandb/
 
 # Generated parquets (will be regenerated on compute)
 data/processed/
-
-# Large datasets not needed for training
-# (olympiad_math CSV is needed, rest can be excluded if too large)
-data/primeintellect-synthetic-2/
-data/moose-chem/
-data/moose-chem2/
-data/research-plan-gen/

@@ -92,7 +92,7 @@ echo ""
 if [ "$PROFILE" = "workstation" ]; then
     echo "NEXT STEPS (workstation debug):"
     echo "  1. Generate debug parquet:"
-    echo "     python -m grubrics_science.data.prepare single --dataset olympiad_math --output_dir ./data/processed/test/"
+    echo "     python -m grubrics_science.data.prepare single --dataset gsm8k --output_dir ./data/processed/test/"
     echo ""
     echo "  2. Run veRL debug training:"
     echo "     python -m verl.trainer.main_ppo --config grubrics_science/configs/verl_grpo_debug.yaml"

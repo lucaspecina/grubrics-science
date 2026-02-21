@@ -42,7 +42,7 @@ GRubrics usa functional alignment contra rubricas humanas existentes. Mide direc
 | Componente              | Archivos                                                                             | Estado   | Tests        |
 | ----------------------- | ------------------------------------------------------------------------------------ | -------- | ------------ |
 | **DatasetAdapter ABC**  | `data/base.py`                                                                       | Completo | 29 (Phase 0) |
-| **Adapters existentes** | `adapters/gsm8k.py`, `math_hendrycks.py`, `frontierscience.py`, `verifiable_math.py` | Completo | -            |
+| **Adapters existentes** | `adapters/gsm8k.py`, `math_hendrycks.py`, `frontierscience.py`                      | Completo | -            |
 | **Adapters medicos**    | `adapters/healthbench.py`, `medqa.py`, `medmcqa.py`                                  | Completo | 44 (HB+MedQA)|
 | **Adapter registry**    | `adapters/__init__.py` (7 adapters registrados)                                      | Completo | -            |
 | **Parquet CLI**         | `data/prepare.py`                                                                    | Completo | -            |

@@ -122,19 +122,6 @@ class TestAdapterSchema:
         assert "gold_scores" in row["extra_info"]
         assert row["reward_model"]["ground_truth"] == ""  # open-ended
 
-    def test_verifiable_math_adapter(self):
-        from grubrics_science.data.adapters.verifiable_math import VerifiableMathAdapter
-
-        adapter = VerifiableMathAdapter()
-        # load_raw outputs "question" (mapped from CSV "prompt" field)
-        row = adapter.to_verl_format({
-            "question": "Find the value of 3! + 4!",
-            "solution": "3! = 6, 4! = 24, so 3! + 4! = 30",
-        })
-
-        self._check_row(row, "olympiad_math", "verifiable")
-
-
 class TestParquetSerialization:
     """Base adapter serialization: prompt→JSON string, dicts stay dicts."""
 

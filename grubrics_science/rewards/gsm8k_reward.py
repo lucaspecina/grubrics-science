@@ -1,4 +1,4 @@
-"""Local reward function for verifiable domains (GSM8K, MATH, olympiad_math).
+"""Local reward function for verifiable domains (GSM8K, MATH, MedQA, MedMCQA).
 
 This reward checks whether a generated rubric has correct format and
 basic coherence, without requiring any external API calls.

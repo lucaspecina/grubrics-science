@@ -77,8 +77,8 @@ algorithm:
 
 # --- Data ---
 data:
-  train_files: data/processed/test/olympiad_math_train.parquet
-  val_files: data/processed/test/olympiad_math_train.parquet
+  train_files: data/processed/test/gsm8k_train.parquet
+  val_files: data/processed/test/gsm8k_train.parquet
   max_prompt_length: 1024
   max_response_length: 256
   train_batch_size: 4

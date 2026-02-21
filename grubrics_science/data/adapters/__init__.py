@@ -13,7 +13,6 @@ from ..base import DatasetAdapter
 from .gsm8k import GSM8KAdapter
 from .math_hendrycks import MATHAdapter
 from .frontierscience import FrontierScienceAdapter
-from .verifiable_math import VerifiableMathAdapter
 from .healthbench import HealthBenchAdapter
 from .medqa import MedQAAdapter
 from .medmcqa import MedMCQAAdapter
@@ -22,7 +21,6 @@ ADAPTERS: Dict[str, Type[DatasetAdapter]] = {
     "gsm8k": GSM8KAdapter,
     "math": MATHAdapter,
     "frontierscience": FrontierScienceAdapter,
-    "olympiad_math": VerifiableMathAdapter,
     "healthbench": HealthBenchAdapter,
     "medqa": MedQAAdapter,
     "medmcqa": MedMCQAAdapter,

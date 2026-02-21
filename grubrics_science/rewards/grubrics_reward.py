@@ -1,7 +1,7 @@
 """Unified reward function for veRL GRPO training.
 
 Routes based on ``data_source``:
-  - Verifiable domains (gsm8k, math, olympiad_math) → local reward (format + coherence).
+  - Verifiable domains (gsm8k, math, medqa, medmcqa) → local reward (format + coherence).
   - Open domains (frontierscience) → Judge API reward (functional alignment).
 
 veRL calls ``compute_score(data_source, solution_str, ground_truth, extra_info)``.
@@ -119,7 +119,7 @@ def _get_judge():
 # Verifiable domain reward (local, no API)
 # ---------------------------------------------------------------------------
 
-VERIFIABLE_SOURCES = {"gsm8k", "math", "olympiad_math"}
+VERIFIABLE_SOURCES = {"gsm8k", "math", "medqa", "medmcqa"}
 
 
 def _reward_verifiable(

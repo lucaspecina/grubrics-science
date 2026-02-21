@@ -20,7 +20,7 @@ command: |
 
   echo "=== [2/4] Generate debug parquet ==="
   python -m grubrics_science.data.prepare single \
-      --dataset olympiad_math \
+      --dataset gsm8k \
       --output_dir ./data/processed/test/
 
   echo "=== [3/4] Run veRL GRPO debug (20 steps) ==="

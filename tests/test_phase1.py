@@ -98,7 +98,7 @@ class TestGrubricsRewardRouting:
         )
 
         # All verifiable sources should use local reward (no API)
-        for source in ["gsm8k", "math", "olympiad_math"]:
+        for source in ["gsm8k", "math", "medqa", "medmcqa"]:
             score = compute_score(
                 data_source=source,
                 solution_str=good_rubric,
