@@ -1,0 +1,926 @@
+{
+  "healthbench": {
+    "dataset": "healthbench",
+    "judge_stats": {
+      "n_entries": 19,
+      "n_scores": 101,
+      "mean": 0.5200792079207921,
+      "std": 0.33180842358766155,
+      "median": 0.53,
+      "min": 0.0,
+      "max": 1.0,
+      "within_entry_std_mean": 0.19039475883739052,
+      "within_entry_std_median": 0.15420945352200544,
+      "zero_variance_entries": 2,
+      "zero_variance_pct": 0.10526315789473684,
+      "histogram": {
+        "0.0-0.1": 16,
+        "0.1-0.2": 4,
+        "0.2-0.3": 7,
+        "0.3-0.4": 5,
+        "0.4-0.5": 15,
+        "0.5-0.6": 13,
+        "0.6-0.7": 11,
+        "0.7-0.8": 4,
+        "0.8-0.9": 4,
+        "0.9-1.0": 22
+      }
+    },
+    "physician_stats": {
+      "n_completions": 14592,
+      "mean": 0.7677639193469786,
+      "std": 0.2868755574363211,
+      "median": 0.8333333333333334,
+      "min": 0.0,
+      "max": 1.0,
+      "histogram": {
+        "0.0-0.1": 736,
+        "0.1-0.2": 42,
+        "0.2-0.3": 617,
+        "0.3-0.4": 120,
+        "0.4-0.5": 20,
+        "0.5-0.6": 2368,
+        "0.6-0.7": 581,
+        "0.7-0.8": 2272,
+        "0.8-0.9": 749,
+        "0.9-1.0": 7087
+      }
+    },
+    "cross_reference": {
+      "n_matched": 63,
+      "details": [
+        {
+          "prompt_id": "00085964-69f8-41a2-986b-2b91cbb49010",
+          "completion_id": "9eed294a-b912-4304-950f-053938627157",
+          "judge_score": 0.0,
+          "physician_score": 0.5,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.5
+        },
+        {
+          "prompt_id": "00085964-69f8-41a2-986b-2b91cbb49010",
+          "completion_id": "adc9bcde-4748-4aa8-8cb8-d56429af6d80",
+          "judge_score": 0.21,
+          "physician_score": 0.5,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.29000000000000004
+        },
+        {
+          "prompt_id": "00085964-69f8-41a2-986b-2b91cbb49010",
+          "completion_id": "89cefdc5-5a50-425a-9229-9ddbd3b8718e",
+          "judge_score": 0.58,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.42000000000000004
+        },
+        {
+          "prompt_id": "00085964-69f8-41a2-986b-2b91cbb49010",
+          "completion_id": "a02acd9c-d7ac-4d41-8828-0d1024e5b556",
+          "judge_score": 0.11,
+          "physician_score": 0.25,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.14
+        },
+        {
+          "prompt_id": "0009fb20-718d-4321-a254-76008362be7b",
+          "completion_id": "209965f2-ea8a-40f1-a28f-8861c9eb408a",
+          "judge_score": 0.7857,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.21430000000000005
+        },
+        {
+          "prompt_id": "0009fb20-718d-4321-a254-76008362be7b",
+          "completion_id": "7fcd86ee-8d5f-486a-bfe6-c0b10da760e0",
+          "judge_score": 0.9048,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.09519999999999995
+        },
+        {
+          "prompt_id": "0009fb20-718d-4321-a254-76008362be7b",
+          "completion_id": "dcd48010-6897-43f5-8736-ebbd8131b664",
+          "judge_score": 0.5238,
+          "physician_score": 0.5,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.023800000000000043
+        },
+        {
+          "prompt_id": "0009fb20-718d-4321-a254-76008362be7b",
+          "completion_id": "a3dccab8-09ac-4c9d-80cf-bc248c1de1be",
+          "judge_score": 0.7857,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.21430000000000005
+        },
+        {
+          "prompt_id": "00108e6a-cfda-4c10-9470-a991151f06ab",
+          "completion_id": "1995cefa-4689-4a8b-8dba-2fe3515d5b46",
+          "judge_score": 0.14,
+          "physician_score": 0.5,
+          "n_criteria": 1,
+          "n_labels": 2,
+          "diff": 0.36
+        },
+        {
+          "prompt_id": "00108e6a-cfda-4c10-9470-a991151f06ab",
+          "completion_id": "b80db962-c89c-4a47-bff7-835b84786062",
+          "judge_score": 0.0,
+          "physician_score": 0.5,
+          "n_criteria": 1,
+          "n_labels": 2,
+          "diff": 0.5
+        },
+        {
+          "prompt_id": "00108e6a-cfda-4c10-9470-a991151f06ab",
+          "completion_id": "53ee2c1e-f4da-49c9-98e9-978a51554dd4",
+          "judge_score": 0.23,
+          "physician_score": 0.5,
+          "n_criteria": 1,
+          "n_labels": 2,
+          "diff": 0.27
+        },
+        {
+          "prompt_id": "00108e6a-cfda-4c10-9470-a991151f06ab",
+          "completion_id": "d1f5a5f4-6388-40ec-8436-6a3534c032a7",
+          "judge_score": 0.0,
+          "physician_score": 0.0,
+          "n_criteria": 1,
+          "n_labels": 2,
+          "diff": 0.0
+        },
+        {
+          "prompt_id": "00355ba6-e454-44e7-b606-bacfb011595c",
+          "completion_id": "e6a8996d-fa76-4d9b-8015-a68af8bfa7cf",
+          "judge_score": 0.62,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 6,
+          "diff": 0.38
+        },
+        {
+          "prompt_id": "00355ba6-e454-44e7-b606-bacfb011595c",
+          "completion_id": "3e4f4107-f68c-4d46-b3b7-1fe633cb8891",
+          "judge_score": 0.69,
+          "physician_score": 0.5,
+          "n_criteria": 2,
+          "n_labels": 6,
+          "diff": 0.18999999999999995
+        },
+        {
+          "prompt_id": "00355ba6-e454-44e7-b606-bacfb011595c",
+          "completion_id": "59a692da-24c1-4937-896e-e52dab9c76fc",
+          "judge_score": 0.0,
+          "physician_score": 0.3333333333333333,
+          "n_criteria": 2,
+          "n_labels": 6,
+          "diff": 0.3333333333333333
+        },
+        {
+          "prompt_id": "00355ba6-e454-44e7-b606-bacfb011595c",
+          "completion_id": "7d0ea197-174b-496e-afb7-db10585e46ec",
+          "judge_score": 0.86,
+          "physician_score": 0.6666666666666666,
+          "n_criteria": 2,
+          "n_labels": 6,
+          "diff": 0.19333333333333336
+        },
+        {
+          "prompt_id": "00383f6b-d2bb-4a0d-8f82-57573a69532b",
+          "completion_id": "887edab6-18e9-4d1d-9f72-06ca11a942ef",
+          "judge_score": 1.0,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.0
+        },
+        {
+          "prompt_id": "00383f6b-d2bb-4a0d-8f82-57573a69532b",
+          "completion_id": "caa9ec2e-45bc-4bc2-a84f-23825751bd02",
+          "judge_score": 0.3,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.7
+        },
+        {
+          "prompt_id": "00383f6b-d2bb-4a0d-8f82-57573a69532b",
+          "completion_id": "cea7bf8e-4bbf-4689-9229-ef26af30fd39",
+          "judge_score": 0.83,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.17000000000000004
+        },
+        {
+          "prompt_id": "00383f6b-d2bb-4a0d-8f82-57573a69532b",
+          "completion_id": "9136e431-dea6-4815-8aad-46368f0bfed0",
+          "judge_score": 0.61,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.39
+        },
+        {
+          "prompt_id": "003f74cf-8913-4a42-a4c0-f463165f8da5",
+          "completion_id": "ebf6b123-9781-42bb-80c7-6d8a70f31393",
+          "judge_score": 0.5,
+          "physician_score": 0.75,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.25
+        },
+        {
+          "prompt_id": "003f74cf-8913-4a42-a4c0-f463165f8da5",
+          "completion_id": "d6185d77-d7a9-4417-9d0b-726c872c7f20",
+          "judge_score": 0.41,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.5900000000000001
+        },
+        {
+          "prompt_id": "003f74cf-8913-4a42-a4c0-f463165f8da5",
+          "completion_id": "50f10723-61f5-4073-8790-93c24cb1c893",
+          "judge_score": 0.41,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.5900000000000001
+        },
+        {
+          "prompt_id": "003f74cf-8913-4a42-a4c0-f463165f8da5",
+          "completion_id": "428c6c7b-9966-4017-9687-0c8e0af99ab6",
+          "judge_score": 0.41,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.5900000000000001
+        },
+        {
+          "prompt_id": "0043fbca-111c-4dae-bf90-af914c7a5ddf",
+          "completion_id": "9c9bcdf2-4ad5-43e5-a37f-efa6c567d58d",
+          "judge_score": 1.0,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.0
+        },
+        {
+          "prompt_id": "0043fbca-111c-4dae-bf90-af914c7a5ddf",
+          "completion_id": "e2094fdb-97f1-402c-a0be-a33aadbe3c0e",
+          "judge_score": 1.0,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.0
+        },
+        {
+          "prompt_id": "0043fbca-111c-4dae-bf90-af914c7a5ddf",
+          "completion_id": "933123ac-b48c-4b5e-96f2-75d8a165fc91",
+          "judge_score": 0.0,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 1.0
+        },
+        {
+          "prompt_id": "0043fbca-111c-4dae-bf90-af914c7a5ddf",
+          "completion_id": "b0d5f5b3-496b-4a2e-80d1-ce4cfb84d9f2",
+          "judge_score": 0.48,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.52
+        },
+        {
+          "prompt_id": "005c136b-a914-400e-81a2-24c419634ebd",
+          "completion_id": "bf62eeaa-033d-488a-b34f-1b78a1f8a33e",
+          "judge_score": 0.44,
+          "physician_score": 0.5,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.06
+        },
+        {
+          "prompt_id": "005c136b-a914-400e-81a2-24c419634ebd",
+          "completion_id": "b5688fb2-d60b-41f7-976c-6b694e0bf348",
+          "judge_score": 0.58,
+          "physician_score": 0.75,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.17000000000000004
+        },
+        {
+          "prompt_id": "005c136b-a914-400e-81a2-24c419634ebd",
+          "completion_id": "b6c57289-f121-414d-a878-46e8cac1c20d",
+          "judge_score": 0.32,
+          "physician_score": 0.25,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.07
+        },
+        {
+          "prompt_id": "005c136b-a914-400e-81a2-24c419634ebd",
+          "completion_id": "b60d392e-a032-4dbf-b296-8421414bc500",
+          "judge_score": 0.05,
+          "physician_score": 0.0,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.05
+        },
+        {
+          "prompt_id": "005d27ea-2fbe-4872-a42f-6542a638864e",
+          "completion_id": "15460a5e-49ab-4e87-9502-e62cb03fe7d8",
+          "judge_score": 0.56,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 6,
+          "diff": 0.43999999999999995
+        },
+        {
+          "prompt_id": "005d27ea-2fbe-4872-a42f-6542a638864e",
+          "completion_id": "ef5bdb0f-8de4-43b6-a729-2b66f4168dae",
+          "judge_score": 0.45,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 6,
+          "diff": 0.55
+        },
+        {
+          "prompt_id": "005d27ea-2fbe-4872-a42f-6542a638864e",
+          "completion_id": "c54ecca6-e14e-474e-a02a-9b94da59b360",
+          "judge_score": 0.34,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 6,
+          "diff": 0.6599999999999999
+        },
+        {
+          "prompt_id": "005d27ea-2fbe-4872-a42f-6542a638864e",
+          "completion_id": "64049306-40f8-49fa-8f5f-7142baa85cea",
+          "judge_score": 0.71,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 6,
+          "diff": 0.29000000000000004
+        },
+        {
+          "prompt_id": "00656524-cc51-47a3-bfb5-85e7096ee1c8",
+          "completion_id": "842c12fe-ac38-43bd-96a9-9fee219e8f03",
+          "judge_score": 0.56,
+          "physician_score": 0.5,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.06000000000000005
+        },
+        {
+          "prompt_id": "00656524-cc51-47a3-bfb5-85e7096ee1c8",
+          "completion_id": "2a6c8887-174b-4837-a649-0ca2e8fb0d31",
+          "judge_score": 0.51,
+          "physician_score": 0.75,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.24
+        },
+        {
+          "prompt_id": "00656524-cc51-47a3-bfb5-85e7096ee1c8",
+          "completion_id": "19d97691-e8ae-45ab-9239-e59ebb04895f",
+          "judge_score": 0.49,
+          "physician_score": 0.5,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.010000000000000009
+        },
+        {
+          "prompt_id": "00656524-cc51-47a3-bfb5-85e7096ee1c8",
+          "completion_id": "e03ba6f2-b0c6-43b7-adb9-79eb0bfc75fa",
+          "judge_score": 0.46,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.54
+        },
+        {
+          "prompt_id": "00797fe0-30a5-4293-b300-2c648d3fe7a3",
+          "completion_id": "ddb71eaa-7388-45a7-9db3-1cc7cad10fe2",
+          "judge_score": 1.0,
+          "physician_score": 0.75,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.25
+        },
+        {
+          "prompt_id": "00797fe0-30a5-4293-b300-2c648d3fe7a3",
+          "completion_id": "9eeeab26-f8a4-4310-99bc-0923385cb8fd",
+          "judge_score": 1.0,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.0
+        },
+        {
+          "prompt_id": "00797fe0-30a5-4293-b300-2c648d3fe7a3",
+          "completion_id": "42da738c-e0eb-4ce9-a35e-c92482d66a73",
+          "judge_score": 1.0,
+          "physician_score": 0.25,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.75
+        },
+        {
+          "prompt_id": "00797fe0-30a5-4293-b300-2c648d3fe7a3",
+          "completion_id": "a0d7f1ba-d70e-4d57-a2cc-7f889af7e260",
+          "judge_score": 0.0,
+          "physician_score": 0.25,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.25
+        },
+        {
+          "prompt_id": "009cb39f-8327-43c1-a637-1381742e936b",
+          "completion_id": "1fcb801a-3dbe-4b62-883f-3e8e9d31f510",
+          "judge_score": 0.62,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.38
+        },
+        {
+          "prompt_id": "009cb39f-8327-43c1-a637-1381742e936b",
+          "completion_id": "251007af-49f4-48a1-854d-c78447021c9c",
+          "judge_score": 0.55,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.44999999999999996
+        },
+        {
+          "prompt_id": "009cb39f-8327-43c1-a637-1381742e936b",
+          "completion_id": "8f992c1b-cb54-4e9c-8fa1-c78074b073e6",
+          "judge_score": 0.6,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.4
+        },
+        {
+          "prompt_id": "009cb39f-8327-43c1-a637-1381742e936b",
+          "completion_id": "3e56c805-1b1f-4097-b405-03854202b90f",
+          "judge_score": 0.24,
+          "physician_score": 0.5,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.26
+        },
+        {
+          "prompt_id": "00a1c462-cdc3-487c-9dce-5a7de3a3a631",
+          "completion_id": "38c819f2-911d-405d-a713-bbacde037085",
+          "judge_score": 0.9,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 6,
+          "diff": 0.09999999999999998
+        },
+        {
+          "prompt_id": "00a1c462-cdc3-487c-9dce-5a7de3a3a631",
+          "completion_id": "5f52a32f-165f-4124-ba1d-452fca63fceb",
+          "judge_score": 0.62,
+          "physician_score": 0.5,
+          "n_criteria": 2,
+          "n_labels": 6,
+          "diff": 0.12
+        },
+        {
+          "prompt_id": "00a1c462-cdc3-487c-9dce-5a7de3a3a631",
+          "completion_id": "cd82077f-a8f0-4d1d-993d-ba5340071409",
+          "judge_score": 0.25,
+          "physician_score": 0.0,
+          "n_criteria": 2,
+          "n_labels": 6,
+          "diff": 0.25
+        },
+        {
+          "prompt_id": "00a1c462-cdc3-487c-9dce-5a7de3a3a631",
+          "completion_id": "8f5bd577-243d-42f1-b21f-6e2c55087cf0",
+          "judge_score": 0.0,
+          "physician_score": 0.0,
+          "n_criteria": 2,
+          "n_labels": 6,
+          "diff": 0.0
+        },
+        {
+          "prompt_id": "00a7b27e-4e99-435c-91da-e4f2a1b2baea",
+          "completion_id": "b617df03-c157-4472-9e85-f445303b6627",
+          "judge_score": 0.0,
+          "physician_score": 0.0,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.0
+        },
+        {
+          "prompt_id": "00a7b27e-4e99-435c-91da-e4f2a1b2baea",
+          "completion_id": "82926a8e-09d8-4efb-85f0-edc4aba0911e",
+          "judge_score": 0.0,
+          "physician_score": 0.75,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.75
+        },
+        {
+          "prompt_id": "00a7b27e-4e99-435c-91da-e4f2a1b2baea",
+          "completion_id": "ed17009d-096c-476f-a44a-efb963e59468",
+          "judge_score": 0.0,
+          "physician_score": 0.75,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.75
+        },
+        {
+          "prompt_id": "00b9706f-6d43-46d9-a024-23b12ebd177f",
+          "completion_id": "e154da3a-d113-4706-95ff-905fce7a510c",
+          "judge_score": 0.0,
+          "physician_score": 0.5,
+          "n_criteria": 1,
+          "n_labels": 2,
+          "diff": 0.5
+        },
+        {
+          "prompt_id": "00b9706f-6d43-46d9-a024-23b12ebd177f",
+          "completion_id": "cc5a63ea-42fe-4ea4-b84c-ca7952e5a694",
+          "judge_score": 1.0,
+          "physician_score": 0.5,
+          "n_criteria": 1,
+          "n_labels": 2,
+          "diff": 0.5
+        },
+        {
+          "prompt_id": "00b9706f-6d43-46d9-a024-23b12ebd177f",
+          "completion_id": "b7eb9d04-b4ba-4fa8-ae49-1db54418b6a0",
+          "judge_score": 1.0,
+          "physician_score": 0.5,
+          "n_criteria": 1,
+          "n_labels": 2,
+          "diff": 0.5
+        },
+        {
+          "prompt_id": "00b9706f-6d43-46d9-a024-23b12ebd177f",
+          "completion_id": "1c2ec5b0-cfc8-4db4-9842-a10cfb78b771",
+          "judge_score": 0.82,
+          "physician_score": 1.0,
+          "n_criteria": 1,
+          "n_labels": 2,
+          "diff": 0.18000000000000005
+        },
+        {
+          "prompt_id": "00c9bc53-7593-4787-8d7a-84aaeccd404d",
+          "completion_id": "c29fb80d-77c0-4a3e-b677-7dc5c41605ef",
+          "judge_score": 0.95,
+          "physician_score": 0.75,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.19999999999999996
+        },
+        {
+          "prompt_id": "00c9bc53-7593-4787-8d7a-84aaeccd404d",
+          "completion_id": "38082509-4d7c-428d-aea8-8fc544670c19",
+          "judge_score": 0.9,
+          "physician_score": 0.75,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.15000000000000002
+        },
+        {
+          "prompt_id": "00c9bc53-7593-4787-8d7a-84aaeccd404d",
+          "completion_id": "36a2de9b-3c44-4a86-939e-b6f6c41a59e1",
+          "judge_score": 0.92,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.07999999999999996
+        },
+        {
+          "prompt_id": "00c9bc53-7593-4787-8d7a-84aaeccd404d",
+          "completion_id": "df7c22ed-814f-4cfa-8452-55c47903ad32",
+          "judge_score": 0.88,
+          "physician_score": 1.0,
+          "n_criteria": 2,
+          "n_labels": 4,
+          "diff": 0.12
+        }
+      ],
+      "spearman_corr": 0.4611453980665747,
+      "spearman_pval": 0.0001425798947323314,
+      "pearson_corr": 0.5151125972449042,
+      "pearson_pval": 1.5625053899702396e-05,
+      "mae": 0.3016550264550264,
+      "rmse": 0.3823375752014635,
+      "pairwise_concordant": 32,
+      "pairwise_discordant": 15,
+      "pairwise_tied": 46,
+      "pairwise_accuracy": 0.6808510638297872
+    },
+    "entries_detail": [
+      {
+        "prompt_id": "00085964-69f8-41a2-986b-2b91cbb49010",
+        "n_answers": 5,
+        "scores": [
+          0.0,
+          0.21,
+          0.58,
+          0.11,
+          0.17
+        ],
+        "mean": 0.21399999999999997,
+        "std": 0.19622436138257654,
+        "min": 0.0,
+        "max": 0.58
+      },
+      {
+        "prompt_id": "0009fb20-718d-4321-a254-76008362be7b",
+        "n_answers": 6,
+        "scores": [
+          0.7857,
+          0.9048,
+          0.5238,
+          0.7857,
+          0.619,
+          0.619
+        ],
+        "mean": 0.7063333333333333,
+        "std": 0.1294602856305962,
+        "min": 0.5238,
+        "max": 0.9048
+      },
+      {
+        "prompt_id": "00108e6a-cfda-4c10-9470-a991151f06ab",
+        "n_answers": 5,
+        "scores": [
+          0.14,
+          0.0,
+          0.23,
+          0.0,
+          0.0
+        ],
+        "mean": 0.074,
+        "std": 0.09499473669630334,
+        "min": 0.0,
+        "max": 0.23
+      },
+      {
+        "prompt_id": "001b3a82-ad2a-4bbb-9f2a-db643983eb13",
+        "n_answers": 5,
+        "scores": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "mean": 1.0,
+        "std": 0.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      {
+        "prompt_id": "00307537-8ca5-4e21-8209-0c3c40b8df3f",
+        "n_answers": 5,
+        "scores": [
+          0.32,
+          0.32,
+          0.54,
+          0.24,
+          0.65
+        ],
+        "mean": 0.41400000000000003,
+        "std": 0.1546091847207015,
+        "min": 0.24,
+        "max": 0.65
+      },
+      {
+        "prompt_id": "00355ba6-e454-44e7-b606-bacfb011595c",
+        "n_answers": 6,
+        "scores": [
+          0.62,
+          0.69,
+          0.0,
+          0.86,
+          1.0,
+          0.48
+        ],
+        "mean": 0.6083333333333333,
+        "std": 0.3188738866002601,
+        "min": 0.0,
+        "max": 1.0
+      },
+      {
+        "prompt_id": "00383f6b-d2bb-4a0d-8f82-57573a69532b",
+        "n_answers": 5,
+        "scores": [
+          1.0,
+          0.3,
+          0.83,
+          0.61,
+          0.13
+        ],
+        "mean": 0.574,
+        "std": 0.32265151479576226,
+        "min": 0.13,
+        "max": 1.0
+      },
+      {
+        "prompt_id": "003f74cf-8913-4a42-a4c0-f463165f8da5",
+        "n_answers": 6,
+        "scores": [
+          0.5,
+          0.41,
+          0.41,
+          0.41,
+          0.41,
+          0.22
+        ],
+        "mean": 0.3933333333333333,
+        "std": 0.08419553960210058,
+        "min": 0.22,
+        "max": 0.5
+      },
+      {
+        "prompt_id": "0043fbca-111c-4dae-bf90-af914c7a5ddf",
+        "n_answers": 5,
+        "scores": [
+          1.0,
+          1.0,
+          0.0,
+          0.48,
+          0.0
+        ],
+        "mean": 0.496,
+        "std": 0.4472851439518196,
+        "min": 0.0,
+        "max": 1.0
+      },
+      {
+        "prompt_id": "005c136b-a914-400e-81a2-24c419634ebd",
+        "n_answers": 6,
+        "scores": [
+          0.44,
+          0.58,
+          0.32,
+          0.05,
+          0.63,
+          0.49
+        ],
+        "mean": 0.4183333333333333,
+        "std": 0.19230329054791434,
+        "min": 0.05,
+        "max": 0.63
+      },
+      {
+        "prompt_id": "005d27ea-2fbe-4872-a42f-6542a638864e",
+        "n_answers": 6,
+        "scores": [
+          0.56,
+          0.45,
+          0.34,
+          0.71,
+          0.76,
+          0.41
+        ],
+        "mean": 0.5383333333333334,
+        "std": 0.15420945352200544,
+        "min": 0.34,
+        "max": 0.76
+      },
+      {
+        "prompt_id": "00656524-cc51-47a3-bfb5-85e7096ee1c8",
+        "n_answers": 6,
+        "scores": [
+          0.56,
+          0.51,
+          0.49,
+          0.46,
+          0.53,
+          0.61
+        ],
+        "mean": 0.5266666666666666,
+        "std": 0.04853406592853679,
+        "min": 0.46,
+        "max": 0.61
+      },
+      {
+        "prompt_id": "00797fe0-30a5-4293-b300-2c648d3fe7a3",
+        "n_answers": 5,
+        "scores": [
+          1.0,
+          1.0,
+          1.0,
+          0.0,
+          0.67
+        ],
+        "mean": 0.734,
+        "std": 0.38861806442830216,
+        "min": 0.0,
+        "max": 1.0
+      },
+      {
+        "prompt_id": "009cb39f-8327-43c1-a637-1381742e936b",
+        "n_answers": 5,
+        "scores": [
+          0.62,
+          0.55,
+          0.6,
+          0.24,
+          0.41
+        ],
+        "mean": 0.484,
+        "std": 0.14235167719419398,
+        "min": 0.24,
+        "max": 0.62
+      },
+      {
+        "prompt_id": "00a1c462-cdc3-487c-9dce-5a7de3a3a631",
+        "n_answers": 6,
+        "scores": [
+          0.9,
+          0.62,
+          0.25,
+          0.0,
+          0.95,
+          0.9
+        ],
+        "mean": 0.6033333333333333,
+        "std": 0.3617856946990703,
+        "min": 0.0,
+        "max": 0.95
+      },
+      {
+        "prompt_id": "00a7b27e-4e99-435c-91da-e4f2a1b2baea",
+        "n_answers": 4,
+        "scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "mean": 0.0,
+        "std": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      },
+      {
+        "prompt_id": "00b9706f-6d43-46d9-a024-23b12ebd177f",
+        "n_answers": 6,
+        "scores": [
+          0.0,
+          1.0,
+          1.0,
+          0.82,
+          0.0,
+          1.0
+        ],
+        "mean": 0.6366666666666666,
+        "std": 0.4546671554249572,
+        "min": 0.0,
+        "max": 1.0
+      },
+      {
+        "prompt_id": "00c9bc53-7593-4787-8d7a-84aaeccd404d",
+        "n_answers": 4,
+        "scores": [
+          0.95,
+          0.9,
+          0.92,
+          0.88
+        ],
+        "mean": 0.9125,
+        "std": 0.025860201081971484,
+        "min": 0.88,
+        "max": 0.95
+      },
+      {
+        "prompt_id": "00d34549-134c-48e2-b4bb-b54946da70cc",
+        "n_answers": 5,
+        "scores": [
+          0.57,
+          0.31,
+          0.57,
+          0.49,
+          0.4
+        ],
+        "mean": 0.46799999999999997,
+        "std": 0.10087616170334791,
+        "min": 0.31,
+        "max": 0.57
+      }
+    ]
+  },
+  "timestamp": "2026-02-21T17:44:55.820784"
+}

@@ -17,6 +17,20 @@ from typing import Any, Dict, List, Optional
 from ..base import DatasetAdapter
 
 
+def _filter_example_rubrics(rubrics: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Keep only example-level rubrics, discarding cluster-level ones.
+
+    HealthBench has two rubric levels:
+    - level:cluster — generic criteria shared across questions (~10% of points,
+      ~50% of text). Evaluated by physicians in meta_eval but too broad for
+      training golden rubrics.
+    - level:example — specific, detailed criteria per question (~90% of points).
+      These are the true "golden rubrics" for GRubrics training.
+    """
+    example = [r for r in rubrics if "level:cluster" not in r.get("tags", [])]
+    return example if example else rubrics
+
+
 def _rubrics_to_text(rubrics: List[Dict[str, Any]]) -> str:
     """Convert HealthBench rubric JSON list to our text format.
 
@@ -148,32 +162,31 @@ class HealthBenchAdapter(DatasetAdapter):
         return items
 
     def _load_from_huggingface(self) -> List[Dict[str, Any]]:
-        """Download and load from HuggingFace."""
-        try:
-            import blobfile as bf
-        except ImportError:
-            from datasets import load_dataset
-            ds = load_dataset("openai/healthbench", split="train")
-            items = []
-            for row in ds:
-                items.append(self._parse_record(dict(row)))
-            return items
+        """Download and load from HuggingFace.
 
-        url = "https://openaipublic.blob.core.windows.net/simple-evals/healthbench/2025-05-07-06-14-12_oss_eval.jsonl"
+        HealthBench has two JSONL files with different schemas (oss_eval and
+        oss_meta_eval), so we must load oss_eval specifically via data_files.
+        """
+        from datasets import load_dataset
+
+        ds = load_dataset(
+            "openai/healthbench",
+            data_files="2025-05-07-06-14-12_oss_eval.jsonl",
+            split="train",
+        )
         items = []
-        with bf.BlobFile(url, "rb") as f:
-            for line in f:
-                record = json.loads(line)
-                items.append(self._parse_record(record))
+        for row in ds:
+            items.append(self._parse_record(dict(row)))
         return items
 
     def _parse_record(self, record: Dict[str, Any]) -> Dict[str, Any]:
         """Parse a single HealthBench record into our internal format."""
         prompt = record.get("prompt", [])
-        rubrics = record.get("rubrics", [])
+        all_rubrics = record.get("rubrics", [])
         prompt_id = record.get("prompt_id", "")
 
-        # Extract ideal completions if available
+        example_rubrics = _filter_example_rubrics(all_rubrics)
+
         ideal_data = record.get("ideal_completions_data") or {}
         ideal_completion = ideal_data.get("ideal_completion", "")
         ref_completions = ideal_data.get(
@@ -183,8 +196,9 @@ class HealthBenchAdapter(DatasetAdapter):
         return {
             "prompt_id": prompt_id,
             "prompt": prompt,
-            "rubrics": rubrics,
-            "golden_rubric": _rubrics_to_text(rubrics),
+            "rubrics": example_rubrics,
+            "rubrics_all": all_rubrics,
+            "golden_rubric": _rubrics_to_text(example_rubrics),
             "question": _extract_question_text(prompt),
             "category": record.get("category", ""),
             "example_tags": record.get("example_tags", []),

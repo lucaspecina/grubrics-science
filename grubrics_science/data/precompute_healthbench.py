@@ -7,12 +7,18 @@ We only need our Judge to evaluate them with the golden rubric.
 This ensures gold_scores come from the same Judge used during training,
 avoiding evaluator mismatch in the Spearman correlation.
 
+Questions are evaluated in parallel (``--max_concurrent``) for speed.
+Each question = 1 API call that evaluates all its answers at once.
+
 Usage:
-    # Validate with 10 questions:
+    # Validate with 10 questions (parallel):
     python -m grubrics_science.data.precompute_healthbench --limit 10
 
-    # Full run (~$45 for 5000 questions):
-    python -m grubrics_science.data.precompute_healthbench
+    # Full run with 10 parallel calls:
+    python -m grubrics_science.data.precompute_healthbench --max_concurrent 10
+
+    # Conservative (5 parallel, 1 eval per question):
+    python -m grubrics_science.data.precompute_healthbench --max_concurrent 5 --num_evals 1
 """
 
 import argparse
@@ -61,6 +67,12 @@ def _load_meta_eval_answers(path: str) -> Dict[str, List[str]]:
     return answers
 
 
+def _filter_example_rubrics(rubrics: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Keep only example-level rubrics (discard cluster-level)."""
+    example = [r for r in rubrics if "level:cluster" not in r.get("tags", [])]
+    return example if example else rubrics
+
+
 def _rubrics_to_text(rubrics: List[Dict[str, Any]]) -> str:
     """Convert HealthBench rubric JSON to text format."""
     lines = []
@@ -107,6 +119,101 @@ async def evaluate_with_golden_rubric(
     return avg_scores
 
 
+def _prepare_tasks(
+    oss_eval: Dict[str, Dict[str, Any]],
+    meta_answers: Dict[str, List[str]],
+    prompt_ids: List[str],
+    existing: Dict[str, Any],
+    max_answers_per_question: int,
+) -> tuple:
+    """Prepare evaluation tasks from data, skipping cached/invalid entries.
+
+    Returns (tasks, stats) where each task is a dict with all info needed
+    to evaluate one question.
+    """
+    tasks = []
+    stats = {"skipped_cached": 0, "skipped_no_answers": 0}
+
+    for pid in prompt_ids:
+        if pid in existing:
+            stats["skipped_cached"] += 1
+            continue
+
+        record = oss_eval[pid]
+        all_rubrics = record.get("rubrics", [])
+        rubrics = _filter_example_rubrics(all_rubrics)
+        prompt = record.get("prompt", [])
+        golden_rubric = _rubrics_to_text(rubrics)
+        question = _extract_question_text(prompt)
+
+        answers = []
+        if pid in meta_answers:
+            answers.extend(meta_answers[pid])
+
+        ideal_data = record.get("ideal_completions_data") or {}
+        ideal = ideal_data.get("ideal_completion", "")
+        if ideal and ideal not in answers:
+            answers.append(ideal)
+        for ref in ideal_data.get("ideal_completions_ref_completions", []) or []:
+            if ref and ref not in answers:
+                answers.append(ref)
+
+        answers = answers[:max_answers_per_question]
+
+        if len(answers) < 2:
+            stats["skipped_no_answers"] += 1
+            continue
+
+        tasks.append({
+            "prompt_id": pid,
+            "question": question,
+            "golden_rubric": golden_rubric,
+            "rubrics": rubrics,
+            "category": record.get("category", ""),
+            "answers": answers,
+        })
+
+    return tasks, stats
+
+
+async def _evaluate_one(
+    task: Dict[str, Any],
+    judge,
+    num_evals: int,
+    task_idx: int,
+    total: int,
+) -> Dict[str, Any]:
+    """Evaluate a single question (one API call per num_eval)."""
+    import numpy as np
+
+    pid = task["prompt_id"]
+    try:
+        gold_scores = await evaluate_with_golden_rubric(
+            judge, task["question"], task["answers"], task["golden_rubric"],
+            num_evals=num_evals,
+        )
+    except Exception as exc:
+        logger.error("[%d/%d] %s — failed: %s", task_idx + 1, total, pid, exc)
+        return {}
+
+    scores_arr = np.array(gold_scores)
+    logger.info(
+        "[%d/%d] %s — %d answers, std=%.3f, range=%.3f-%.3f",
+        task_idx + 1, total, pid,
+        len(gold_scores), scores_arr.std(), scores_arr.min(), scores_arr.max(),
+    )
+
+    return {
+        "prompt_id": pid,
+        "question": task["question"],
+        "golden_rubric": task["golden_rubric"],
+        "rubrics_json": task["rubrics"],
+        "category": task["category"],
+        "answers": task["answers"],
+        "gold_scores": gold_scores,
+    }
+
+
 async def precompute_healthbench(
     oss_eval_path: str,
     meta_eval_path: str,
@@ -116,8 +223,13 @@ async def precompute_healthbench(
     limit: int = 0,
     num_evals: int = 3,
     max_answers_per_question: int = 6,
+    max_concurrent: int = 10,
 ):
     """Run the precompute pipeline for HealthBench.
+
+    Evaluates questions in parallel batches for speed. Each question makes
+    1 API call (all answers evaluated together), and up to ``max_concurrent``
+    questions are evaluated simultaneously.
 
     Args:
         oss_eval_path: Path to oss_eval.jsonl (rubrics + ideal completions).
@@ -127,6 +239,7 @@ async def precompute_healthbench(
         limit: Process only this many questions (0=all).
         num_evals: Number of Judge evaluations to average per question.
         max_answers_per_question: Cap on answers per question.
+        max_concurrent: Max parallel API calls.
     """
     from ..llm.client import AzureOpenAIClient
     from ..judge.judge import Judge
@@ -144,11 +257,6 @@ async def precompute_healthbench(
         prompt_ids = prompt_ids[:limit]
         logger.info("Limiting to %d questions (validation mode)", limit)
 
-    logger.info(
-        "Model: %s | num_evals: %d | max_answers: %d",
-        model, num_evals, max_answers_per_question,
-    )
-
     # Load existing cache
     cache_path = Path(output_cache)
     existing: Dict[str, Any] = {}
@@ -160,91 +268,53 @@ async def precompute_healthbench(
                     existing[entry.get("prompt_id", "")] = entry
         logger.info("Existing cache: %d entries", len(existing))
 
+    tasks, skip_stats = _prepare_tasks(
+        oss_eval, meta_answers, prompt_ids, existing, max_answers_per_question,
+    )
+
+    logger.info(
+        "Tasks: %d to evaluate | Cached: %d | NoAnswers: %d",
+        len(tasks), skip_stats["skipped_cached"], skip_stats["skipped_no_answers"],
+    )
+    logger.info(
+        "Model: %s | num_evals: %d | max_concurrent: %d",
+        model, num_evals, max_concurrent,
+    )
+
+    if not tasks:
+        logger.info("Nothing to do.")
+        return
+
     client = AzureOpenAIClient(model=model, use_azure=use_azure)
-    judge = Judge(client=client, max_concurrent=5, max_retries=3, timeout=120.0)
+    judge = Judge(client=client, max_concurrent=max_concurrent, max_retries=3, timeout=120.0)
 
     cache_path.parent.mkdir(parents=True, exist_ok=True)
-    stats = {"processed": 0, "skipped_cached": 0, "skipped_no_answers": 0}
+    processed = 0
 
-    with open(cache_path, "a", encoding="utf-8") as f_out:
-        for i, pid in enumerate(prompt_ids):
-            if pid in existing:
-                stats["skipped_cached"] += 1
-                continue
+    # Process in parallel batches
+    for batch_start in range(0, len(tasks), max_concurrent):
+        batch = tasks[batch_start : batch_start + max_concurrent]
+        logger.info(
+            "Batch %d-%d of %d...",
+            batch_start + 1, batch_start + len(batch), len(tasks),
+        )
 
-            record = oss_eval[pid]
-            rubrics = record.get("rubrics", [])
-            prompt = record.get("prompt", [])
-            golden_rubric = _rubrics_to_text(rubrics)
-            question = _extract_question_text(prompt)
+        coros = [
+            _evaluate_one(task, judge, num_evals, batch_start + j, len(tasks))
+            for j, task in enumerate(batch)
+        ]
+        results = await asyncio.gather(*coros)
 
-            # Collect answers: meta_eval first, then ideal completions
-            answers = []
-            if pid in meta_answers:
-                answers.extend(meta_answers[pid])
-
-            ideal_data = record.get("ideal_completions_data") or {}
-            ideal = ideal_data.get("ideal_completion", "")
-            if ideal and ideal not in answers:
-                answers.append(ideal)
-            for ref in ideal_data.get("ideal_completions_ref_completions", []) or []:
-                if ref and ref not in answers:
-                    answers.append(ref)
-
-            answers = answers[:max_answers_per_question]
-
-            if len(answers) < 2:
-                stats["skipped_no_answers"] += 1
-                if (i + 1) <= 5:
-                    logger.warning(
-                        "[%d/%d] %s — only %d answer(s), skipping",
-                        i + 1, len(prompt_ids), pid, len(answers),
-                    )
-                continue
-
-            if (i + 1) <= 5 or (i + 1) % 100 == 0:
-                logger.info(
-                    "[%d/%d] %s — evaluating %d answers with golden rubric (%d evals)...",
-                    i + 1, len(prompt_ids), pid, len(answers), num_evals,
-                )
-
-            try:
-                gold_scores = await evaluate_with_golden_rubric(
-                    judge, question, answers, golden_rubric,
-                    num_evals=num_evals,
-                )
-            except Exception as exc:
-                logger.error("[%d/%d] %s — evaluation failed: %s", i + 1, len(prompt_ids), pid, exc)
-                continue
-
-            import numpy as np
-            scores_arr = np.array(gold_scores)
-
-            entry = {
-                "prompt_id": pid,
-                "question": question,
-                "golden_rubric": golden_rubric,
-                "rubrics_json": rubrics,
-                "category": record.get("category", ""),
-                "answers": answers,
-                "gold_scores": gold_scores,
-            }
-
-            f_out.write(json.dumps(entry, ensure_ascii=False) + "\n")
-            f_out.flush()
-            stats["processed"] += 1
-
-            if (i + 1) <= 5 or (i + 1) % 100 == 0:
-                logger.info(
-                    "[%d/%d] %s — gold_scores: std=%.3f, range=%.3f-%.3f",
-                    i + 1, len(prompt_ids), pid,
-                    scores_arr.std(), scores_arr.min(), scores_arr.max(),
-                )
+        with open(cache_path, "a", encoding="utf-8") as f_out:
+            for entry in results:
+                if entry:
+                    f_out.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                    processed += 1
 
     logger.info(
         "Done. Processed=%d, Cached=%d, NoAnswers=%d. Cache: %s",
-        stats["processed"], stats["skipped_cached"],
-        stats["skipped_no_answers"], cache_path,
+        processed, skip_stats["skipped_cached"],
+        skip_stats["skipped_no_answers"], cache_path,
     )
 
 
@@ -254,12 +324,12 @@ def main():
     )
     parser.add_argument(
         "--oss_eval_path",
-        default="data/healthbench/2025-05-07-06-14-12_oss_eval.jsonl",
+        default="data/healthbench/oss_eval.jsonl",
         help="Path to oss_eval.jsonl",
     )
     parser.add_argument(
         "--meta_eval_path",
-        default="data/healthbench/2025-05-07-06-14-12_oss_meta_eval.jsonl",
+        default="data/healthbench/oss_meta_eval.jsonl",
         help="Path to oss_meta_eval.jsonl",
     )
     parser.add_argument(
@@ -271,6 +341,7 @@ def main():
     parser.add_argument("--limit", type=int, default=0, help="Limit to N questions (0=all)")
     parser.add_argument("--num_evals", type=int, default=3, help="Judge evals to average")
     parser.add_argument("--max_answers", type=int, default=6, help="Max answers per question")
+    parser.add_argument("--max_concurrent", type=int, default=10, help="Max parallel API calls")
     parser.add_argument("--no_azure", action="store_true", help="Use OpenAI directly")
 
     args = parser.parse_args()
@@ -284,6 +355,7 @@ def main():
             limit=args.limit,
             num_evals=args.num_evals,
             max_answers_per_question=args.max_answers,
+            max_concurrent=args.max_concurrent,
         )
     )
 

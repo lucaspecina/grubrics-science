@@ -328,33 +328,69 @@ El sistema opera sobre dos tipos de datos. El truco del transfer learning es que
 **Campos del oss_eval (por fila):**
 - `prompt`: lista de mensajes `[{role, content}, ...]` (conversacion multi-turn, 58% single-turn)
 - `prompt_id`: identificador unico
-- `rubrics`: lista de `{criterion, points, tags}` (~11.4 criterios promedio)
+- `rubrics`: lista de `{criterion, points, tags}` — dos niveles (ver abajo)
 - `example_tags`: tags de la pregunta (ej: emergency, pediatrics)
 - `ideal_completions_data`: contiene `ideal_completion` (respuesta ideal del medico), `ideal_completions_ref_completions` (4 respuestas de modelos de referencia: o3, gpt-4.1, etc.)
-- `category`: categoria medica
 
-**Campos adicionales del oss_meta_eval (ademas de los anteriores):**
+**Dos niveles de rubrics en oss_eval:**
+
+Cada pregunta tiene criterios en dos niveles, distinguidos por el tag `level:`:
+
+| Nivel | Cantidad total | Por pregunta | Puntos | Que son |
+|---|---|---|---|---|
+| `level:cluster` | 8,053 | 1-3 (avg 1.6) | siempre 5 | Criterios **genericos** reutilizados entre preguntas. Solo 24 textos unicos. Ej: "La respuesta no tiene info factualmente incorrecta" |
+| `level:example` | 49,184 | 0-45 (avg 9.8) | variable (avg 2, rango -10 a +10) | Criterios **especificos** escritos por medicos para esa pregunta. Ej: "Recomienda buscar un profesional de salud mental" |
+
+Los **example-level son las golden rubrics** que usamos para training y evaluacion. Son las rubricas ricas, detalladas, especificas de cada pregunta.
+
+Los cluster-level son ejes de evaluacion genericos (accuracy, completeness, context_awareness, communication_quality, instruction_following).
+
+**Filtro implementado:** El precompute y el adapter filtran automaticamente los cluster-level, usando solo example-level como golden rubrics. Esto ahorra ~46% del texto del prompt (cluster-level son ~926 chars/criterio vs ~165 chars/criterio para example-level) y representan solo el 10.6% de los puntos totales.
+
+**Campos del oss_meta_eval (29,511 filas):**
+
+Cada fila = 1 completion × 1 criterio cluster-level × N physicians:
+
+- `prompt_id`: misma pregunta que en oss_eval
 - `completion`: respuesta del modelo evaluada
 - `completion_id`: identificador de la respuesta
-- `binary_labels`: lista de booleans — para cada criterio de la rubrica, si el medico dijo true/false (criteria_met)
-- `anonymized_physician_ids`: IDs de los medicos que evaluaron
+- `rubric`: texto del criterio cluster-level evaluado (coincide exactamente con el `criterion` del oss_eval)
+- `binary_labels`: lista de booleans — **un bool por physician** (no por criterio). Indica si ese physician considero que la completion cumple ese criterio cluster
+- `anonymized_physician_ids`: IDs de los medicos que evaluaron (tipicamente 2, a veces 3-5)
+- `category`: categoria medica
+
+**Estructura del meta_eval (ejemplo):**
+
+```
+Pregunta "depresion postparto" (prompt_id: 1f548d5b...):
+  oss_eval: 19 criterios (2 cluster + 17 example)
+  meta_eval: 4 completions × 2 cluster criteria = 8 filas
+
+  Completion 1 (GPT-4.1):
+    Criterio cluster "context_awareness" → binary_labels: [True, False]  (2 medicos)
+    Criterio cluster "accuracy"          → binary_labels: [True, True]   (2 medicos)
+  
+  Completion 2 (o3):
+    Criterio cluster "context_awareness" → binary_labels: [False, False]
+    Criterio cluster "accuracy"          → binary_labels: [True, False]
+```
+
+**IMPORTANTE: Los medicos solo evaluaron los cluster-level (genericos), NO los example-level (especificos).**
 
 **Que podemos y que NO podemos usar del meta_eval:**
 
-| Componente | Usable? | Por que |
+| Componente | Usable? | Para que |
 |---|---|---|
-| **Prompts** (conversaciones) | Si, directamente | Son las preguntas medicas |
-| **Rubrics** (rubricas de medicos) | Si, directamente | Son las golden rubrics |
-| **Respuestas de modelos** (ref_completions, completion) | Si, como nuestras "answers" pre-generadas | Nos ahorran correr Answer Policy (~$0) |
-| **binary_labels de medicos como gold_scores** | **NO para training** | El Judge en training es GPT-5.2; los binary_labels son de medicos humanos. Evaluadores distintos con sesgos distintos. Mezclarlos contamina el reward — una rubrica buena podria recibir reward bajo por la diferencia entre evaluadores, no por su calidad. |
-| **binary_labels para validar el Judge** | **SI, muy util** | Podemos medir la concordancia entre nuestro Judge (GPT-5.2) y los medicos. Alta concordancia = mayor confianza en el pipeline. |
+| **Completions** (respuestas de modelos) | Si, como answers pre-generadas | Nos ahorran correr Answer Policy (~$0) |
+| **binary_labels para elegir/validar Judge** | **SI — analisis complementario** | Evaluacion por item cluster-level: probar varios LLMs como Judge, comparar con physicians, medir variabilidad. Sirve para elegir el mejor Judge y reportar concordancia |
+| **binary_labels como gold_scores para training** | **NO** | (1) Solo cubren cluster-level (genericos), no example-level (los que importan). (2) Evaluadores distintos al Judge: mezclarlos contamina el reward |
 
-**Consecuencia para el precompute:**
+**Consecuencia para el precompute (el paso que importa):**
 
-Necesitamos gold_scores producidos por el **mismo Judge** que se usa durante training (GPT-5.2), para que el sesgo se cancele en la correlacion de Spearman. El flujo correcto es:
+Los gold_scores deben producirse con el **mismo Judge** que se usa durante training, evaluando con las **rubricas example-level** (las especificas). El flujo es:
 
 1. Tomar las respuestas del meta_eval (ya existen, gratis — nos ahorramos Answer Policy).
-2. Nuestro Judge (GPT-5.2) las evalua con la golden rubric → gold_scores.
+2. Nuestro Judge evalua cada respuesta con la golden rubric **completa** (todos los example-level criteria) → gold_scores.
 3. Promediar N=3 evaluaciones para estabilizar (gpt-5.2 solo soporta temperature=1).
 4. Cachear en disco.
 
@@ -362,15 +398,16 @@ Necesitamos gold_scores producidos por el **mismo Judge** que se usa durante tra
 - ~5000 preguntas × ~4 respuestas × 1 batched call × 3 evals = ~15,000 API calls
 - A ~$0.003 por call = ~$45
 
-**Bonus — Validacion del Judge contra medicos:**
+**Analisis complementario — Seleccion y validacion del Judge (opcional, no bloqueante):**
 
-Con el meta_eval podemos correr un experimento de concordancia:
-1. Tomar las respuestas evaluadas por medicos (binary_labels).
-2. Hacer que nuestro Judge evalue las mismas respuestas con las mismas rubricas.
-3. Comparar binary_labels del Judge vs binary_labels de medicos.
-4. Reportar agreement (accuracy, Cohen's kappa, F1 por criterio).
+Con el meta_eval podemos hacer un benchmark de Judges:
+1. Tomar completions evaluadas por medicos (binary_labels por item cluster-level).
+2. Hacer que varios LLMs (GPT-5.2, GPT-5, Claude, etc.) evaluen las mismas completions con los mismos criterios cluster, **item por item**.
+3. Comparar cada Judge contra physicians: accuracy, Cohen's kappa, F1 por criterio cluster.
+4. Medir variabilidad intra-juez (evaluar lo mismo N veces, reportar std).
+5. Elegir el Judge con mejor concordancia y menor variabilidad.
 
-Esto da una medida de confianza en el pipeline entero. Si el Judge tiene alta concordancia con medicos → los gold_scores del Judge son buena proxy de los gold_scores humanos → el reward es confiable.
+Esto es un analisis para el paper (seccion de robustez), no un bloqueante para el training. El precompute con example-level rubrics es lo prioritario.
 
 **Datasets complementarios:**
 - **Intelligent-Internet HB evals**: Respuestas de II-Medical-8B evaluadas con GPT-4.1 contra rubricas (~5K completions + scores).
@@ -455,7 +492,7 @@ reward = alignment                    # Spearman(gold_scores, grubrics_scores) �
 El grader (GPT-4.1) evalua cada criterio de forma binaria: `{"criteria_met": true/false, "explanation": "..."}`. Score = (puntos logrados) / (total puntos positivos posibles), clipeado a [0, 1]. Criterios negativos restan si criteria_met=true (el modelo hizo algo peligroso).
 
 **Meta_eval — evaluaciones de medicos (NO de LLM):**
-El archivo `oss_meta_eval.jsonl` contiene evaluaciones de **medicos humanos** (confirmado por el campo `anonymized_physician_ids`), no de GPT-4.1. Son binary_labels (true/false) por criterio, hechos por los mismos 262 medicos que escribieron las rubricas. Estos labels **no se pueden usar directamente como gold_scores** para nuestro training (evaluador distinto al Judge), pero si para **validar la concordancia de nuestro Judge** contra el juicio medico real.
+El archivo `oss_meta_eval.jsonl` contiene evaluaciones de **medicos humanos** (confirmado por el campo `anonymized_physician_ids`), no de GPT-4.1. Cada fila = 1 completion × 1 criterio cluster-level. Los `binary_labels` son una lista de True/False, **una por physician** (tipicamente 2, a veces 3-5), indicando si esa completion cumple ese criterio cluster especifico. Los medicos **solo evaluaron criterios cluster-level** (genericos, 24 textos unicos), no los example-level (especificos de cada pregunta). Estos labels no se usan como gold_scores para training, pero sirven como benchmark para elegir/validar el Judge (analisis complementario).
 
 **Por que HealthBench**: 5000 preguntas (vs 60 de FrontierScience), holdout de ~500 (vs 12), resultados estadisticamente robustos, MIT license, respuestas de modelos ya disponibles (nos ahorramos Answer Policy).
 
@@ -540,15 +577,17 @@ Nota: No implementamos baselines de evolving rubrics (DR-Tulu, RLCER). Son proye
 | A3 | **Sin defense_penalty** | Importa la penalidad de degeneracion? | `lambda_defense=0.0` |
 | A4 | **Sin curriculum** (flat 50/50) | Ayuda el shifting gradual? | `--phases 0.5:0.5:1.0` |
 
-### Cuando correr cada cosa
+### Priorizacion y orden de ejecucion
 
-| Grupo | Cuando | Requiere |
-|---|---|---|
-| B0, B1, B3 (zero-cost rubric eval) | Primero — establece rangos de referencia | Solo API |
-| B2, B7 (Qwen base + SFT) | Con GPU | GPU |
-| B4-B6 (ablations de metodo) | Despues del primer run exitoso | GPU + veRL |
-| B8-B9 (baselines externos) | Si hay tiempo/presupuesto | GPU + veRL |
-| Exp 1 (policy training) | Despues de tener rubricas de cada metodo | GPU + veRL (multiples runs) |
+| Fase | Que | Costo | Cuando |
+|---|---|---|---|
+| **Fase 1** | Precompute + validar Judge vs medicos (DECISION GATE) | ~$70 | Primero (~3 dias) |
+| **Fase 2** | Baselines + SFT + RL con curriculum + eval cross-domain | ~$135 | Despues de Fase 1 (~2 semanas) |
+| Extensiones | Open-only, policy training, ablations, inter-juez | ~$90-$630 | Si hay tiempo/presupuesto |
+
+**Total core (Fase 1 + 2): ~$205.** Extensiones son opcionales.
+
+Para el paper, nos apalancamos en Rubric Anchors (2508.12790) para el claim de "mejores rubricas → mejores policies". El experimento controlado (Exp 1) es una extension natural que fortalece el paper pero no es necesaria para la primera version.
 
 ### Metricas de evaluacion
 
@@ -568,13 +607,18 @@ Nota: No implementamos baselines de evolving rubrics (DR-Tulu, RLCER). Son proye
 | **HealthBench Score** | Score agregado de la policy en HealthBench (como lo mide el benchmark original) |
 | **Per-axis scores** | Accuracy, Completeness, Context awareness, Communication, Instruction following |
 
-**Para robustez del Judge (NIVEL 3):**
+**Para robustez del Judge (analisis complementario, no bloqueante):**
 
 | Metrica | Que captura | Fuente |
 |---|---|---|
-| **Variabilidad intra-juez** | std de scores del mismo Judge sobre misma pregunta+rubrica con num_evals=3 | Precompute pipeline |
-| **Concordancia Judge vs medicos** | Accuracy, Cohen's kappa, F1 por criterio | `scripts/validate_judge.py` vs HealthBench meta_eval |
-| **Consistencia inter-juez** (opcional) | Correlacion de rankings entre 2+ modelos como juez | Correr eval con GPT-5.2, Claude, modelo open-source |
+| **Variabilidad intra-juez** | std de scores del mismo Judge sobre misma pregunta+rubrica con num_evals=3 | Precompute pipeline (ya disponible) |
+| **Concordancia Judge vs medicos (por item cluster)** | Accuracy, Cohen's kappa, F1 por criterio cluster-level | `scripts/validate_judge.py` vs HealthBench meta_eval |
+| **Benchmark de Judges** (opcional) | Comparar varios LLMs (GPT-5.2, GPT-5, Claude) como Judge, item por item cluster, elegir el mejor | `scripts/validate_judge.py` con --judge_model |
+| **Consistencia inter-juez** (opcional) | Correlacion de rankings entre 2+ modelos como juez | Correr eval con distintos modelos |
+
+**Estructura de la validacion:** El meta_eval tiene evaluaciones de medicos **por item cluster-level** (criterios genericos, 24 textos unicos). Para cada completion × criterio cluster, N physicians (tipicamente 2) dieron True/False. Podemos hacer que el Judge evalue los mismos items y comparar. Esto es granular (por item, no por respuesta completa) y permite ver en que ejes (accuracy, completeness, etc.) el Judge es mas o menos confiable.
+
+**Importante:** Esta validacion es un analisis para el paper (seccion de robustez), no un bloqueante. El precompute con rubricas example-level es lo prioritario y no depende de esto.
 
 Contexto de la literatura: TrustJudge (2509.21117) reporta ~23% inconsistencia en LLM judges. Sin embargo, rubricas explicitas mejoran significativamente la consistencia (favorable para nuestro enfoque), y multiples evaluaciones reducen el ruido (ya implementado). Los humanos tambien muestran inconsistencia sustancial en evaluacion (2512.16041).
 
@@ -636,7 +680,18 @@ Contexto de la literatura: TrustJudge (2509.21117) reporta ~23% inconsistencia e
 |---|---|---|---|---|---|---|
 | FrontierScience Research | `data/frontierscience-research/` | 60 subtasks de investigacion fisica, PhD-authored | **Si, 10pts** | **Si (PhD)** | **Fisica** | **D_open — cross-domain generalization** |
 
-Nota: Los datasets verificables (GSM8K, MATH, MedQA, MedMCQA) y HealthBench se descargan de HuggingFace en runtime. Ver "Datasets Externos" abajo.
+**Datos descargados localmente** (validados con datos reales, 30/30 tests pasan):
+
+| Dataset | Directorio local | Registros | Tamaño |
+|---|---|---|---|
+| HealthBench eval | `data/healthbench/oss_eval.jsonl` | 5,000 | 55 MB |
+| HealthBench meta_eval | `data/healthbench/oss_meta_eval.jsonl` | 29,511 | 126 MB |
+| MedQA-USMLE | `data/medqa/train.jsonl` + `test.jsonl` | 10,178 + 1,273 | 17 MB |
+| MedMCQA | `data/medmcqa/train.jsonl` + `validation.jsonl` | 182,822 + 4,183 | 147 MB |
+
+Script de descarga: `scripts/download_datasets.py`. Validacion: `scripts/validate_data_integration.py`.
+
+Nota: GSM8K y MATH se descargan de HuggingFace en runtime (no guardados localmente). FrontierScience ya esta en el repo.
 
 ### Datasets Externos Relevantes
 
@@ -663,12 +718,17 @@ Nota: Los datasets verificables (GSM8K, MATH, MedQA, MedMCQA) y HealthBench se d
 
 ### Conclusiones sobre datos
 
-1. **D_verif medico**: MedQA-USMLE (~10K) y MedMCQA (~183K) son los datasets verificables primarios para el curriculum medico. Adapters implementados.
+1. **D_verif medico**: MedQA-USMLE (~10K) y MedMCQA (~183K) son los datasets verificables primarios para el curriculum medico. **Descargados y validados.**
 2. **D_verif math**: MATH (12K) y GSM8K (8.5K) como warm-up y validacion cruzada. Adapters implementados.
-3. **D_open medico**: HealthBench (5000 conversaciones, rubricas de 262 medicos) es el dataset principal. Adapter implementado.
+3. **D_open medico**: HealthBench (5000 conversaciones, rubricas de 262 medicos) es el dataset principal. **Descargado, validado, mini precompute OK.**
 4. **D_open ciencia**: FrontierScience (60 subtasks, rubricas de PhDs) para validacion de generalizacion. Adapter implementado.
-5. **synthetic-2 NO sirve** — es instruction following con rewards de modelos, no problemas verificables.
-6. **Potencial futuro**: Dr. SCI (1M questions) podria ser util cuando se publique. Codigo flexible para incorporarlo.
+5. **Potencial futuro**: Dr. SCI (1M questions) podria ser util cuando se publique. Codigo flexible para incorporarlo.
+
+**Bugs corregidos durante validacion con datos reales:**
+- `medqa.py`: campo `answer` contiene el texto, no la letra. Corregido a usar `answer_idx`.
+- `healthbench.py`: `load_dataset("openai/healthbench")` falla porque oss_eval y oss_meta_eval tienen schemas distintos. Corregido con `data_files="2025-05-07-06-14-12_oss_eval.jsonl"`.
+- `holdout.py`: `split_holdout` hardcodeaba `question_id` pero HealthBench usa `prompt_id`. Corregido para buscar ambos.
+- `validate_judge.py`: reescrito para el formato real del meta_eval (`binary_labels` por physician con majority vote, no `criteria_met` por criterio). Score del Judge ya esta normalizado a [0,1], no dividir por total_points.
 
 ### Arquitectura de datos flexible
 
@@ -1073,11 +1133,27 @@ Ventajas: gratis (sin API extra), determinista, garantiza varianza en gold_score
    - Soporta `--num_eval_runs`, `--holdout_size`, `--output results.json`
    - Holdout size automatico por dataset (12 FS, 500 HB)
    - Genera tabla markdown con resultados
-7. **`scripts/validate_judge.py`** — CREADO
-   - Valida nuestro Judge contra binary_labels de medicos del meta_eval
-   - Metricas: accuracy, precision, recall, F1, Cohen's kappa
-   - Breakdown por tag (accuracy/completeness/safety/etc)
-   - CLI: `python scripts/validate_judge.py --limit 50 --output results.json`
+7. **`scripts/validate_judge.py`** — CREADO (reescrito para formato real)
+   - Valida nuestro Judge contra physician majority vote del meta_eval
+   - Cada meta_eval entry tiene `binary_labels` (1 bool por physician, no por criterio)
+   - Judge evalua completion contra rubrica completa, threshold score >= 0.5
+   - Metricas: accuracy, precision, recall, F1, Cohen's kappa, score distribution
+   - Breakdown por category (no por tag individual)
+   - CLI: `python scripts/validate_judge.py --limit 500 --output results.json`
+   - Resultado preliminar (20 entries): accuracy=0.75, F1=0.857 (muestra insuficiente para kappa)
+8. **`scripts/download_datasets.py`** — CREADO
+   - Descarga HealthBench, MedQA, MedMCQA de HuggingFace a `data/` local
+   - CLI: `python scripts/download_datasets.py [--only healthbench medqa]`
+9. **`scripts/validate_data_integration.py`** — CREADO
+   - Valida integracion de datos reales: adapters, fields, holdout split
+   - 30/30 tests pasan con datos reales de HuggingFace
+10. **`scripts/analyze_precompute.py`** — CREADO
+    - Analisis offline ($0) de precompute: Judge gold_scores stats, distribuciones, zero-variance detection
+    - Cross-reference con physician scores de meta_eval: Spearman, Pearson, MAE, pairwise ranking
+    - Soporta HealthBench, MedQA, MedMCQA (y `--dataset all`)
+    - Puede correr precompute automaticamente con `--run-precompute --limit N`
+    - CLI: `python scripts/analyze_precompute.py --output data/results/analysis.json`
+    - Resultado (19 preguntas, 63 pares): Spearman=0.461 (p=0.0001), pairwise accuracy=0.681
 7. **`tests/test_evaluation.py`** — CREADO (29 tests, todos pasan)
    - `TestAlignmentScore` (5), `TestDiscriminationScore` (3), `TestFormatValidity` (4)
    - `TestPointsSum` (2), `TestInfoValue` (2), `TestComputeAllMetrics` (1)
@@ -1265,7 +1341,9 @@ grubrics-science/
 
   scripts/
     run_baselines.py               (--dataset_name healthbench/frontierscience) ✓
-    validate_judge.py              (Judge vs medicos: accuracy, kappa, F1) ✓
+    validate_judge.py              (Judge vs physician majority vote: accuracy, kappa, F1) ✓
+    validate_data_integration.py   (30/30 tests con datos reales de HuggingFace) ✓
+    download_datasets.py           (descarga HealthBench, MedQA, MedMCQA a data/) ✓
 
   tests/
     test_phase0.py                 (29 tests) ✓
@@ -1278,9 +1356,19 @@ grubrics-science/
     test_medqa.py                  (16 tests) ✓
 
   data/
+    healthbench/                   # Descargado de HuggingFace
+      oss_eval.jsonl                   (5,000 conversaciones + rubrics) ✓
+      oss_meta_eval.jsonl              (29,511 completions + physician labels) ✓
+    medqa/                         # Descargado de HuggingFace
+      train.jsonl                      (10,178 USMLE MCQ) ✓
+      test.jsonl                       (1,273 USMLE MCQ) ✓
+    medmcqa/                       # Descargado de HuggingFace
+      train.jsonl                      (182,822 MCQ) ✓
+      validation.jsonl                 (4,183 MCQ) ✓
     cache/
       frontierscience_precompute.jsonl  (2 preguntas de prueba) ✓
       gsm8k_precompute_test.jsonl       (5 preguntas de prueba) ✓
+      healthbench_precompute_test.jsonl (9 preguntas de prueba) ✓
     processed/
       frontierscience_train.parquet     (60 rows, 2 con cache) ✓
     frontierscience-research/      # FrontierScience (60 subtasks, rubricas PhD)
@@ -1336,7 +1424,8 @@ python -m grubrics_science.data.precompute_verifiable --dataset medqa --limit 10
 python -m grubrics_science.data.precompute_verifiable --dataset medmcqa --limit 10
 
 # Precompute de HealthBench (answers del meta_eval, Judge evalua con golden rubric):
-python -m grubrics_science.data.precompute_healthbench --limit 10 --num_evals 3
+# Paralelo por defecto (max_concurrent=10). Cada pregunta = 1 API call.
+python -m grubrics_science.data.precompute_healthbench --limit 20 --num_evals 1 --max_concurrent 10
 
 # Datasets disponibles: gsm8k, math, frontierscience, healthbench, medqa, medmcqa
 ```
@@ -1353,9 +1442,22 @@ python scripts/run_baselines.py --dataset_name healthbench --baselines B0 B1 B3 
 # Con multiples evaluaciones para reducir ruido del Judge:
 python scripts/run_baselines.py --dataset_name healthbench --baselines B0 B1 B3 --num_eval_runs 3
 
-# Validar Judge contra medicos (concordancia con binary_labels del meta_eval):
-python scripts/validate_judge.py --limit 50    # quick validation
-python scripts/validate_judge.py --output data/results/judge_validation.json  # full
+# Validar Judge contra medicos (physician majority vote del meta_eval):
+python scripts/validate_judge.py --limit 500 --output data/results/judge_validation.json  # muestra (~$5, ~1h)
+
+# Descargar datasets localmente:
+python scripts/download_datasets.py                    # todos
+python scripts/download_datasets.py --only healthbench # solo uno
+
+# Validar integracion de datos (30/30 tests, sin API):
+python scripts/validate_data_integration.py
+
+# Analizar precompute + cross-reference con medicos (offline, $0):
+python scripts/analyze_precompute.py --dataset healthbench --output data/results/healthbench_analysis.json
+python scripts/analyze_precompute.py --dataset all  # todos los datasets
+
+# Analizar + correr precompute si no existe:
+python scripts/analyze_precompute.py --dataset healthbench --run-precompute --limit 20
 ```
 
 #### Setup
@@ -1388,7 +1490,7 @@ az ml job stream --name <job-id> \
 - **`prepare.py`**: CLI que genera parquets.
 - **`precompute.py`**: Precompute answers + gold_scores para FrontierScience. Usa Answer Policy (GPT) + Judge batched. Promedia N evaluaciones.
 - **`precompute_verifiable.py`**: Precompute para GSM8K/MATH/MedQA/MedMCQA. Para MCQ (MedQA/MedMCQA): las 4 opciones son las answers, gold_scores programaticos (correcta=1.0, incorrectas=0.0). Para math: genera 1 answer + 3 perturbaciones.
-- **`precompute_healthbench.py`**: Precompute para HealthBench. NO genera answers (las toma del meta_eval). Nuestro Judge evalua con golden rubric → gold_scores.
+- **`precompute_healthbench.py`**: Precompute para HealthBench. NO genera answers (las toma del meta_eval). Nuestro Judge evalua con golden rubric (example-level, filtradas) → gold_scores. **Paralelo** con asyncio.gather (batches de max_concurrent). Speedup ~8x vs secuencial.
 - **`adapters/`**: 7 adapters registrados. HealthBenchAdapter (open_rubric, meta_eval answers, cache), MedQAAdapter y MedMCQAAdapter (verifiable, HuggingFace, MCQ).
 
 #### `rewards/` — Funciones de reward
@@ -1462,7 +1564,7 @@ az ml job stream --name <job-id> \
 3. **Phase 2** ✓ (codigo completo): precompute_verifiable (GSM8K/MATH/MedQA/MedMCQA), reward unificado, adapters con cache, curriculum, run_grpo, validación e2e con API. Falta: smoke test en workstation con GPU
 4. **Phase 2.5** ✓ (codigo completo): evaluador + baselines zero-cost (B0, B1, B3), generalizado para FrontierScience + HealthBench. Falta: descargar datos + precompute + correr
 5. **Phase 3** ✓: Reward configurable via YAML/env + flags para ablations (B4, A1-A3)
-6. **Datasets medicos** ✓ (codigo completo): HealthBenchAdapter, MedQAAdapter, MedMCQAAdapter, precompute_healthbench, validate_judge, holdout generalizado, baselines con --dataset_name. 181 tests pasan. Falta: descargar datos de HuggingFace + ejecutar precompute
+6. **Datasets medicos** ✓ (validado end-to-end): HealthBenchAdapter, MedQAAdapter, MedMCQAAdapter, precompute_healthbench (paralelo), validate_judge, analyze_precompute, holdout generalizado, baselines con --dataset_name. 181 tests pasan. Datos descargados de HuggingFace (346 MB). Precompute validado (19 preguntas paralelo en ~1 min). Judge vs physician cross-reference: Spearman=0.461 (p=0.0001), acuerdo moderado. Rubrics filtradas a example-level (ahorro 46% tokens). Bugs corregidos: MedQA answer_idx, HealthBench data_files, holdout prompt_id, validate_judge reescrito
 7. **Phase 4**: Evolucion de rubricas (bonus, no bloquea)
 8. **Phase 5**: Training runs completos + tabla final (GPU)
 

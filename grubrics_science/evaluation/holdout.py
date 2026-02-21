@@ -198,8 +198,11 @@ def split_holdout(
         )
         return [], list(data)
 
-    # Sort by question_id for reproducibility before shuffling
-    sorted_data = sorted(data, key=lambda d: str(d["question_id"]))
+    # Sort by id for reproducibility before shuffling
+    def _get_id(d):
+        return str(d.get("question_id", d.get("prompt_id", "")))
+
+    sorted_data = sorted(data, key=_get_id)
 
     rng = _random.Random(seed)
     indices = list(range(len(sorted_data)))

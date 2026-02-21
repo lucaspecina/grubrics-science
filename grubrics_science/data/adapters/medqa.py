@@ -61,15 +61,16 @@ class MedQAAdapter(DatasetAdapter):
         for idx, row in enumerate(ds):
             question = row["question"]
             options = row.get("options", {})
-            answer_letter = row.get("answer", "")
 
-            # options is a dict like {"A": "...", "B": "...", "C": "...", "D": "..."}
             if isinstance(options, str):
                 try:
                     options = json.loads(options)
                 except (json.JSONDecodeError, TypeError):
                     options = {}
 
+            answer_letter = row.get("answer_idx", "") or row.get("answer", "")
+            if len(answer_letter) > 1:
+                answer_letter = row.get("answer_idx", "")
             correct_text = options.get(answer_letter, "")
 
             items.append({
