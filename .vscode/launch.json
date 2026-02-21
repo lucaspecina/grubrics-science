@@ -2,10 +2,13 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "GRubrics: Test",
+            "name": "veRL Debug: 20 steps",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/test_grubrics.py",
+            "module": "verl.trainer.main_ppo",
+            "args": [
+                "--config", "${workspaceFolder}/grubrics_science/configs/verl_grpo_debug.yaml"
+            ],
             "console": "integratedTerminal",
             "justMyCode": false,
             "env": {
@@ -15,10 +18,13 @@
             "python": "${command:python.interpreterPath}"
         },
         {
-            "name": "Evolving Rubrics: Test",
+            "name": "veRL Production: 2000 steps",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/test_evolve.py",
+            "module": "verl.trainer.main_ppo",
+            "args": [
+                "--config", "${workspaceFolder}/grubrics_science/configs/verl_grpo.yaml"
+            ],
             "console": "integratedTerminal",
             "justMyCode": false,
             "env": {

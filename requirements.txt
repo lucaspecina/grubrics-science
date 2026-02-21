@@ -27,9 +27,18 @@ python-dotenv>=1.0.0
 torch>=2.0.0
 transformers>=4.51.0
 accelerate>=0.20.0
+peft>=0.11.0
 
 # --- Data (HuggingFace Datasets) ---
 datasets>=2.14.0
+pyarrow>=14.0.0
+
+# --- RL Training (veRL + vLLM) ---
+# NOTE: verl and vllm should be installed via setup_env.sh on GPU machines.
+# Uncomment below only if installing on a machine with CUDA:
+# verl>=0.2.0
+# vllm>=0.4.0
+# ray[default]>=2.9.0
 
 # --- Experiment Tracking (opcional) ---
 wandb>=0.15.0

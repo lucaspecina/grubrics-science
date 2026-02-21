@@ -18,22 +18,30 @@ def get_answer_policy_prompt(question: str, instruction_type: str = "normal") ->
     Returns:
         Formatted prompt string
     """
-    base_instruction = """Answer the following question clearly and completely, but be concise. 
-Provide a complete answer with a clear conclusion. Do not cut off mid-sentence or leave the answer incomplete."""
-    
+    # All instructions request detailed, thorough answers of similar length.
+    # Diversity comes from different *approaches*, not different lengths.
     instructions = {
-        "normal": base_instruction,
-        "low_temp": """Answer the following question in a detailed and precise manner, including all necessary derivations and assumptions.
-Be thorough but concise. Ensure your answer is complete with a clear conclusion.""",
-        "high_temp": """Answer the following question creatively, exploring different perspectives and approaches.
-Be concise while covering multiple angles. End with a clear summary or conclusion.""",
-        "failure_mode_1": """Answer the following question but omit any derivations or mathematical steps. Just state conclusions.
-Be brief and direct. Provide a complete answer with clear conclusions.""",
-        "failure_mode_2": """Answer the following question but omit explicit assumptions or boundary conditions. Be vague about limitations.
-Keep it concise. Provide a complete answer even if some details are omitted.""",
+        "rigorous": """Answer the following question in a detailed and precise manner. Include all necessary derivations,
+mathematical steps, assumptions, and boundary conditions. Be thorough and systematic.
+Ensure your answer is complete with a clear conclusion.""",
+        "conceptual": """Answer the following question with a detailed conceptual explanation. Focus on physical intuition,
+qualitative reasoning, and connecting ideas. Explain the underlying principles thoroughly,
+but prioritize conceptual clarity over mathematical formalism. Write a thorough, complete answer.""",
+        "exploratory": """Answer the following question by exploring multiple approaches or perspectives in detail.
+Consider alternative methods, discuss trade-offs, and connect to related problems.
+Write a thorough and complete answer covering different angles.""",
+        "tangential": """Answer the following question in detail but spend significant time on tangential topics,
+historical context, and loosely related concepts. Include some correct content but dilute it
+with extensive discussion of secondary or marginally relevant material. Write a long, detailed answer.""",
+        "overconfident": """Answer the following question in detail. State your conclusions confidently even when
+making approximations or assumptions. Skip some intermediate justification steps and present results
+as more certain than they are. Write a thorough, complete answer.""",
+        "shallow": """Answer the following question with a detailed response. Cover the main points at a surface level
+but avoid deep derivations or rigorous justifications. Discuss the topic broadly rather than deeply.
+Write a long, complete answer that touches on many aspects without going into full detail on any.""",
     }
     
-    instruction = instructions.get(instruction_type, base_instruction)
+    instruction = instructions.get(instruction_type, instructions["rigorous"])
     
     return f"""{instruction}
 
@@ -261,6 +269,54 @@ Return detailed scores and explanations for EACH ITEM within each rubric.
 
 Answer ID: {answer_id}
 """
-    
+
+    return prompt
+
+
+# ============================================================================
+# JUDGE BATCHED PROMPT (multiple answers, 1 rubric, 1 call)
+# ============================================================================
+
+JUDGE_BATCHED_SYSTEM_PROMPT = """You are an expert evaluator. You will be given a question, multiple answers, and a scoring rubric.
+
+Evaluate EACH answer independently against the rubric.
+For each rubric item ("Points: X, Item: Y"), decide how well the answer meets it:
+- 0.0 = Answer completely fails to meet this item's criteria
+- 0.5 = Answer partially meets this item's criteria
+- 1.0 = Answer fully meets this item's criteria
+
+Compute total_score for each answer as: sum(item_score * max_points) / sum(max_points).
+
+Return ONLY this JSON (no other text):
+{"evaluations": [{"answer_id": "a1", "total_score": 0.65}, {"answer_id": "a2", "total_score": 0.43}, ...]}"""
+
+
+def get_judge_batched_prompt(
+    question: str,
+    answers: List[str],
+    rubric: str,
+) -> str:
+    """Generate prompt for Judge to evaluate multiple answers against one rubric.
+
+    This is more efficient than calling get_judge_prompt per answer:
+    one API call instead of N, and the model can compare answers for
+    more consistent relative scoring.
+
+    Args:
+        question: The original question.
+        answers: List of answers to evaluate.
+        rubric: Single rubric string.
+
+    Returns:
+        Formatted prompt string.
+    """
+    prompt = f"Question: {question}\n\n"
+
+    for i, answer in enumerate(answers):
+        prompt += f"--- Answer a{i + 1} ---\n{answer}\n\n"
+
+    prompt += f"--- Rubric ---\n{rubric}\n\n"
+    prompt += "Evaluate each answer independently against the rubric."
+
     return prompt
 
