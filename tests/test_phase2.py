@@ -227,33 +227,26 @@ class TestVerifiableAdapterCache:
 class TestUnifiedRewardRouting:
     """Test that verifiable reward uses functional alignment when cache is present."""
 
-    def test_verifiable_with_cache_uses_functional_alignment(self):
-        """When answers + gold_scores are in extra_info, verifiable should
-        attempt functional alignment (which needs Judge). Here we just verify
-        the routing by checking it doesn't fall back to local reward."""
+    def test_verifiable_without_cache_raises(self):
+        """Without precomputed data, verifiable reward must raise."""
+        import pytest
         from grubrics_science.rewards.grubrics_reward import _reward_verifiable
-        from grubrics_science.rewards.gsm8k_reward import compute_score as local_score
 
         rubric = (
             "Points: 5.0, Item: Correctly computes 2+2\n"
             "Points: 5.0, Item: Shows step-by-step work"
         )
 
-        # Without cache: uses local reward
-        score_no_cache = _reward_verifiable(
-            solution_str=rubric,
-            ground_truth="4",
-            extra_info={"question": "What is 2+2?"},
-        )
-        local = local_score(
-            data_source="gsm8k",
-            solution_str=rubric,
-            extra_info={"question": "What is 2+2?"},
-        )
-        assert score_no_cache == local
+        with pytest.raises(ValueError, match="Missing precomputed"):
+            _reward_verifiable(
+                solution_str=rubric,
+                ground_truth="4",
+                extra_info={"question": "What is 2+2?", "question_id": "test"},
+            )
 
-    def test_verifiable_without_cache_falls_back(self):
-        """Without cache, verifiable reward falls back to format-only."""
+    def test_verifiable_without_cache_compute_score_raises(self):
+        """compute_score must raise for verifiable without precompute."""
+        import pytest
         from grubrics_science.rewards.grubrics_reward import compute_score
 
         rubric = (
@@ -261,14 +254,13 @@ class TestUnifiedRewardRouting:
             "Points: 3.0, Item: Clear steps\n"
             "Points: 4.0, Item: Final result"
         )
-        score = compute_score(
-            data_source="gsm8k",
-            solution_str=rubric,
-            ground_truth="42",
-            extra_info={"question": "What is 6*7?"},
-        )
-        assert isinstance(score, float)
-        assert score > 0.5  # well-formed rubric should score well
+        with pytest.raises(ValueError, match="Missing precomputed"):
+            compute_score(
+                data_source="gsm8k",
+                solution_str=rubric,
+                ground_truth="42",
+                extra_info={"question": "What is 6*7?", "question_id": "test"},
+            )
 
 
 # =========================================================================

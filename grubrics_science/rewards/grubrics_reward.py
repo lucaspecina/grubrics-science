@@ -1,8 +1,12 @@
 """Unified reward function for veRL GRPO training.
 
+All training rows MUST have precomputed answers + gold_scores.
+The reward is always functional alignment (Spearman correlation between
+the Judge's scores using the generated rubric vs the precomputed gold scores).
+
 Routes based on ``data_source``:
-  - Verifiable domains (gsm8k, math, medqa, medmcqa) → local reward (format + coherence).
-  - Open domains (frontierscience) → Judge API reward (functional alignment).
+  - Verifiable domains (gsm8k, math, medqa, medmcqa) → functional alignment.
+  - Open domains (healthbench, frontierscience) → functional alignment.
 
 veRL calls ``compute_score(data_source, solution_str, ground_truth, extra_info)``.
 
@@ -11,7 +15,6 @@ Reward weights are configurable via environment variables:
   REWARD_LAMBDA_INFO     — info value bonus weight (default: 0.3)
   REWARD_LAMBDA_DEFENSE  — defense penalty weight (default: 0.3)
   REWARD_CHAR_THRESHOLD  — chars before length penalty kicks in (default: 3000)
-  REWARD_USE_FUNCTIONAL  — "1" to use functional alignment, "0" for format-only (default: "1")
 """
 
 import asyncio
@@ -20,7 +23,6 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from .gsm8k_reward import compute_score as local_compute_score
 from .alignment import (
     compute_alignment,
     compute_defense_penalty,
@@ -46,6 +48,8 @@ class RewardConfig:
     lambda_info: float = 0.3
     lambda_defense: float = 0.3
     char_threshold: int = 3000
+    # Kept for backward compatibility with tests/configs. Always True in practice:
+    # all training rows must have precomputed data, no format-only fallback exists.
     use_functional_alignment: bool = True
 
     @classmethod
@@ -56,7 +60,6 @@ class RewardConfig:
             lambda_info=float(os.environ.get("REWARD_LAMBDA_INFO", "0.3")),
             lambda_defense=float(os.environ.get("REWARD_LAMBDA_DEFENSE", "0.3")),
             char_threshold=int(os.environ.get("REWARD_CHAR_THRESHOLD", "3000")),
-            use_functional_alignment=os.environ.get("REWARD_USE_FUNCTIONAL", "1") == "1",
         )
 
 
@@ -71,12 +74,11 @@ def get_reward_config() -> RewardConfig:
         _reward_config = RewardConfig.from_env()
         logger.info(
             "Reward config: lambda_len=%.2f lambda_info=%.2f lambda_defense=%.2f "
-            "char_threshold=%d use_functional=%s",
+            "char_threshold=%d",
             _reward_config.lambda_len,
             _reward_config.lambda_info,
             _reward_config.lambda_defense,
             _reward_config.char_threshold,
-            _reward_config.use_functional_alignment,
         )
     return _reward_config
 
@@ -90,9 +92,9 @@ def configure_reward(config: RewardConfig) -> None:
     _reward_config = config
     logger.info(
         "Reward config updated: lambda_len=%.2f lambda_info=%.2f lambda_defense=%.2f "
-        "char_threshold=%d use_functional=%s",
+        "char_threshold=%d",
         config.lambda_len, config.lambda_info, config.lambda_defense,
-        config.char_threshold, config.use_functional_alignment,
+        config.char_threshold,
     )
 
 
@@ -129,26 +131,20 @@ def _reward_verifiable(
 ) -> float:
     """Reward for verifiable domains.
 
-    If precomputed answers + gold_scores are available in extra_info
-    AND functional alignment is enabled, uses the Judge-based reward.
-    Otherwise falls back to the local format-only reward.
+    Requires precomputed answers + gold_scores in extra_info.
+    Raises if data is missing — all training rows must have precompute.
     """
-    config = get_reward_config()
     answers: List[str] = extra_info.get("answers", [])
     gold_scores: List[float] = extra_info.get("gold_scores", [])
 
-    if config.use_functional_alignment and answers and gold_scores:
-        # Functional alignment path (Phase 2): Judge evaluates answers
-        # with the generated rubric, then Spearman vs programmatic gold_scores.
-        return _reward_functional_alignment(solution_str, extra_info)
+    if not answers or not gold_scores:
+        qid = extra_info.get("question_id", "unknown")
+        raise ValueError(
+            f"Missing precomputed answers/gold_scores for verifiable question '{qid}'. "
+            f"Run precompute before training. All rows must have precomputed data."
+        )
 
-    # Fallback: format-only reward (Phase 0 behaviour / B4 ablation)
-    return local_compute_score(
-        data_source=extra_info.get("data_source", "gsm8k"),
-        solution_str=solution_str,
-        ground_truth=ground_truth,
-        extra_info=extra_info,
-    )
+    return _reward_functional_alignment(solution_str, extra_info)
 
 
 # ---------------------------------------------------------------------------
@@ -177,17 +173,13 @@ def _reward_functional_alignment(
     rubric = solution_str
     judge = _get_judge()
 
-    try:
-        scores = _run_async(
-            judge.evaluate_answers_batched(
-                question=question,
-                answers=answers,
-                rubric=rubric,
-            )
+    scores = _run_async(
+        judge.evaluate_answers_batched(
+            question=question,
+            answers=answers,
+            rubric=rubric,
         )
-    except Exception as exc:
-        logger.error("Judge API call failed in reward: %s", exc)
-        return 0.0
+    )
 
     config = get_reward_config()
 
@@ -229,23 +221,19 @@ def _reward_open_sync(
     solution_str: str,
     extra_info: Dict[str, Any],
 ) -> float:
-    """Reward for open domains. Calls the Judge API synchronously."""
-    config = get_reward_config()
+    """Reward for open domains. Calls the Judge API synchronously.
+
+    Requires precomputed answers + gold_scores in extra_info.
+    Raises if data is missing — all training rows must have precompute.
+    """
     answers: List[str] = extra_info.get("answers", [])
     gold_scores: List[float] = extra_info.get("gold_scores", [])
 
-    if not config.use_functional_alignment or not answers or not gold_scores:
-        if not config.use_functional_alignment:
-            logger.debug("Functional alignment disabled, using format-only reward.")
-        else:
-            logger.warning(
-                "No precomputed answers/gold_scores for open-domain reward. "
-                "Falling back to format-only reward."
-            )
-        return local_compute_score(
-            data_source="frontierscience",
-            solution_str=solution_str,
-            extra_info=extra_info,
+    if not answers or not gold_scores:
+        qid = extra_info.get("question_id", extra_info.get("prompt_id", "unknown"))
+        raise ValueError(
+            f"Missing precomputed answers/gold_scores for open-domain question '{qid}'. "
+            f"Run precompute before training. All rows must have precomputed data."
         )
 
     return _reward_functional_alignment(solution_str, extra_info)

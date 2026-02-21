@@ -2,26 +2,35 @@
 
 Usage examples
 --------------
+Prepare from a preset (recommended)::
+
+    python -m grubrics_science.data.prepare preset --output_dir data/processed
+    python -m grubrics_science.data.prepare preset --name open_only --output_dir data/processed
+    python -m grubrics_science.data.prepare preset --list
+
 Prepare a single dataset::
 
-    python -m grubrics_science.data.prepare --dataset gsm8k --output_dir ./data/processed
+    python -m grubrics_science.data.prepare single --dataset healthbench --output_dir data/processed
 
-Prepare curriculum mix::
+Prepare curriculum mix (manual)::
 
-    python -m grubrics_science.data.prepare \\
-        --mix math:0.4 gsm8k:0.4 frontierscience:0.2 \\
-        --output_dir ./data/processed/curriculum_phase1
+    python -m grubrics_science.data.prepare curriculum \\
+        --verif medqa:0.5 medmcqa:0.5 --open healthbench:1.0 \\
+        --output_dir data/processed
 """
 
 import argparse
 import json
 import random
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import pandas as pd
+import yaml
 
 from .adapters import get_adapter
+
+_PRESETS_PATH = Path(__file__).parent.parent / "configs" / "training_presets.yaml"
 
 
 # ------------------------------------------------------------------
@@ -265,6 +274,164 @@ def prepare_curriculum(
 
 
 # ------------------------------------------------------------------
+# Filtering helpers
+# ------------------------------------------------------------------
+
+def _filter_cached_rows(parquet_path: Path) -> Path:
+    """Remove rows without precomputed answers+gold_scores from a parquet.
+
+    Overwrites the file in-place and returns the same path.
+    """
+    df = pd.read_parquet(parquet_path)
+    original_len = len(df)
+
+    def has_precompute(extra_info_str):
+        ei = json.loads(extra_info_str) if isinstance(extra_info_str, str) else extra_info_str
+        answers = ei.get("answers", [])
+        gold_scores = ei.get("gold_scores", [])
+        return bool(answers) and bool(gold_scores)
+
+    mask = df["extra_info"].apply(has_precompute)
+    df_filtered = df[mask].reset_index(drop=True)
+
+    if len(df_filtered) == 0:
+        raise ValueError(
+            f"No rows with precomputed data found in {parquet_path}. "
+            f"Run precompute first."
+        )
+
+    df_filtered.to_parquet(parquet_path, index=False)
+    removed = original_len - len(df_filtered)
+    print(f"  [only-cached] Kept {len(df_filtered)}/{original_len} rows "
+          f"({removed} without precompute removed)")
+    return parquet_path
+
+
+# ------------------------------------------------------------------
+# Preset-based preparation
+# ------------------------------------------------------------------
+
+def load_presets(path: Optional[Path] = None) -> Dict[str, Any]:
+    """Load training presets from YAML."""
+    p = path or _PRESETS_PATH
+    with open(p) as f:
+        return yaml.safe_load(f)
+
+
+def list_presets(path: Optional[Path] = None) -> None:
+    """Print available presets to stdout."""
+    cfg = load_presets(path)
+    active = cfg.get("active_preset", "")
+    presets = cfg.get("presets", {})
+
+    print("Available training presets:")
+    print(f"  (active default: {active})\n")
+    for name, preset in presets.items():
+        marker = " <-- active" if name == active else ""
+        desc = preset.get("description", "")
+        rec = preset.get("recommended_for", "")
+        print(f"  {name}{marker}")
+        print(f"    {desc}")
+        if rec:
+            print(f"    Recommended for: {rec}")
+        print()
+
+
+def prepare_from_preset(
+    preset_name: Optional[str] = None,
+    output_dir: str = "data/processed",
+    tokenizer: Any = None,
+    total_items: Optional[int] = None,
+    seed: int = 42,
+    presets_path: Optional[Path] = None,
+    only_cached: bool = False,
+) -> Union[Path, List[Path]]:
+    """Prepare training data from a named preset.
+
+    Args:
+        preset_name: Preset key. If ``None``, uses ``active_preset`` from YAML.
+        output_dir: Directory for output parquet(s).
+        tokenizer: Optional HuggingFace tokenizer.
+        total_items: Cap on total rows (per phase for curriculum).
+        seed: Random seed.
+        presets_path: Override path to presets YAML.
+        only_cached: If True, filter out rows that don't have precomputed
+            answers + gold_scores. Essential for training (reward requires
+            precomputed data).
+
+    Returns:
+        Path (single/mix) or list of Paths (curriculum).
+    """
+    cfg = load_presets(presets_path)
+    if preset_name is None:
+        preset_name = cfg.get("active_preset", "open_only")
+
+    presets = cfg.get("presets", {})
+    if preset_name not in presets:
+        available = ", ".join(presets.keys())
+        raise ValueError(f"Unknown preset '{preset_name}'. Available: {available}")
+
+    preset = presets[preset_name]
+    preset_type = preset.get("type", "single")
+
+    print(f"=== Preset: {preset_name} ===")
+    print(f"  {preset.get('description', '')}")
+    print()
+
+    if preset_type == "curriculum":
+        verif_entries = preset.get("verifiable", [])
+        open_entries = preset.get("open", [])
+        phase_defs = preset.get("phases", [])
+
+        verif_adapters = [(e["name"], e["weight"]) for e in verif_entries]
+        open_adapters = [(e["name"], e["weight"]) for e in open_entries]
+        phases = [(p["ratio_verif"], p["ratio_open"]) for p in phase_defs]
+
+        cache_paths = {}
+        for e in verif_entries + open_entries:
+            if e.get("cache"):
+                cache_paths[e["name"]] = e["cache"]
+
+        # curriculum uses prepare_mixed internally, which doesn't take cache_paths.
+        # Set cache on adapters via env or direct construction.
+        # For now, use prepare_curriculum which calls prepare_mixed.
+        paths = prepare_curriculum(
+            verif_adapters=verif_adapters,
+            open_adapters=open_adapters,
+            output_dir=output_dir,
+            tokenizer=tokenizer,
+            phases=phases,
+            total_items_per_phase=total_items,
+            seed=seed,
+        )
+        print(f"\n  Generated {len(paths)} phase parquets in {output_dir}")
+        return paths
+
+    else:
+        datasets = preset.get("datasets", [])
+        adapters_with_ratios = [(d["name"], d["weight"]) for d in datasets]
+        cache_paths = {
+            d["name"]: d["cache"] for d in datasets if d.get("cache")
+        }
+
+        path = prepare_mixed_with_cache(
+            adapters_with_ratios=adapters_with_ratios,
+            output_dir=output_dir,
+            tokenizer=tokenizer,
+            total_items=total_items,
+            split="train",
+            cache_paths=cache_paths,
+            seed=seed,
+        )
+
+        if only_cached:
+            path = _filter_cached_rows(path)
+
+        print(f"\n  Generated parquet: {path}")
+        return path
+
+
+# ------------------------------------------------------------------
 # CLI
 # ------------------------------------------------------------------
 
@@ -273,6 +440,17 @@ def main():
         description="Prepare datasets for GRubrics-Transfer training."
     )
     sub = parser.add_subparsers(dest="command")
+
+    # --- preset (recommended) ---
+    pre = sub.add_parser("preset", help="Prepare data from a training preset (recommended)")
+    pre.add_argument("--name", default=None, help="Preset name (default: active_preset from YAML)")
+    pre.add_argument("--output_dir", default="data/processed")
+    pre.add_argument("--total_items", type=int, default=None)
+    pre.add_argument("--tokenizer", default=None)
+    pre.add_argument("--seed", type=int, default=42)
+    pre.add_argument("--list", action="store_true", help="List available presets and exit")
+    pre.add_argument("--only-cached", action="store_true",
+                     help="Keep only rows with precomputed answers+gold_scores (required for training)")
 
     # --- single dataset ---
     single = sub.add_parser("single", help="Prepare a single dataset")
@@ -306,7 +484,20 @@ def main():
         from transformers import AutoTokenizer
         tokenizer = AutoTokenizer.from_pretrained(tok_name)
 
-    if args.command == "single":
+    if args.command == "preset":
+        if args.list:
+            list_presets()
+            return
+        prepare_from_preset(
+            preset_name=args.name,
+            output_dir=args.output_dir,
+            tokenizer=tokenizer,
+            total_items=args.total_items,
+            seed=args.seed,
+            only_cached=args.only_cached,
+        )
+
+    elif args.command == "single":
         prepare_dataset(
             adapter_name=args.dataset,
             output_dir=args.output_dir,

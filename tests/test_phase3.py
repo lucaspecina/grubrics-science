@@ -32,14 +32,12 @@ class TestRewardConfig:
         monkeypatch.setenv("REWARD_LAMBDA_INFO", "0.0")
         monkeypatch.setenv("REWARD_LAMBDA_DEFENSE", "0.5")
         monkeypatch.setenv("REWARD_CHAR_THRESHOLD", "5000")
-        monkeypatch.setenv("REWARD_USE_FUNCTIONAL", "0")
 
         config = RewardConfig.from_env()
         assert config.lambda_len == 0.05
         assert config.lambda_info == 0.0
         assert config.lambda_defense == 0.5
         assert config.char_threshold == 5000
-        assert config.use_functional_alignment is False
 
     def test_from_env_defaults(self, monkeypatch):
         """If env vars not set, use defaults."""
@@ -47,8 +45,7 @@ class TestRewardConfig:
 
         # Clear any existing env vars
         for key in ["REWARD_LAMBDA_LEN", "REWARD_LAMBDA_INFO",
-                     "REWARD_LAMBDA_DEFENSE", "REWARD_CHAR_THRESHOLD",
-                     "REWARD_USE_FUNCTIONAL"]:
+                     "REWARD_LAMBDA_DEFENSE", "REWARD_CHAR_THRESHOLD"]:
             monkeypatch.delenv(key, raising=False)
 
         config = RewardConfig.from_env()
@@ -78,7 +75,6 @@ class TestConfigureReward:
             lambda_info=0.0,
             lambda_defense=0.0,
             char_threshold=1000,
-            use_functional_alignment=False,
         )
         configure_reward(custom)
 
@@ -87,7 +83,6 @@ class TestConfigureReward:
         assert config.lambda_info == 0.0
         assert config.lambda_defense == 0.0
         assert config.char_threshold == 1000
-        assert config.use_functional_alignment is False
 
         # Reset for other tests
         mod._reward_config = None
@@ -117,47 +112,42 @@ class TestRewardWeightsIntegration:
         # Reset
         mod._reward_config = None
 
-    def test_format_only_ablation(self):
-        """With use_functional=False, verifiable reward should use format-only."""
-        from grubrics_science.rewards.grubrics_reward import (
-            RewardConfig,
-            configure_reward,
-            _reward_verifiable,
-        )
+    def test_missing_precompute_raises_verifiable(self):
+        """Without precomputed data, verifiable reward must raise."""
+        from grubrics_science.rewards.grubrics_reward import _reward_verifiable
         import grubrics_science.rewards.grubrics_reward as mod
 
-        configure_reward(RewardConfig(use_functional_alignment=False))
-
-        # Even with answers and gold_scores, should fall back to format-only
-        result = _reward_verifiable(
-            solution_str="Points: 5.0, Item: A\nPoints: 5.0, Item: B",
-            ground_truth="42",
-            extra_info={
-                "data_source": "gsm8k",
-                "question": "What is 6*7?",
-                "answers": ["answer1", "answer2"],
-                "gold_scores": [1.0, 0.0],
-            },
-        )
-        # format-only reward should return something (not crash)
-        assert isinstance(result, float)
-
-        # Reset
         mod._reward_config = None
 
-    def test_functional_alignment_enabled(self):
-        """With use_functional=True and no judge, should try Judge and gracefully fail."""
-        from grubrics_science.rewards.grubrics_reward import (
-            RewardConfig,
-            configure_reward,
-        )
+        with pytest.raises(ValueError, match="Missing precomputed"):
+            _reward_verifiable(
+                solution_str="Points: 5.0, Item: A\nPoints: 5.0, Item: B",
+                ground_truth="42",
+                extra_info={
+                    "data_source": "gsm8k",
+                    "question": "What is 6*7?",
+                    "question_id": "test_q",
+                },
+            )
+
+        mod._reward_config = None
+
+    def test_missing_precompute_raises_open(self):
+        """Without precomputed data, open-domain reward must raise."""
+        from grubrics_science.rewards.grubrics_reward import _reward_open_sync
         import grubrics_science.rewards.grubrics_reward as mod
 
-        configure_reward(RewardConfig(use_functional_alignment=True))
-        config = mod.get_reward_config()
-        assert config.use_functional_alignment is True
+        mod._reward_config = None
 
-        # Reset
+        with pytest.raises(ValueError, match="Missing precomputed"):
+            _reward_open_sync(
+                solution_str="Points: 5.0, Item: A\nPoints: 5.0, Item: B",
+                extra_info={
+                    "question": "What causes chest pain?",
+                    "prompt_id": "test_p",
+                },
+            )
+
         mod._reward_config = None
 
 
@@ -288,7 +278,7 @@ class TestApplyRewardConfigEnv:
         # Clear existing vars
         for var in ["REWARD_LAMBDA_LEN", "REWARD_LAMBDA_INFO",
                      "REWARD_LAMBDA_DEFENSE", "REWARD_CHAR_THRESHOLD",
-                     "REWARD_USE_FUNCTIONAL", "USE_CONTRASTIVE"]:
+                     "USE_CONTRASTIVE"]:
             monkeypatch.delenv(var, raising=False)
 
         config = {
@@ -296,7 +286,6 @@ class TestApplyRewardConfigEnv:
             "lambda_info": 0.0,
             "lambda_defense": 0.5,
             "char_threshold": 5000,
-            "use_functional": False,
             "use_contrastive": True,
         }
         _apply_reward_config_env(config)
@@ -305,7 +294,6 @@ class TestApplyRewardConfigEnv:
         assert os.environ["REWARD_LAMBDA_INFO"] == "0.0"
         assert os.environ["REWARD_LAMBDA_DEFENSE"] == "0.5"
         assert os.environ["REWARD_CHAR_THRESHOLD"] == "5000"
-        assert os.environ["REWARD_USE_FUNCTIONAL"] == "0"
         assert os.environ["USE_CONTRASTIVE"] == "1"
 
     def test_empty_config_no_change(self, monkeypatch):
@@ -335,7 +323,6 @@ class TestYAMLConfig:
         assert rc["lambda_info"] == 0.3
         assert rc["lambda_defense"] == 0.3
         assert rc["char_threshold"] == 3000
-        assert rc["use_functional"] is True
         assert rc["use_contrastive"] is True
 
     def test_debug_yaml_has_reward_config(self):
@@ -346,5 +333,4 @@ class TestYAMLConfig:
 
         assert "reward_config" in config
         rc = config["reward_config"]
-        assert rc["use_functional"] is True
         assert rc["use_contrastive"] is True

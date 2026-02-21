@@ -446,6 +446,30 @@ El training loop de GRPO es siempre el mismo: generar N rubricas, calcular rewar
 
 La intuicion: el transfer es dentro del mismo campo (medicina). Un modelo que sabe distinguir buenas respuestas a preguntas medicas MCQ tiene la base para distinguir buenas respuestas a consultas medicas abiertas. Es el mismo dominio, distinto nivel de verificabilidad.
 
+#### Decision: datasets verifiable excluidos del training inicial
+
+Despues de analizar los datos precomputados de MedQA y MedMCQA, decidimos **no usar datasets verifiable en el training inicial**. El razonamiento:
+
+1. **Señal binaria trivial**: Las "answers" para MCQ son las 4 opciones (textos cortos como "Cistitis"). Los `gold_scores` son `[1.0, 0.0, 0.0, 0.0]`. La rubrica "ideal" seria "la respuesta correcta es X" — no hay gradacion de calidad.
+2. **Spearman no discriminativo**: Con un vector binario, el Spearman solo mide si la rubrica identifica la opcion correcta, no si captura razonamiento medico.
+3. **Mismatch de formato**: El Judge evalua textos cortos ("A. Cistitis") contra rubricas detalladas — la evaluacion no es natural.
+
+HealthBench, en cambio, tiene respuestas largas con variabilidad real en calidad, rubricas multi-criterio ponderadas, y scores humanos de referencia. La señal es mucho mas rica para entrenar generacion de rubricas discriminativas.
+
+**El codigo de verifiable se mantiene intacto** para futuras ablations o si se agregan datasets con respuestas generadas (no MCQ). La seleccion se hace via presets configurables:
+
+```bash
+python -m grubrics_science.data.prepare preset --list       # ver opciones
+python -m grubrics_science.data.prepare preset --output_dir data/processed  # usar preset activo (open_only)
+python -m grubrics_science.data.prepare preset --name curriculum --output_dir data/processed  # curriculum
+```
+
+Presets disponibles en `grubrics_science/configs/training_presets.yaml`:
+- **open_only** (default): Solo HealthBench
+- **verifiable_only**: Solo MedQA + MedMCQA
+- **curriculum**: Mix progresivo verifiable → open (3 fases)
+- **full_mix**: Todos mezclados uniformemente
+
 ### La reward function en detalle
 
 ```

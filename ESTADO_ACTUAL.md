@@ -45,7 +45,7 @@ GRubrics usa functional alignment contra rubricas humanas existentes. Mide direc
 | **Adapters existentes** | `adapters/gsm8k.py`, `math_hendrycks.py`, `frontierscience.py`                      | Completo | -            |
 | **Adapters medicos**    | `adapters/healthbench.py`, `medqa.py`, `medmcqa.py`                                  | Completo | 44 (HB+MedQA)|
 | **Adapter registry**    | `adapters/__init__.py` (7 adapters registrados)                                      | Completo | -            |
-| **Parquet CLI**         | `data/prepare.py`                                                                    | Completo | -            |
+| **Parquet CLI + presets**| `data/prepare.py`, `configs/training_presets.yaml`                                   | Completo | -            |
 | **Azure OpenAI client** | `llm/client.py`                                                                      | Completo | -            |
 | **Prompts**             | `llm/prompts.py`                                                                     | Completo | -            |
 
@@ -168,6 +168,7 @@ Fuente: HuggingFace (`openai/healthbench`, `GBaker/MedQA-USMLE-4-options`, `open
     - Score patterns: 65% mixed (ideal para training), 16% all_high, 16% all_low
     - Distribución de scores bien balanceada: mean=0.537, std=0.332, rango completo [0, 1]
 11. **Precompute paralelo validado**: 19 preguntas en ~1 min (vs ~8 min secuencial), speedup ~8x
+12. **Decisión: excluir datasets verifiable del training inicial.** MedQA/MedMCQA tienen señal binaria trivial (opciones MCQ cortas, gold_scores [1,0,0,0]). HealthBench tiene señal rica (respuestas largas, rúbricas multi-criterio, gradaciones de calidad). Se implementó sistema de presets configurables (`configs/training_presets.yaml`) con 4 opciones: `open_only` (default), `verifiable_only`, `curriculum`, `full_mix`. El código de verifiable se mantiene intacto para futuras ablations.
 
 ---
 

@@ -68,9 +68,11 @@ algorithm:
     kl_coef: 0.01
 
 # --- Data ---
+# Generated via: python -m grubrics_science.data.prepare preset --output_dir data/processed
+# Active preset: open_only (HealthBench). See configs/training_presets.yaml for options.
 data:
-  train_files: data/processed/gsm8k_train.parquet
-  val_files: data/processed/gsm8k_train.parquet
+  train_files: data/processed/mixed_train.parquet
+  val_files: data/processed/mixed_train.parquet
   max_prompt_length: 2048
   max_response_length: 512
   train_batch_size: 24
@@ -80,7 +82,7 @@ data:
   truncation: left
 
 # --- Custom Reward Function ---
-# grubrics_reward.py routes: verifiable → local, open → Judge API
+# grubrics_reward.py routes by data_source: verifiable → local, open → Judge API
 custom_reward_function:
   path: grubrics_science/rewards/grubrics_reward.py
   name: compute_score
@@ -94,7 +96,6 @@ reward_config:
   lambda_info: 0.3         # Info value bonus weight
   lambda_defense: 0.3      # Defense penalty weight
   char_threshold: 3000     # Chars before length penalty kicks in
-  use_functional: true     # false = format-only reward (B4 ablation)
   use_contrastive: true    # false = no contrastive excerpts in prompt (A1 ablation)
 
 # --- Reward Model (disabled — we use custom_reward_function) ---
@@ -109,7 +110,7 @@ critic:
 trainer:
   total_training_steps: 2000
   project_name: grubrics-transfer
-  experiment_name: phase0-gsm8k-grpo
+  experiment_name: healthbench-grpo
   logger:
     - console
     - wandb

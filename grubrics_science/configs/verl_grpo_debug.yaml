@@ -76,9 +76,11 @@ algorithm:
     kl_coef: 0.01
 
 # --- Data ---
+# Generated via: python -m grubrics_science.data.prepare preset --output_dir data/processed
+# Active preset: open_only (HealthBench). See configs/training_presets.yaml for options.
 data:
-  train_files: data/processed/test/gsm8k_train.parquet
-  val_files: data/processed/test/gsm8k_train.parquet
+  train_files: data/processed/mixed_train.parquet
+  val_files: data/processed/mixed_train.parquet
   max_prompt_length: 1024
   max_response_length: 256
   train_batch_size: 4
@@ -88,7 +90,7 @@ data:
   truncation: left
 
 # --- Custom Reward Function ---
-# grubrics_reward.py routes: verifiable → local, open → Judge API
+# grubrics_reward.py routes by data_source: verifiable → local, open → Judge API
 custom_reward_function:
   path: grubrics_science/rewards/grubrics_reward.py
   name: compute_score
@@ -99,7 +101,6 @@ reward_config:
   lambda_info: 0.3
   lambda_defense: 0.3
   char_threshold: 3000
-  use_functional: true
   use_contrastive: true
 
 # --- Reward Model (disabled — we use custom_reward_function) ---

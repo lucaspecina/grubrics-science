@@ -87,7 +87,9 @@ class TestDefensePenalty:
 class TestGrubricsRewardRouting:
     """grubrics_reward.compute_score routes based on data_source."""
 
-    def test_verifiable_uses_local_reward(self):
+    def test_verifiable_without_precompute_raises(self):
+        """All verifiable sources must raise without precomputed data."""
+        import pytest
         from grubrics_science.rewards.grubrics_reward import compute_score
 
         good_rubric = (
@@ -97,28 +99,17 @@ class TestGrubricsRewardRouting:
             "Points: 2.0, Item: The final answer is clearly stated"
         )
 
-        # All verifiable sources should use local reward (no API)
         for source in ["gsm8k", "math", "medqa", "medmcqa"]:
-            score = compute_score(
-                data_source=source,
-                solution_str=good_rubric,
-                extra_info={"question": "What is 2+2?"},
-            )
-            assert isinstance(score, float)
-            assert score > 0.5, f"{source}: good rubric should score > 0.5, got {score}"
+            with pytest.raises(ValueError, match="Missing precomputed"):
+                compute_score(
+                    data_source=source,
+                    solution_str=good_rubric,
+                    extra_info={"question": "What is 2+2?", "question_id": "test"},
+                )
 
-    def test_bad_rubric_low_score_for_verifiable(self):
-        from grubrics_science.rewards.grubrics_reward import compute_score
-
-        score = compute_score(
-            data_source="gsm8k",
-            solution_str="this is not a rubric",
-            extra_info={"question": "What is 2+2?"},
-        )
-        assert score < 0.2
-
-    def test_open_domain_without_cache_falls_back(self):
-        """FrontierScience without precomputed data falls back to local reward."""
+    def test_open_domain_without_precompute_raises(self):
+        """Open domain without precomputed data must raise."""
+        import pytest
         from grubrics_science.rewards.grubrics_reward import compute_score
 
         good_rubric = (
@@ -126,18 +117,17 @@ class TestGrubricsRewardRouting:
             "Points: 5.0, Item: The explanation is physically sound"
         )
 
-        # No answers/gold_scores → should fallback, not crash
-        score = compute_score(
-            data_source="frontierscience",
-            solution_str=good_rubric,
-            extra_info={
-                "question": "Derive E=mc^2",
-                "answers": [],
-                "gold_scores": [],
-            },
-        )
-        assert isinstance(score, float)
-        assert score >= 0.0
+        with pytest.raises(ValueError, match="Missing precomputed"):
+            compute_score(
+                data_source="frontierscience",
+                solution_str=good_rubric,
+                extra_info={
+                    "question": "Derive E=mc^2",
+                    "prompt_id": "test",
+                    "answers": [],
+                    "gold_scores": [],
+                },
+            )
 
 
 # =========================================================================
@@ -377,8 +367,9 @@ class TestAdapterCacheIntegration:
         assert isinstance(extra["question"], str)
         assert len(extra["answers"]) == len(extra["gold_scores"])
 
-    def test_reward_verifiable_path_no_api(self):
-        """Verifiable reward path works end-to-end without any API."""
+    def test_reward_verifiable_without_precompute_raises(self):
+        """Verifiable reward must raise without precomputed data."""
+        import pytest
         from grubrics_science.rewards.grubrics_reward import compute_score
 
         rubric = (
@@ -386,33 +377,34 @@ class TestAdapterCacheIntegration:
             "Points: 4.0, Item: Shows clear step-by-step work\n"
             "Points: 3.0, Item: Arrives at the correct final answer"
         )
-        score = compute_score(
-            data_source="gsm8k",
-            solution_str=rubric,
-            ground_truth="42",
-            extra_info={"question": "What is 6*7?", "domain_type": "verifiable"},
-        )
-        assert 0.0 <= score <= 1.0
-        assert score > 0.5  # well-formed rubric
+        with pytest.raises(ValueError, match="Missing precomputed"):
+            compute_score(
+                data_source="gsm8k",
+                solution_str=rubric,
+                ground_truth="42",
+                extra_info={"question": "What is 6*7?", "question_id": "test"},
+            )
 
-    def test_reward_open_fallback_when_no_cache(self):
-        """Open domain without cache data falls back to format-only reward."""
+    def test_reward_open_without_precompute_raises(self):
+        """Open domain without precomputed data must raise."""
+        import pytest
         from grubrics_science.rewards.grubrics_reward import compute_score
 
         rubric = (
             "Points: 5.0, Item: Correct derivation of partition function\n"
             "Points: 5.0, Item: Proper treatment of boundary conditions"
         )
-        score = compute_score(
-            data_source="frontierscience",
-            solution_str=rubric,
-            extra_info={
-                "question": "Derive the partition function.",
-                "answers": [],
-                "gold_scores": [],
-            },
-        )
-        assert 0.0 <= score <= 1.0
+        with pytest.raises(ValueError, match="Missing precomputed"):
+            compute_score(
+                data_source="frontierscience",
+                solution_str=rubric,
+                extra_info={
+                    "question": "Derive the partition function.",
+                    "prompt_id": "test",
+                    "answers": [],
+                    "gold_scores": [],
+                },
+            )
 
     def test_parquet_roundtrip_preserves_cache_data(self, cache_file, dataset_file, tmp_path):
         """Parquet write/read preserves answers and gold_scores in extra_info."""

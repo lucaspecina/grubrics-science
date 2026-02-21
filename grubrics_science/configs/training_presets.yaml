@@ -1,0 +1,102 @@
+# =============================================================================
+# Training Presets — Dataset configurations for GRubrics-Transfer
+# =============================================================================
+#
+# Usage:
+#   python -m grubrics_science.data.prepare preset --output_dir data/processed
+#   python -m grubrics_science.data.prepare preset --name open_only --output_dir data/processed
+#   python -m grubrics_science.data.prepare preset --list
+#
+# Each preset defines which datasets to include and how to mix them.
+# The "active_preset" field selects the default when --name is not given.
+# =============================================================================
+
+active_preset: open_only
+
+presets:
+
+  # ---------------------------------------------------------------------------
+  # OPEN ONLY — Default for GRubrics medical rubric training
+  # ---------------------------------------------------------------------------
+  # HealthBench provides rich, multi-criteria rubrics with graded physician
+  # scores. The Judge evaluates long-form medical answers against detailed
+  # rubrics, producing a nuanced alignment signal (Spearman correlation).
+  #
+  # Why not verifiable? MedQA/MedMCQA answers are short MCQ options (e.g.
+  # "Cystitis") with binary gold_scores [1,0,0,0]. The "ideal" rubric would
+  # just be "the correct answer is X" — no gradient for learning rich rubrics.
+  open_only:
+    description: "Solo HealthBench (open-domain). Señal rica con rúbricas multi-criterio."
+    type: single
+    datasets:
+      - name: healthbench
+        weight: 1.0
+        cache: data/cache/healthbench_precompute.jsonl
+    recommended_for: "Training principal de GRubrics"
+
+  # ---------------------------------------------------------------------------
+  # VERIFIABLE ONLY — Warm-up or ablation
+  # ---------------------------------------------------------------------------
+  # Binary signal from MCQ datasets. Useful for:
+  #   - Format warm-up (model learns rubric structure before harder signal)
+  #   - Ablation studies (compare vs open_only)
+  verifiable_only:
+    description: "Solo MedQA + MedMCQA. Señal binaria, útil para warm-up de formato."
+    type: single
+    datasets:
+      - name: medqa
+        weight: 0.5
+        cache: data/cache/medqa_precompute.jsonl
+      - name: medmcqa
+        weight: 0.5
+        cache: data/cache/medmcqa_precompute.jsonl
+    recommended_for: "Warm-up o ablation studies"
+
+  # ---------------------------------------------------------------------------
+  # CURRICULUM — Progressive shift from verifiable to open
+  # ---------------------------------------------------------------------------
+  # Phase 1: 80% verifiable, 20% open  (learn format with easy signal)
+  # Phase 2: 50% verifiable, 50% open  (transition)
+  # Phase 3: 20% verifiable, 80% open  (focus on rich rubrics)
+  curriculum:
+    description: "Mix progresivo: empieza con verifiable, transiciona a open."
+    type: curriculum
+    phases:
+      - ratio_verif: 0.8
+        ratio_open: 0.2
+      - ratio_verif: 0.5
+        ratio_open: 0.5
+      - ratio_verif: 0.2
+        ratio_open: 0.8
+    verifiable:
+      - name: medqa
+        weight: 0.5
+        cache: data/cache/medqa_precompute.jsonl
+      - name: medmcqa
+        weight: 0.5
+        cache: data/cache/medmcqa_precompute.jsonl
+    open:
+      - name: healthbench
+        weight: 1.0
+        cache: data/cache/healthbench_precompute.jsonl
+    recommended_for: "Curriculum learning (requiere datos suficientes en ambos dominios)"
+
+  # ---------------------------------------------------------------------------
+  # FULL MIX — All datasets mixed uniformly
+  # ---------------------------------------------------------------------------
+  # Equal weight to all datasets in a single parquet. Useful for ablation
+  # to compare against open_only or curriculum.
+  full_mix:
+    description: "Todos los datasets mezclados uniformemente."
+    type: single
+    datasets:
+      - name: healthbench
+        weight: 0.5
+        cache: data/cache/healthbench_precompute.jsonl
+      - name: medqa
+        weight: 0.25
+        cache: data/cache/medqa_precompute.jsonl
+      - name: medmcqa
+        weight: 0.25
+        cache: data/cache/medmcqa_precompute.jsonl
+    recommended_for: "Ablation: comparar con open_only"

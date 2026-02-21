@@ -62,7 +62,6 @@ def _apply_reward_config_env(reward_config: dict) -> None:
         "lambda_info": "REWARD_LAMBDA_INFO",
         "lambda_defense": "REWARD_LAMBDA_DEFENSE",
         "char_threshold": "REWARD_CHAR_THRESHOLD",
-        "use_functional": "REWARD_USE_FUNCTIONAL",
         "use_contrastive": "USE_CONTRASTIVE",
     }
 
