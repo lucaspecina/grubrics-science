@@ -13,7 +13,7 @@
 # Usage:
 #   python run_grpo.py --config configs/verl_grpo.yaml
 #
-# Estimated VRAM: ~68GB (fits in 94GB with ~26GB margin)
+# Estimated VRAM: ~80GB (FSDP actor ~33GB + vLLM rollout ~47GB, fits in 94GB)
 # =============================================================================
 
 # --- Model + Actor + Rollout ---
@@ -51,7 +51,7 @@ actor_rollout_ref:
     top_p: 0.95
     do_sample: true
     n: 6
-    gpu_memory_utilization: 0.85
+    gpu_memory_utilization: 0.5      # hybrid engine shares GPU with FSDP actor (~33GB)
     tensor_model_parallel_size: 1
     enforce_eager: false
     log_prob_micro_batch_size_per_gpu: 4

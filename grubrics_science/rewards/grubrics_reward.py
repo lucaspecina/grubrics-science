@@ -20,15 +20,29 @@ Reward weights are configurable via environment variables:
 import asyncio
 import logging
 import os
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .alignment import (
-    compute_alignment,
-    compute_defense_penalty,
-    compute_info_value,
-    length_penalty,
-)
+try:
+    from .alignment import (
+        compute_alignment,
+        compute_defense_penalty,
+        compute_info_value,
+        length_penalty,
+    )
+except ImportError:
+    _rewards_dir = str(Path(__file__).resolve().parent)
+    _project_root = str(Path(__file__).resolve().parent.parent.parent)
+    if _project_root not in sys.path:
+        sys.path.insert(0, _project_root)
+    from grubrics_science.rewards.alignment import (
+        compute_alignment,
+        compute_defense_penalty,
+        compute_info_value,
+        length_penalty,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +123,10 @@ def _get_judge():
     verifiable-only runs that never need one."""
     global _judge
     if _judge is None:
-        from ..judge.judge import Judge
+        try:
+            from ..judge.judge import Judge
+        except ImportError:
+            from grubrics_science.judge.judge import Judge
 
         model = os.environ.get("JUDGE_MODEL", "gpt-4o-mini")
         _judge = Judge(model=model)

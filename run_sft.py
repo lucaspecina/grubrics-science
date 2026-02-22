@@ -143,8 +143,10 @@ def run_sft(config_path: str, overrides: Optional[List[str]] = None):
         os.environ.setdefault("WANDB_PROJECT", log_cfg.get("project_name", "grubrics-transfer"))
 
     gc_kwargs = train_cfg.get("gradient_checkpointing_kwargs", {})
+    max_seq_length = data_cfg.get("max_seq_length", 2560)
+    packing = data_cfg.get("packing", False)
 
-    sft_config = SFTConfig(
+    sft_kwargs = dict(
         output_dir=train_cfg["output_dir"],
         num_train_epochs=train_cfg.get("num_train_epochs", 3),
         max_steps=train_cfg.get("max_steps", -1),
@@ -165,28 +167,50 @@ def run_sft(config_path: str, overrides: Optional[List[str]] = None):
         remove_unused_columns=train_cfg.get("remove_unused_columns", False),
         report_to=report_to,
         run_name=run_name,
-        max_seq_length=data_cfg.get("max_seq_length", 2560),
-        packing=data_cfg.get("packing", False),
     )
 
-    def formatting_func(examples):
-        """Format examples into chat template strings for SFTTrainer."""
-        texts = []
-        messages_list = examples["messages"]
-        for messages in messages_list:
-            text = tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=False
-            )
-            texts.append(text)
-        return texts
+    import inspect
+    sft_config_params = inspect.signature(SFTConfig.__init__).parameters
+    if "max_seq_length" in sft_config_params:
+        sft_kwargs["max_seq_length"] = max_seq_length
+        sft_kwargs["packing"] = packing
 
-    trainer = SFTTrainer(
+    sft_config = SFTConfig(**sft_kwargs)
+
+    def _format_messages(messages):
+        """Apply chat template to a single list of message dicts."""
+        msgs = [dict(m) for m in messages]
+        return tokenizer.apply_chat_template(
+            msgs, tokenize=False, add_generation_prompt=False
+        )
+
+    def formatting_func(example):
+        """Format one or many examples into chat template strings.
+
+        TRL may call this with a single example (dict with scalar values)
+        or a batch (dict with list values), depending on the version.
+        """
+        messages_field = example["messages"]
+        if isinstance(messages_field, list) and len(messages_field) > 0:
+            if isinstance(messages_field[0], dict):
+                return _format_messages(messages_field)
+            else:
+                return [_format_messages(m) for m in messages_field]
+        return ""
+
+    trainer_kwargs = dict(
         model=model,
         args=sft_config,
         train_dataset=dataset,
         peft_config=lora_config,
         formatting_func=formatting_func,
     )
+    trainer_params = inspect.signature(SFTTrainer.__init__).parameters
+    if "max_seq_length" in trainer_params and "max_seq_length" not in sft_config_params:
+        trainer_kwargs["max_seq_length"] = max_seq_length
+        trainer_kwargs["packing"] = packing
+
+    trainer = SFTTrainer(**trainer_kwargs)
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
@@ -209,9 +233,12 @@ def run_sft(config_path: str, overrides: Optional[List[str]] = None):
     trainer.train()
 
     final_dir = Path(sft_config.output_dir) / "final"
-    trainer.save_model(str(final_dir))
+
+    logger.info("Merging LoRA weights into base model for veRL compatibility...")
+    merged_model = trainer.model.merge_and_unload()
+    merged_model.save_pretrained(str(final_dir))
     tokenizer.save_pretrained(str(final_dir))
-    logger.info("Saved final checkpoint -> %s", final_dir)
+    logger.info("Saved merged checkpoint -> %s", final_dir)
 
     print("=" * 60)
     print("SFT training complete!")

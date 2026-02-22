@@ -21,6 +21,7 @@ Usage:
 """
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -35,6 +36,58 @@ from omegaconf import OmegaConf
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
+
+
+def _patch_verl_dataset():
+    """Patch veRL's rl_dataset.py on disk to deserialize JSON-string columns.
+
+    Parquet stores ``extra_info`` and ``reward_model`` as JSON strings.
+    veRL's ``__getitem__`` calls ``.get()`` on them expecting dicts, which
+    raises ``AttributeError``.
+
+    Because veRL runs inside Ray actors (separate processes), an in-memory
+    monkey-patch applied here would not propagate.  Instead we inject a small
+    deserialisation block directly into the source file so that every process
+    that imports it — including Ray workers — picks up the fix.
+
+    The patch is idempotent: if the marker comment is already present the
+    function returns immediately.
+    """
+    import importlib.util
+
+    spec = importlib.util.find_spec("verl.utils.dataset.rl_dataset")
+    if spec is None or spec.origin is None:
+        return
+
+    src_path = Path(spec.origin)
+    src = src_path.read_text()
+
+    MARKER = "# --- grubrics json-string patch ---"
+    if MARKER in src:
+        logger.info("veRL rl_dataset.py already patched (marker found)")
+        return
+
+    PATCH = (
+        "\n"
+        f"{MARKER}\n"
+        "import json as _json_patch\n"
+        "_orig_getitem = RLHFDataset.__getitem__\n"
+        "def _patched_getitem(self, item):\n"
+        "    row = _orig_getitem(self, item)\n"
+        "    for _k in ('extra_info', 'reward_model'):\n"
+        "        _v = row.get(_k)\n"
+        "        if isinstance(_v, str):\n"
+        "            try:\n"
+        "                row[_k] = _json_patch.loads(_v)\n"
+        "            except Exception:\n"
+        "                row[_k] = {}\n"
+        "    return row\n"
+        "RLHFDataset.__getitem__ = _patched_getitem\n"
+        f"{MARKER}\n"
+    )
+
+    src_path.write_text(src + PATCH)
+    logger.info("Patched veRL rl_dataset.py on disk: %s", src_path)
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -92,6 +145,8 @@ def load_config(config_path: str, overrides: Optional[List[str]] = None) -> dict
 
 def run_simple_training(config_path: str, overrides: Optional[List[str]] = None):
     """Run single-phase GRPO training."""
+    _patch_verl_dataset()
+
     from verl.trainer.main_ppo import run_ppo
 
     merged_dict = load_config(config_path, overrides)
@@ -133,6 +188,8 @@ def run_curriculum_training(
     3. Set checkpoint resume path (from previous phase)
     4. Call veRL's run_ppo
     """
+    _patch_verl_dataset()
+
     from verl.trainer.main_ppo import run_ppo
 
     logger.info("\n%s", scheduler.summary())
