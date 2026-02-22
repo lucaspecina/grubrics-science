@@ -95,9 +95,9 @@ if [ "$PROFILE" = "workstation" ]; then
     echo "     python -m grubrics_science.data.prepare single --dataset gsm8k --output_dir ./data/processed/test/"
     echo ""
     echo "  2. Run veRL debug training:"
-    echo "     python -m verl.trainer.main_ppo --config grubrics_science/configs/verl_grpo_debug.yaml"
+    echo "     python -m verl.trainer.main_ppo --config configs/verl_grpo_debug.yaml"
     echo ""
-    echo "  Config: grubrics_science/configs/verl_grpo_debug.yaml"
+    echo "  Config: configs/verl_grpo_debug.yaml"
     echo "  Model:  Qwen2.5-0.5B-Instruct + LoRA (rank 16)"
     echo "  Engine: HF generate (no vLLM, fits in 12GB)"
 
@@ -107,9 +107,9 @@ elif [ "$PROFILE" = "h100" ]; then
     echo "     python -m grubrics_science.data.prepare single --dataset gsm8k --output_dir ./data/processed/"
     echo ""
     echo "  2. Run veRL production training:"
-    echo "     python -m verl.trainer.main_ppo --config grubrics_science/configs/verl_grpo.yaml"
+    echo "     python -m verl.trainer.main_ppo --config configs/verl_grpo.yaml"
     echo ""
-    echo "  Config: grubrics_science/configs/verl_grpo.yaml"
+    echo "  Config: configs/verl_grpo.yaml"
     echo "  Model:  Qwen3-8B + LoRA (rank 64)"
     echo "  Engine: vLLM (94GB)"
 fi

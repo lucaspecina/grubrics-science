@@ -30,7 +30,7 @@ import yaml
 
 from .adapters import get_adapter
 
-_PRESETS_PATH = Path(__file__).parent.parent / "configs" / "training_presets.yaml"
+_PRESETS_PATH = Path.cwd() / "configs" / "training_presets.yaml"
 
 
 # ------------------------------------------------------------------

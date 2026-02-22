@@ -45,7 +45,7 @@ GRubrics usa functional alignment contra rubricas humanas existentes. Mide direc
 | **Adapters existentes** | `adapters/gsm8k.py`, `math_hendrycks.py`, `frontierscience.py`                      | Completo | -            |
 | **Adapters medicos**    | `adapters/healthbench.py`, `medqa.py`, `medmcqa.py`                                  | Completo | 44 (HB+MedQA)|
 | **Adapter registry**    | `adapters/__init__.py` (7 adapters registrados)                                      | Completo | -            |
-| **Parquet CLI + presets**| `data/prepare.py`, `configs/training_presets.yaml`                                   | Completo | -            |
+| **Parquet CLI + presets**| `data/prepare.py`, `configs/training_presets.yaml` (raiz)                            | Completo | -            |
 | **Azure OpenAI client** | `llm/client.py`                                                                      | Completo | -            |
 | **Prompts**             | `llm/prompts.py`                                                                     | Completo | -            |
 
@@ -87,9 +87,8 @@ GRubrics usa functional alignment contra rubricas humanas existentes. Mide direc
 | Componente                   | Archivos                                         | Estado   | Tests |
 | ---------------------------- | ------------------------------------------------ | -------- | ----- |
 | **Curriculum scheduler**     | `training/curriculum.py`                         | Completo | 13    |
-| **Multi-phase orchestrator** | `training/run_grpo.py`                           | Completo | -     |
-| **veRL configs**             | `configs/verl_grpo.yaml`, `verl_grpo_debug.yaml` | Completo | -     |
-| **Launch script**            | `run_grpo.py` (top-level)                        | Completo | -     |
+| **Multi-phase orchestrator** | `run_grpo.py` (raiz, simple + curriculum)        | Completo | -     |
+| **veRL configs**             | `configs/verl_grpo.yaml`, `verl_grpo_debug.yaml` (raiz) | Completo | -     |
 
 
 ### Evaluacion
@@ -168,7 +167,7 @@ Fuente: HuggingFace (`openai/healthbench`, `GBaker/MedQA-USMLE-4-options`, `open
     - Score patterns: 65% mixed (ideal para training), 16% all_high, 16% all_low
     - Distribución de scores bien balanceada: mean=0.537, std=0.332, rango completo [0, 1]
 11. **Precompute paralelo validado**: 19 preguntas en ~1 min (vs ~8 min secuencial), speedup ~8x
-12. **Decisión: excluir datasets verifiable del training inicial.** MedQA/MedMCQA tienen señal binaria trivial (opciones MCQ cortas, gold_scores [1,0,0,0]). HealthBench tiene señal rica (respuestas largas, rúbricas multi-criterio, gradaciones de calidad). Se implementó sistema de presets configurables (`configs/training_presets.yaml`) con 4 opciones: `open_only` (default), `verifiable_only`, `curriculum`, `full_mix`. El código de verifiable se mantiene intacto para futuras ablations.
+12. **Decisión: excluir datasets verifiable del training inicial.** MedQA/MedMCQA tienen señal binaria trivial (opciones MCQ cortas, gold_scores [1,0,0,0]). HealthBench tiene señal rica (respuestas largas, rúbricas multi-criterio, gradaciones de calidad). Se implementó sistema de presets configurables (`configs/training_presets.yaml` en raiz) con 4 opciones: `open_only` (default), `verifiable_only`, `curriculum`, `full_mix`. El código de verifiable se mantiene intacto para futuras ablations.
 
 ---
 
@@ -339,8 +338,7 @@ El plan se divide en 2 fases prioritarias y una fase de extensiones.
 # 1. Descargar datasets desde HuggingFace — HECHO
 python scripts/download_datasets.py
 
-# 2. Validar integracion de datos — HECHO (30/30 tests)
-python scripts/validate_data_integration.py
+# 2. Validar integracion de datos — HECHO (30/30 tests via pytest)
 
 # 3. Mini precompute HealthBench — HECHO (19 preguntas, paralelo, ~1 min)
 python -m grubrics_science.data.precompute_healthbench --limit 20 --num_evals 1 --max_concurrent 10
@@ -380,7 +378,7 @@ python scripts/run_baselines.py --dataset_name healthbench --baselines B0 B1 B3 
 # 4. SFT Qwen3-8B — GPU, ~$10
 
 # 5. SISTEMA COMPLETO: RL Qwen3-8B con curriculum — GPU + API, ~$90
-python run_grpo.py --config grubrics_science/configs/verl_grpo.yaml
+python run_grpo.py --config configs/verl_grpo.yaml
 
 # 6. Evaluar checkpoint intermedio como verifiable-only (P2: transfer)
 # 7. Evaluar modelo final en FrontierScience holdout (P3: generalizacion, ~$5)

@@ -314,7 +314,7 @@ class TestYAMLConfig:
     def test_production_yaml_has_reward_config(self):
         import yaml
 
-        with open("grubrics_science/configs/verl_grpo.yaml") as f:
+        with open("configs/verl_grpo.yaml") as f:
             config = yaml.safe_load(f)
 
         assert "reward_config" in config
@@ -328,7 +328,7 @@ class TestYAMLConfig:
     def test_debug_yaml_has_reward_config(self):
         import yaml
 
-        with open("grubrics_science/configs/verl_grpo_debug.yaml") as f:
+        with open("configs/verl_grpo_debug.yaml") as f:
             config = yaml.safe_load(f)
 
         assert "reward_config" in config

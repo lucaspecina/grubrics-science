@@ -2,12 +2,13 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "veRL Debug: 20 steps",
+            "name": "GRPO Dry Run (3 steps)",
             "type": "debugpy",
             "request": "launch",
-            "module": "verl.trainer.main_ppo",
+            "program": "${workspaceFolder}/run_grpo.py",
             "args": [
-                "--config", "${workspaceFolder}/grubrics_science/configs/verl_grpo_debug.yaml"
+                "--config", "${workspaceFolder}/configs/verl_grpo.yaml",
+                "trainer.total_training_steps=3"
             ],
             "console": "integratedTerminal",
             "justMyCode": false,
@@ -18,12 +19,28 @@
             "python": "${command:python.interpreterPath}"
         },
         {
-            "name": "veRL Production: 2000 steps",
+            "name": "GRPO Debug (20 steps, small model)",
             "type": "debugpy",
             "request": "launch",
-            "module": "verl.trainer.main_ppo",
+            "program": "${workspaceFolder}/run_grpo.py",
             "args": [
-                "--config", "${workspaceFolder}/grubrics_science/configs/verl_grpo.yaml"
+                "--config", "${workspaceFolder}/configs/verl_grpo_debug.yaml"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}",
+            "python": "${command:python.interpreterPath}"
+        },
+        {
+            "name": "GRPO Production",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/run_grpo.py",
+            "args": [
+                "--config", "${workspaceFolder}/configs/verl_grpo.yaml"
             ],
             "console": "integratedTerminal",
             "justMyCode": false,

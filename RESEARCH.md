@@ -464,7 +464,7 @@ python -m grubrics_science.data.prepare preset --output_dir data/processed  # us
 python -m grubrics_science.data.prepare preset --name curriculum --output_dir data/processed  # curriculum
 ```
 
-Presets disponibles en `grubrics_science/configs/training_presets.yaml`:
+Presets disponibles en `configs/training_presets.yaml`:
 - **open_only** (default): Solo HealthBench
 - **verifiable_only**: Solo MedQA + MedMCQA
 - **curriculum**: Mix progresivo verifiable → open (3 fases)
@@ -713,7 +713,7 @@ Contexto de la literatura: TrustJudge (2509.21117) reporta ~23% inconsistencia e
 | MedQA-USMLE | `data/medqa/train.jsonl` + `test.jsonl` | 10,178 + 1,273 | 17 MB |
 | MedMCQA | `data/medmcqa/train.jsonl` + `validation.jsonl` | 182,822 + 4,183 | 147 MB |
 
-Script de descarga: `scripts/download_datasets.py`. Validacion: `scripts/validate_data_integration.py`.
+Script de descarga: `scripts/download_datasets.py`.
 
 Nota: GSM8K y MATH se descargan de HuggingFace en runtime (no guardados localmente). FrontierScience ya esta en el repo.
 
@@ -778,10 +778,10 @@ Adapters: `GSM8KAdapter`, `MATHAdapter`, `FrontierScienceAdapter`, `HealthBenchA
 
 ```bash
 # Debug (workstation RTX 4000 Ada, 12GB):
-python -m verl.trainer.main_ppo --config grubrics_science/configs/verl_grpo_debug.yaml
+python run_grpo.py --config configs/verl_grpo_debug.yaml
 
 # Produccion (H100 94GB):
-python -m verl.trainer.main_ppo --config grubrics_science/configs/verl_grpo.yaml
+python run_grpo.py --config configs/verl_grpo.yaml
 ```
 
 ### Tres ambientes
@@ -936,8 +936,8 @@ Esto da una medida cuantitativa de cuanto podemos confiar en el Judge como proxy
 5. `grubrics_science/data/adapters/__init__.py` — Registry
 7. `grubrics_science/data/prepare.py` — CLI entry point
 8. `grubrics_science/rewards/gsm8k_reward.py` — Reward local simple
-9. `grubrics_science/configs/verl_grpo.yaml` — Config produccion (H100)
-10. `grubrics_science/configs/verl_grpo_debug.yaml` — Config debug (workstation)
+9. `configs/verl_grpo.yaml` — Config produccion (H100)
+10. `configs/verl_grpo_debug.yaml` — Config debug (workstation)
 11. `setup_env.sh` — Script de setup
 
 ---
@@ -1170,10 +1170,7 @@ Ventajas: gratis (sin API extra), determinista, garantiza varianza en gold_score
 8. **`scripts/download_datasets.py`** — CREADO
    - Descarga HealthBench, MedQA, MedMCQA de HuggingFace a `data/` local
    - CLI: `python scripts/download_datasets.py [--only healthbench medqa]`
-9. **`scripts/validate_data_integration.py`** — CREADO
-   - Valida integracion de datos reales: adapters, fields, holdout split
-   - 30/30 tests pasan con datos reales de HuggingFace
-10. **`scripts/analyze_precompute.py`** — CREADO y MEJORADO
+9. **`scripts/analyze_precompute.py`** — CREADO y MEJORADO
     - Analisis offline ($0) de precompute: Judge gold_scores stats, distribuciones, zero-variance detection
     - Cross-reference con physician scores de meta_eval: Spearman, Pearson, MAE, pairwise ranking
     - **Nuevo:** Training signal quality (parse failures, zero/low variance, effective data %)
@@ -1243,26 +1240,22 @@ python scripts/run_baselines.py --baselines B0 B1 B3 --output data/results/basel
 
 ```bash
 # A1: Sin contrastive excerpts
-python -m grubrics_science.training.run_grpo --config ... \
+python run_grpo.py --config configs/verl_grpo.yaml \
     reward_config.use_contrastive=false
 
 # A2: Sin info_value bonus
-python -m grubrics_science.training.run_grpo --config ... \
+python run_grpo.py --config configs/verl_grpo.yaml \
     reward_config.lambda_info=0.0
 
 # A3: Sin defense penalty
-python -m grubrics_science.training.run_grpo --config ... \
+python run_grpo.py --config configs/verl_grpo.yaml \
     reward_config.lambda_defense=0.0
-
-# B4: Format-only reward (sin functional alignment)
-python -m grubrics_science.training.run_grpo --config ... \
-    reward_config.use_functional=false
 ```
 
 O via env vars directamente:
 ```bash
-REWARD_LAMBDA_INFO=0.0 python -m grubrics_science.training.run_grpo --config ...
-USE_CONTRASTIVE=0 python -m grubrics_science.training.run_grpo --config ...
+REWARD_LAMBDA_INFO=0.0 python run_grpo.py --config configs/verl_grpo.yaml
+USE_CONTRASTIVE=0 python run_grpo.py --config configs/verl_grpo.yaml
 ```
 
 ---
@@ -1315,15 +1308,17 @@ grubrics-science/
   requirements.txt                 # Dependencias Python
   RESEARCH.md                      # Este documento
 
-  azure_job_phase0_debug.yaml      # Job de Azure ML: debug
-  azure_job_phase0_prod.yaml       # Job de Azure ML: produccion
+  azure/
+    job_dryrun.yaml                # Job de Azure ML: dry run
+    job_prod.yaml                  # Job de Azure ML: produccion
   .amlignore                       # Archivos a excluir al subir jobs a Azure
 
+  configs/                         # Configuraciones (raiz)
+    verl_grpo.yaml                 (produccion H100) ✓
+    verl_grpo_debug.yaml           (debug workstation) ✓
+    training_presets.yaml          (presets de datasets) ✓
+
   grubrics_science/                # Paquete principal
-    configs/
-      default.yaml                 (referencia)
-      verl_grpo.yaml               (produccion H100) ✓
-      verl_grpo_debug.yaml         (debug workstation) ✓
     data/
       base.py                      (DatasetAdapter ABC) ✓
       prepare.py                   (CLI entry point) ✓
@@ -1362,22 +1357,16 @@ grubrics-science/
     rl/
       model_wrap.py                (RETIRADO - reemplazado por veRL)
       train_grpo.py                (RETIRADO - reemplazado por veRL)
-    tasks/
-      frontierscience.py           ✓
     training/
       __init__.py                  ✓
       curriculum.py                (CurriculumScheduler + parse_phases) ✓
       run_grpo.py                  (multi-phase training orchestrator) ✓
-    utils/
-      io.py                        ✓
-      logging.py                   ✓
-      seeding.py                   ✓
 
   scripts/
     run_baselines.py               (--dataset_name healthbench/frontierscience) ✓
     validate_judge.py              (Judge vs physician majority vote: accuracy, kappa, F1) ✓
-    validate_data_integration.py   (30/30 tests con datos reales de HuggingFace) ✓
     download_datasets.py           (descarga HealthBench, MedQA, MedMCQA a data/) ✓
+    analyze_precompute.py          (analisis offline de precompute) ✓
 
   tests/
     test_phase0.py                 (29 tests) ✓
@@ -1414,26 +1403,21 @@ grubrics-science/
 
 ```bash
 # Debug single-phase (modelo chico, 20 steps):
-python run_grpo.py --config grubrics_science/configs/verl_grpo_debug.yaml
+python run_grpo.py --config configs/verl_grpo_debug.yaml
 
 # Produccion single-phase (Qwen3-8B, 2000 steps):
-python run_grpo.py --config grubrics_science/configs/verl_grpo.yaml
+python run_grpo.py --config configs/verl_grpo.yaml
 
 # Con overrides:
-python run_grpo.py --config grubrics_science/configs/verl_grpo.yaml \
+python run_grpo.py --config configs/verl_grpo.yaml \
     trainer.total_training_steps=50 data.train_batch_size=8
 
 # Curriculum training (3 fases: 80/20 → 50/50 → 20/80):
-python -m grubrics_science.training.run_grpo \
-    --config grubrics_science/configs/verl_grpo.yaml \
-    --total_steps 2000 \
-    --generate_data \
-    --gsm8k_cache data/cache/gsm8k_precompute.jsonl \
-    --fs_cache data/cache/frontierscience_precompute.jsonl
+python run_grpo.py --config configs/verl_grpo.yaml --curriculum \
+    --total_steps 2000
 
 # Curriculum custom phases:
-python -m grubrics_science.training.run_grpo \
-    --config grubrics_science/configs/verl_grpo.yaml \
+python run_grpo.py --config configs/verl_grpo.yaml --curriculum \
     --total_steps 1000 \
     --phases 0.9:0.1:0.3 0.5:0.5:0.4 0.1:0.9:0.3
 ```
@@ -1483,9 +1467,6 @@ python scripts/validate_judge.py --limit 500 --output data/results/judge_validat
 python scripts/download_datasets.py                    # todos
 python scripts/download_datasets.py --only healthbench # solo uno
 
-# Validar integracion de datos (30/30 tests, sin API):
-python scripts/validate_data_integration.py
-
 # Analizar precompute + cross-reference con medicos (offline, $0):
 python scripts/analyze_precompute.py --dataset healthbench --output data/results/healthbench_analysis.json
 python scripts/analyze_precompute.py --dataset all  # todos los datasets
@@ -1507,7 +1488,7 @@ chmod +x setup_env.sh && ./setup_env.sh
 brew install azure-cli && az extension add -n ml && az login
 
 # Mandar job:
-az ml job create --file azure_job_phase0_debug.yaml \
+az ml job create --file azure/job_dryrun.yaml \
     --workspace-name AI-coscientist-agents \
     --resource-group RG-IAF-YTEC-poc-int
 

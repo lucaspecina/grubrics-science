@@ -1,45 +1,53 @@
 # =============================================================================
-# veRL GRPO Production Configuration — Azure H100 NVL (94GB)
+# veRL GRPO Debug Configuration — Small GPU (Linux, ~12GB+ VRAM)
 # =============================================================================
 #
-# UNIFIED PIPELINE: same veRL framework as debug, different params.
+# UNIFIED PIPELINE: same veRL framework as production, smaller params.
 #
-# Target: 1x H100 NVL 94GB (Azure Standard_NC40ads_H100_v5)
-# Model: Qwen3-8B + LoRA (rank 64)
-# Algorithm: GRPO (Group Relative Policy Optimization)
+# Target: Any Linux GPU with 12GB+ VRAM (e.g. RTX 4000 Ada, A10, small Azure VM)
+# Model: Qwen2.5-0.5B-Instruct (instead of Qwen3-8B)
+# Purpose: Debug full veRL GRPO pipeline before running on H100
 #
-# Debug config: verl_grpo_debug.yaml (Workstation RTX 4000, Qwen2.5-0.5B, HF engine)
+# Production config: configs/verl_grpo.yaml (H100, Qwen3-8B, vLLM, rank 64)
+#
+# Differences vs production:
+#   - Model: 0.5B instead of 8B (~1GB VRAM vs ~16GB)
+#   - LoRA rank: 16 instead of 64
+#   - group_size (rollout.n): 2 instead of 6
+#   - max_response_length: 256 instead of 512
+#   - total_training_steps: 20 instead of 2000
+#   - No wandb logging
 #
 # Usage:
-#   python run_grpo.py --config grubrics_science/configs/verl_grpo.yaml
+#   python run_grpo.py --config configs/verl_grpo_debug.yaml
 #
-# Estimated VRAM: ~68GB (fits in 94GB with ~26GB margin)
+# Estimated VRAM: ~3.5-5.5 GB (fits comfortably in 12GB)
 # =============================================================================
 
 # --- Model + Actor + Rollout ---
 actor_rollout_ref:
   model:
-    path: Qwen/Qwen3-8B
+    path: Qwen/Qwen2.5-0.5B-Instruct
     trust_remote_code: true
-    enable_gradient_checkpointing: true
-    use_remove_padding: true
-    # LoRA config
-    lora_rank: 64
-    lora_alpha: 128
+    enable_gradient_checkpointing: false
+    use_remove_padding: false
+    # LoRA config (smaller rank for debug)
+    lora_rank: 16
+    lora_alpha: 32
     target_modules: all-linear
 
   actor:
     strategy: fsdp
-    ppo_mini_batch_size: 64
-    ppo_micro_batch_size_per_gpu: 4
+    ppo_mini_batch_size: 2
+    ppo_micro_batch_size_per_gpu: 2
     ppo_epochs: 1
     clip_ratio: 0.2
     entropy_coeff: 0.01
     use_kl_loss: false
     grad_clip: 1.0
-    use_torch_compile: true
+    use_torch_compile: false
     optim:
-      lr: 1.0e-5
+      lr: 5.0e-5
       lr_warmup_steps_ratio: 0.1
       weight_decay: 0.01
       lr_scheduler_type: cosine
@@ -50,11 +58,11 @@ actor_rollout_ref:
     top_k: -1
     top_p: 0.95
     do_sample: true
-    n: 6
-    gpu_memory_utilization: 0.85
+    n: 2
+    gpu_memory_utilization: 0.4
     tensor_model_parallel_size: 1
-    enforce_eager: false
-    log_prob_micro_batch_size_per_gpu: 4
+    enforce_eager: true
+    log_prob_micro_batch_size_per_gpu: 2
 
   hybrid_engine: true
 
@@ -69,13 +77,13 @@ algorithm:
 
 # --- Data ---
 # Generated via: python -m grubrics_science.data.prepare preset --output_dir data/processed
-# Active preset: open_only (HealthBench). See configs/training_presets.yaml for options.
+# Active preset: open_only (HealthBench). See training_presets.yaml for options.
 data:
   train_files: data/processed/mixed_train.parquet
   val_files: data/processed/mixed_train.parquet
-  max_prompt_length: 2048
-  max_response_length: 512
-  train_batch_size: 24
+  max_prompt_length: 1024
+  max_response_length: 256
+  train_batch_size: 4
   shuffle: true
   trust_remote_code: true
   filter_overlong_prompts: true
@@ -88,15 +96,12 @@ custom_reward_function:
   name: compute_score
 
 # --- Reward Weights (Phase 3 configurable) ---
-# These are passed as env vars to the reward function.
-# To disable a component for ablation, set its lambda to 0.0.
-# To disable functional alignment entirely (B4 ablation), set use_functional to false.
 reward_config:
-  lambda_len: 0.1          # Length penalty weight
-  lambda_info: 0.3         # Info value bonus weight
-  lambda_defense: 0.3      # Defense penalty weight
-  char_threshold: 3000     # Chars before length penalty kicks in
-  use_contrastive: true    # false = no contrastive excerpts in prompt (A1 ablation)
+  lambda_len: 0.1
+  lambda_info: 0.3
+  lambda_defense: 0.3
+  char_threshold: 3000
+  use_contrastive: true
 
 # --- Reward Model (disabled — we use custom_reward_function) ---
 reward_model:
@@ -108,16 +113,15 @@ critic:
 
 # --- Trainer ---
 trainer:
-  total_training_steps: 2000
-  project_name: grubrics-transfer
-  experiment_name: healthbench-grpo
+  total_training_steps: 20
+  project_name: grubrics-transfer-debug
+  experiment_name: debug-local
   logger:
     - console
-    - wandb
   n_gpus_per_node: 1
   nnodes: 1
-  save_freq: 200
-  test_freq: 100
-  val_before_train: true
+  save_freq: 10
+  test_freq: 10
+  val_before_train: false
   default_local_dir: checkpoints/${trainer.project_name}/${trainer.experiment_name}
   device: cuda

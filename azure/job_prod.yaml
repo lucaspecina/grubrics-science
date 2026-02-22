@@ -1,0 +1,29 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+
+display_name: grubrics-prod-healthbench
+description: >
+  GRubrics-Transfer produccion: GRPO con Qwen3-8B + LoRA + vLLM en H100.
+  Solo correr despues de que el dry run termine sin errores.
+
+compute: azureml:YT404321-gpu
+
+environment:
+  image: mcr.microsoft.com/azureml/openmpi4.1.0-cuda12.4-cudnn9-ubuntu22.04:latest
+
+code: .
+
+command: |
+  set -e
+
+  echo "=== [1/4] Setup environment ==="
+  bash setup_env.sh
+
+  echo "=== [2/4] Generate HealthBench parquet ==="
+  python -m grubrics_science.data.prepare preset \
+      --output_dir ./data/processed/ --only-cached
+
+  echo "=== [3/4] Run veRL GRPO production ==="
+  python run_grpo.py --config configs/verl_grpo.yaml
+
+  echo "=== [4/4] Done ==="
+  echo "Production training completed successfully."

@@ -35,19 +35,7 @@ Destino: `data/healthbench/`, `data/medqa/`, `data/medmcqa/`
 
 ---
 
-## 3. Validacion de datos
-
-```bash
-# Validar integracion de datos (no requiere API)
-python scripts/validate_data_integration.py
-
-# Con test de API (requiere Azure OpenAI)
-python scripts/validate_data_integration.py --test-api
-```
-
----
-
-## 4. Precompute de gold_scores
+## 3. Precompute de gold_scores
 
 ### HealthBench (requiere API — ~$0.003/pregunta)
 
@@ -87,7 +75,7 @@ Cache: `data/cache/frontierscience_precompute.jsonl`
 
 ---
 
-## 5. Analisis de precompute
+## 4. Analisis de precompute
 
 ```bash
 # Analisis de HealthBench (Judge stats, physician cross-reference, signal quality)
@@ -103,7 +91,7 @@ Notebook interactivo: `notebooks/analyze_judge_rewards.ipynb`
 
 ---
 
-## 6. Preparar parquets para training
+## 5. Preparar parquets para training
 
 ### Con presets (recomendado)
 
@@ -121,7 +109,7 @@ python -m grubrics_science.data.prepare preset \
     --name curriculum --output_dir data/processed --only-cached
 ```
 
-Presets disponibles (ver `grubrics_science/configs/training_presets.yaml`):
+Presets disponibles (ver `configs/training_presets.yaml`):
 
 | Preset | Datasets | Uso |
 |---|---|---|
@@ -141,37 +129,37 @@ Salida: `data/processed/mixed_train.parquet`
 
 ---
 
-## 7. Training GRPO
+## 6. Training GRPO
 
 ### Debug (GPU local, ~12GB VRAM)
 
 ```bash
 # Modelo: Qwen2.5-0.5B, 20 steps, sin wandb
-python run_grpo.py --config grubrics_science/configs/verl_grpo_debug.yaml
+python run_grpo.py --config configs/verl_grpo_debug.yaml
 ```
 
 ### Produccion (H100 94GB)
 
 ```bash
 # Modelo: Qwen3-8B + LoRA rank 64, 2000 steps, con wandb
-python run_grpo.py --config grubrics_science/configs/verl_grpo.yaml
+python run_grpo.py --config configs/verl_grpo.yaml
 ```
 
 ### Con overrides
 
 ```bash
 # Cambiar steps
-python run_grpo.py --config grubrics_science/configs/verl_grpo_debug.yaml \
+python run_grpo.py --config configs/verl_grpo_debug.yaml \
     trainer.total_training_steps=5
 
 # Cambiar batch size
-python run_grpo.py --config grubrics_science/configs/verl_grpo_debug.yaml \
+python run_grpo.py --config configs/verl_grpo_debug.yaml \
     data.train_batch_size=2
 ```
 
 ---
 
-## 8. Baselines
+## 7. Baselines
 
 ```bash
 # Baselines en HealthBench
@@ -190,7 +178,7 @@ Baselines: B0 (random), B1 (zero-shot Qwen), B2 (SFT), B3 (zero-shot GPT)
 
 ---
 
-## 9. Validacion del Judge
+## 8. Validacion del Judge
 
 ```bash
 # Judge vs physicians en HealthBench (requiere API)
@@ -201,19 +189,7 @@ python scripts/validate_judge.py \
 
 ---
 
-## 10. Validacion del pipeline de training
-
-```bash
-# Sin API (solo formato y routing)
-python scripts/validate_training_pipeline.py
-
-# Con test de reward via API
-python scripts/validate_training_pipeline.py --test-reward
-```
-
----
-
-## 11. Tests
+## 9. Tests
 
 ```bash
 # Todos los tests (181)
@@ -262,5 +238,5 @@ python -m grubrics_science.data.precompute_healthbench --limit 50 --num_evals 1 
 python -m grubrics_science.data.prepare preset --output_dir data/processed --only-cached
 
 # 5. Training
-python run_grpo.py --config grubrics_science/configs/verl_grpo_debug.yaml
+python run_grpo.py --config configs/verl_grpo_debug.yaml
 ```
