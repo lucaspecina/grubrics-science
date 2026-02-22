@@ -46,6 +46,8 @@ GRubrics usa functional alignment contra rubricas humanas existentes. Mide direc
 | **Adapters medicos**    | `adapters/healthbench.py`, `medqa.py`, `medmcqa.py`                                  | Completo | 44 (HB+MedQA)|
 | **Adapter registry**    | `adapters/__init__.py` (7 adapters registrados)                                      | Completo | -            |
 | **Parquet CLI + presets**| `data/prepare.py`, `configs/training_presets.yaml` (raiz)                            | Completo | -            |
+| **SFT data prep**       | `data/prepare_sft.py` (subsets: all/no_answers/with_answers + holdout)                | Completo | -            |
+| **SFT training**        | `run_sft.py`, `configs/sft_healthbench.yaml` (TRL + LoRA)                            | Completo | -            |
 | **Azure OpenAI client** | `llm/client.py`                                                                      | Completo | -            |
 | **Prompts**             | `llm/prompts.py`                                                                     | Completo | -            |
 
@@ -173,20 +175,17 @@ Fuente: HuggingFace (`openai/healthbench`, `GBaker/MedQA-USMLE-4-options`, `open
 
 ## 3. Que NO hay implementado (gaps restantes)
 
-### GAP 1: Entrenamiento SFT (Baseline B7)
+### GAP 1: Entrenamiento SFT (Baseline B7) — IMPLEMENTADO
 
-**Impacto: NECESARIO para comparar RL vs SFT.**
+**Estado: COMPLETO.** Pipeline SFT implementado como warm-up antes de RL.
 
-La comparacion "RL supera a SFT" es central al paper. Pero:
+- `grubrics_science/data/prepare_sft.py` — preparacion de datos SFT con subsets configurables
+- `run_sft.py` — entrenamiento con TRL SFTTrainer + LoRA
+- `configs/sft_healthbench.yaml` — configuracion para H100
+- Datos: 4500 pares (pregunta, rubrica_humana) de HealthBench + 500 holdout
+- El checkpoint SFT se usa como punto de partida para GRPO RL
 
-- No existe script de SFT
-- RESEARCH.md menciona "script separado con transformers Trainer" pero no esta creado
-
-**Que falta:**
-
-- Script de SFT usando transformers Trainer
-- Datos de SFT: pares (pregunta, rubrica_humana) de HealthBench
-- Training + evaluacion del modelo SFT
+**Pendiente:** ejecutar SFT en H100 y evaluar
 
 ### GAP 2: Entrenamiento de Policy (Experimento 1)
 
@@ -245,11 +244,11 @@ Ningun training run real se ejecuto todavia. Los datos estan descargados y el pi
 | "Transfer dentro del mismo campo (medicina)" | Adapters listos y validados con datos reales. No ejecutado aun |
 | "Datasets primarios: MedQA-USMLE, MedMCQA" | **Descargados y validados** (10K + 183K preguntas) |
 | "HealthBench (5000 conversaciones medicas)" | **Descargado y validado** (5,000 eval + 29,511 meta_eval). Mini precompute OK |
-| "B7: SFT — script separado" | No existe |
+| "B7: SFT — script separado" | **Implementado** (`run_sft.py` + `prepare_sft.py`) |
 | "Experiment 1: policy training" | No existe |
 
 
-**Resumen:** El pipeline de datos medicos esta implementado, testeado con datos reales, y validado end-to-end con mini runs. Los gaps restantes son: (1) paralelizar precompute para viabilidad temporal, (2) SFT script, (3) policy training.
+**Resumen:** El pipeline de datos medicos esta implementado, testeado con datos reales, y validado end-to-end con mini runs. SFT script implementado. Los gaps restantes son: (1) precompute completo de gold_scores, (2) ejecucion de SFT + RL en H100, (3) policy training.
 
 ---
 
@@ -374,8 +373,8 @@ python -m grubrics_science.data.precompute --limit 60 --num_evals 3
 python scripts/run_baselines.py --dataset_name healthbench --baselines B0 B1 B3 --num_eval_runs 3  # ~$10
 
 # 2. Zero-shot Qwen3-8B (lower bound) — GPU, $0
-# 3. Implementar SFT script
-# 4. SFT Qwen3-8B — GPU, ~$10
+# 3. SFT Qwen3-8B (warm-up) — GPU, ~$10 [SCRIPT LISTO]
+# 4. GRPO desde checkpoint SFT
 
 # 5. SISTEMA COMPLETO: RL Qwen3-8B con curriculum — GPU + API, ~$90
 python run_grpo.py --config configs/verl_grpo.yaml
@@ -422,7 +421,7 @@ REWARD_LAMBDA_DEFENSE=0.0         # A3: sin defense_penalty
 | 7 | Baselines FS | 1 | Rangos de referencia | $5 | ~1h | PENDIENTE |
 | 8 | Baselines HealthBench | 2 | Piso y techo | $10 | ~2h | PENDIENTE |
 | 9 | Zero-shot Qwen3-8B | 2 | Lower bound | $0 | ~1h GPU | PENDIENTE |
-| 10 | SFT Qwen3-8B | 2 | RL vs SFT | $10 | ~2h GPU | PENDIENTE (script) |
+| 10 | SFT Qwen3-8B | 2 | RL vs SFT | $10 | ~2h GPU | SCRIPT LISTO |
 | **11** | **RL Qwen3-8B (curriculum)** | **2** | **Nuestro metodo** | **$90** | **~10h GPU** | **PENDIENTE** |
 | 12 | Eval checkpoint verifiable-only | 2 | Transfer funciona? | $0 | ~30 min | PENDIENTE |
 | 13 | Eval en FrontierScience | 2 | Generalizacion | $5 | ~1h | PENDIENTE |
@@ -470,8 +469,8 @@ REWARD_LAMBDA_DEFENSE=0.0         # A3: sin defense_penalty
 ### Dias 4-10: Fase 2 — El metodo
 
 1. Baselines HealthBench (piso y techo)
-2. Implementar SFT script
-3. Zero-shot Qwen3-8B + SFT Qwen3-8B
+2. SFT Qwen3-8B warm-up (script listo, ejecutar en H100)
+3. Zero-shot Qwen3-8B + evaluar SFT Qwen3-8B
 4. **RL Qwen3-8B con curriculum** (~10h GPU)
 5. Evaluar checkpoint intermedio (verifiable-only)
 6. Evaluar en FrontierScience

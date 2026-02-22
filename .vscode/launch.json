@@ -2,6 +2,39 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "SFT Dry Run (3 steps)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/run_sft.py",
+            "args": [
+                "--config", "${workspaceFolder}/configs/sft_healthbench.yaml",
+                "training.max_steps=3"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}",
+            "python": "${command:python.interpreterPath}"
+        },
+        {
+            "name": "SFT Production",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/run_sft.py",
+            "args": [
+                "--config", "${workspaceFolder}/configs/sft_healthbench.yaml"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}",
+            "python": "${command:python.interpreterPath}"
+        },
+        {
             "name": "GRPO Dry Run (3 steps)",
             "type": "debugpy",
             "request": "launch",

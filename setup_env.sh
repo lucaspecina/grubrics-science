@@ -57,8 +57,8 @@ echo "[3/5] Installing veRL..."
 pip install verl
 
 # --- 4. PEFT + RL dependencies ---
-echo "[4/5] Installing PEFT, transformers, and other dependencies..."
-pip install peft accelerate transformers datasets
+echo "[4/5] Installing PEFT, TRL, transformers, and other dependencies..."
+pip install peft accelerate transformers datasets trl
 pip install ray[default]
 
 # --- 5. Project dependencies ---

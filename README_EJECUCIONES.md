@@ -129,6 +129,60 @@ Salida: `data/processed/mixed_train.parquet`
 
 ---
 
+## 5b. Preparar datos SFT
+
+```bash
+# Ver estadisticas sin escribir archivos
+python -m grubrics_science.data.prepare_sft --stats
+
+# Todas las preguntas (5000), 500 holdout para evaluacion
+python -m grubrics_science.data.prepare_sft --subset all --holdout_size 500
+
+# Solo preguntas SIN respuestas en meta_eval (1329)
+python -m grubrics_science.data.prepare_sft --subset no_answers
+
+# Solo preguntas CON respuestas (3671, mismas que se usan en RL)
+python -m grubrics_science.data.prepare_sft --subset with_answers
+```
+
+Salida: `data/sft/train.jsonl`, `data/sft/holdout_ids.json`
+
+---
+
+## 5c. Training SFT (warm-up antes de RL)
+
+### Produccion (H100 94GB)
+
+```bash
+# Qwen3-8B + LoRA rank 64, 3 epochs, ~1-2h
+python run_sft.py --config configs/sft_healthbench.yaml
+```
+
+### Dry run (3 steps)
+
+```bash
+python run_sft.py --config configs/sft_healthbench.yaml \
+    training.max_steps=3
+```
+
+### Con overrides
+
+```bash
+# Cambiar epochs
+python run_sft.py --config configs/sft_healthbench.yaml \
+    training.num_train_epochs=1
+
+# Cambiar batch size
+python run_sft.py --config configs/sft_healthbench.yaml \
+    training.per_device_train_batch_size=4
+```
+
+Checkpoint: `checkpoints/grubrics-transfer/sft-healthbench/final/`
+
+Config: `configs/sft_healthbench.yaml`
+
+---
+
 ## 6. Training GRPO
 
 ### Debug (GPU local, ~12GB VRAM)
@@ -143,6 +197,14 @@ python run_grpo.py --config configs/verl_grpo_debug.yaml
 ```bash
 # Modelo: Qwen3-8B + LoRA rank 64, 2000 steps, con wandb
 python run_grpo.py --config configs/verl_grpo.yaml
+```
+
+### Desde checkpoint SFT (recomendado)
+
+```bash
+# Usar el modelo SFT como punto de partida para RL
+python run_grpo.py --config configs/verl_grpo.yaml \
+    actor_rollout_ref.model.path=checkpoints/grubrics-transfer/sft-healthbench/final
 ```
 
 ### Con overrides
@@ -231,12 +293,19 @@ conda activate RL
 # 2. Descargar datos
 python scripts/download_datasets.py
 
-# 3. Precompute gold_scores
-python -m grubrics_science.data.precompute_healthbench --limit 50 --num_evals 1 --max_concurrent 10
+# 3. Preparar datos SFT
+python -m grubrics_science.data.prepare_sft --subset all --holdout_size 500
 
-# 4. Generar parquet
+# 4. Entrenar SFT (warm-up)
+python run_sft.py --config configs/sft_healthbench.yaml
+
+# 5. Precompute gold_scores
+python -m grubrics_science.data.precompute_healthbench --num_evals 1 --max_concurrent 10
+
+# 6. Generar parquet para RL
 python -m grubrics_science.data.prepare preset --output_dir data/processed --only-cached
 
-# 5. Training
-python run_grpo.py --config configs/verl_grpo_debug.yaml
+# 7. Entrenar GRPO (desde checkpoint SFT)
+python run_grpo.py --config configs/verl_grpo.yaml \
+    actor_rollout_ref.model.path=checkpoints/grubrics-transfer/sft-healthbench/final
 ```

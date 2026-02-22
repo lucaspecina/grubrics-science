@@ -1,0 +1,64 @@
+# =============================================================================
+# SFT Configuration — HealthBench Rubric Warm-up (Azure H100 NVL 94GB)
+# =============================================================================
+#
+# Supervised fine-tuning on HealthBench (question -> physician rubric) as a
+# warm-up before GRPO RL.  The model learns rubric format and medical
+# vocabulary, making subsequent RL exploration more efficient.
+#
+# Target: 1x H100 NVL 94GB (Azure Standard_NC40ads_H100_v5)
+# Model:  Qwen/Qwen3-8B + LoRA (rank 64) — same config as GRPO
+#
+# Usage:
+#   python run_sft.py --config configs/sft_healthbench.yaml
+#
+# Estimated VRAM: ~40GB (bf16 + LoRA + gradient checkpointing)
+# Estimated time: ~1-2 hours for 3 epochs on 4500 examples
+# =============================================================================
+
+# --- Model ---
+model:
+  path: Qwen/Qwen3-8B
+  trust_remote_code: true
+
+# --- LoRA (consistent with GRPO config) ---
+lora:
+  r: 64
+  lora_alpha: 128
+  target_modules: all-linear
+  lora_dropout: 0.05
+  bias: none
+  task_type: CAUSAL_LM
+
+# --- Data ---
+data:
+  train_file: data/sft/train.jsonl
+  max_seq_length: 2560          # 2048 prompt + 512 rubric, matches GRPO
+  packing: false                # no packing — each example is one conversation
+
+# --- Training ---
+training:
+  output_dir: checkpoints/grubrics-transfer/sft-healthbench
+  num_train_epochs: 3
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 4    # effective batch = 32
+  learning_rate: 2.0e-5
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.1
+  weight_decay: 0.01
+  bf16: true
+  gradient_checkpointing: true
+  gradient_checkpointing_kwargs:
+    use_reentrant: false
+  logging_steps: 10
+  save_strategy: epoch
+  save_total_limit: 2
+  seed: 42
+  dataloader_num_workers: 4
+  remove_unused_columns: false
+
+# --- Logging ---
+logging:
+  report_to: wandb
+  project_name: grubrics-transfer
+  run_name: sft-healthbench
