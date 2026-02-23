@@ -129,7 +129,7 @@ def _get_judge():
             from grubrics_science.judge.judge import Judge
 
         model = os.environ.get("JUDGE_MODEL") or os.environ.get("RUBRIC_JUDGE_MODEL", "gpt-4o-mini")
-        _judge = Judge(model=model)
+        _judge = Judge(model=model, max_cache_size=0)  # 0 = no cache during RL (rubrics unique each step)
         logger.info("Judge initialised for API-based reward (model=%s).", model)
     return _judge
 

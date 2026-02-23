@@ -286,7 +286,7 @@ async def precompute_healthbench(
         return
 
     client = AzureOpenAIClient(model=model, use_azure=use_azure)
-    judge = Judge(client=client, max_concurrent=max_concurrent, max_retries=3, timeout=120.0)
+    judge = Judge(client=client, max_concurrent=max_concurrent, max_retries=3, timeout=120.0, max_cache_size=500)
 
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     processed = 0

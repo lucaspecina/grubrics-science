@@ -162,7 +162,7 @@ async def precompute_dataset(
 
     # Initialise clients
     client = AzureOpenAIClient(model=model, use_azure=use_azure)
-    judge = Judge(client=client, max_concurrent=5, max_retries=3, timeout=120.0)
+    judge = Judge(client=client, max_concurrent=5, max_retries=3, timeout=120.0, max_cache_size=500)
 
     # Process each question
     cache_path.parent.mkdir(parents=True, exist_ok=True)

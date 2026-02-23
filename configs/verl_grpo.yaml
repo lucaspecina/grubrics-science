@@ -80,6 +80,8 @@ data:
   trust_remote_code: true
   filter_overlong_prompts: true
   truncation: left
+  # Reduce DataLoader workers to lower RAM (avoids OOM at end of training)
+  num_workers: 2
 
 # --- Custom Reward Function ---
 # grubrics_reward.py routes by data_source: verifiable → local, open → Judge API

@@ -81,6 +81,7 @@ class Judge:
         max_concurrent: int = 10,
         max_retries: int = 3,
         timeout: float = 60.0,
+        max_cache_size: int = 0,
     ):
         """
         Args:
@@ -90,11 +91,14 @@ class Judge:
             max_concurrent: Max parallel API calls (semaphore size).
             max_retries: Number of retry attempts on failure.
             timeout: Timeout in seconds per API call.
+            max_cache_size: Max cache entries (0 = disabled). Use 0 during RL
+                training to avoid unbounded memory growth; rubrics are unique each step.
         """
         self.client = client or AzureOpenAIClient(model=model, use_azure=use_azure)
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._max_retries = max_retries
         self._timeout = timeout
+        self._max_cache_size = max_cache_size
         self._cache: Dict[str, Tuple[List[float], List[Dict[str, Any]]]] = {}
 
     async def _call_with_retry(
@@ -208,17 +212,19 @@ class Judge:
         Returns:
             (scores, details) — scores[j] is the total score for rubric j.
         """
-        # Check cache
-        key = _cache_key(question, answer, rubrics)
-        if key in self._cache:
-            return self._cache[key]
+        if self._max_cache_size > 0:
+            key = _cache_key(question, answer, rubrics)
+            if key in self._cache:
+                return self._cache[key]
 
         prompt = get_judge_prompt(question, answer, rubrics, answer_id)
         response = await self._call_with_retry(prompt)
         scores, details = self._parse_response(response, len(rubrics), return_details)
 
-        # Store in cache
-        self._cache[key] = (scores, details)
+        if self._max_cache_size > 0:
+            key = _cache_key(question, answer, rubrics)
+            if len(self._cache) < self._max_cache_size:
+                self._cache[key] = (scores, details)
         return scores, details
 
     async def evaluate_multiple_answers(
@@ -275,11 +281,11 @@ class Judge:
         Returns:
             List of total_scores, one per answer.
         """
-        # Cache key covers all answers + the rubric
-        key = _cache_key(question, json.dumps(answers), [rubric])
-        if key in self._cache:
-            cached_scores, _ = self._cache[key]
-            return cached_scores
+        if self._max_cache_size > 0:
+            key = _cache_key(question, json.dumps(answers), [rubric])
+            if key in self._cache:
+                cached_scores, _ = self._cache[key]
+                return cached_scores
 
         prompt = get_judge_batched_prompt(question, answers, rubric)
 
@@ -291,8 +297,10 @@ class Judge:
 
         scores = self._parse_batched_response(response, len(answers))
 
-        # Store in cache (use same tuple format for consistency)
-        self._cache[key] = (scores, [])
+        if self._max_cache_size > 0:
+            key = _cache_key(question, json.dumps(answers), [rubric])
+            if len(self._cache) < self._max_cache_size:
+                self._cache[key] = (scores, [])
         return scores
 
     def _parse_batched_response(

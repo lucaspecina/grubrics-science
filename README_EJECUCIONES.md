@@ -219,6 +219,15 @@ python run_grpo.py --config configs/verl_grpo_debug.yaml \
     data.train_batch_size=2
 ```
 
+### Si crashea al final (DataLoader worker killed)
+
+El entrenamiento puede completar bien pero fallar al guardar o cerrar. Mitigaciones:
+
+1. **Cache del Judge deshabilitado** — Ya configurado (max_cache_size=0) en RL para no acumular RAM.
+2. **Cargar .env antes** — `set -a && source .env && set +a` para que los workers tengan credenciales.
+3. **Reducir data.num_workers** — En `verl_grpo.yaml` está en 2; probar 1 si sigue fallando.
+4. **Máquina con más RAM** — El pico ocurre al guardar checkpoint (~40 GB extra).
+
 ---
 
 ## 7. Baselines
