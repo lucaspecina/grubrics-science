@@ -28,6 +28,7 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import List, Optional
@@ -66,8 +67,10 @@ def _should_print_simple(line: str) -> bool:
     if "Default sampling parameters" in line:
         return False
 
-    # Include: our banner and key lines only
+    # Include: our banner, progress, and key lines only
     if line.startswith("="):
+        return True
+    if "Progress:" in line:
         return True
     if line.startswith("Config:") or line.startswith("Model:") or "GRubrics" in line:
         return True
@@ -220,15 +223,26 @@ def load_config(config_path: str, overrides: Optional[List[str]] = None) -> dict
 # Simple (single-phase) training
 # ---------------------------------------------------------------------------
 
+def _progress_heartbeat(stop_event: threading.Event):
+    """Print 'Still initializing...' every 60s until stop_event or 10 min."""
+    for n in range(1, 11):
+        if stop_event.wait(timeout=60):
+            return
+        print(f"Progress: Still initializing (Ray, model, vLLM)... {n} min", flush=True)
+
+
 def run_simple_training(config_path: str, overrides: Optional[List[str]] = None):
     """Run single-phase GRPO training."""
+    print("Progress: Patching dataset...", flush=True)
     _patch_verl_dataset()
 
+    print("Progress: Loading config and veRL...", flush=True)
     from verl.trainer.main_ppo import run_ppo
 
     merged_dict = load_config(config_path, overrides)
     _apply_reward_config_env(merged_dict.get("reward_config", {}))
     merged = OmegaConf.create(merged_dict)
+    print("Progress: Config loaded.", flush=True)
 
     if sys.platform == "win32":
         print("[Windows] Using gloo backend (NCCL not available)")
@@ -245,8 +259,17 @@ def run_simple_training(config_path: str, overrides: Optional[List[str]] = None)
     print(f"GPUs:   {merged.trainer.n_gpus_per_node}")
     print("=" * 60)
 
+    print("Progress: Starting veRL (Ray init → model load → vLLM). May take 5-10 min...", flush=True)
+    stop_event = threading.Event()
+    heartbeat = threading.Thread(target=_progress_heartbeat, args=(stop_event,), daemon=True)
+    heartbeat.start()
+
     t0 = time.perf_counter()
-    run_ppo(merged)
+    try:
+        run_ppo(merged)
+    finally:
+        stop_event.set()
+
     elapsed = time.perf_counter() - t0
     print("=" * 60)
     print(f"Training complete. Total time: {elapsed:.1f}s ({elapsed/60:.1f} min)")
