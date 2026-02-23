@@ -1,6 +1,8 @@
 """Alignment metrics and reward computation."""
 
+import warnings
 from typing import List
+
 import numpy as np
 from scipy.stats import spearmanr, pearsonr
 
@@ -66,7 +68,9 @@ def spearman_correlation(scores: List[float], gold_scores: List[float]) -> float
         return 1.0
     
     try:
-        corr, _ = spearmanr(scores, gold_scores)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="An input array is constant")
+            corr, _ = spearmanr(scores, gold_scores)
         if np.isnan(corr):
             return 0.0
         return float(corr)

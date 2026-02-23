@@ -10,9 +10,11 @@ Usage:
     # Simple mode — production (H100):
     python run_grpo.py --config configs/verl_grpo.yaml
 
-    # Simple mode with extra Hydra-style overrides:
-    python run_grpo.py --config configs/verl_grpo_debug.yaml \
-        trainer.total_training_steps=5 data.train_batch_size=2
+    # With --quiet: fewer warnings, no tqdm progress bars, less Ray/veRL noise
+    python run_grpo.py --config configs/verl_grpo.yaml --quiet
+
+    # With --simple-output: only shows key lines (steps, timing, checkpoints)
+    python run_grpo.py --config configs/verl_grpo.yaml --simple-output
 
     # Curriculum mode (multi-phase):
     python run_grpo.py --config configs/verl_grpo.yaml --curriculum \
@@ -24,12 +26,49 @@ import argparse
 import json
 import logging
 import os
+import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import List, Optional
 
 if sys.platform == "win32":
     os.environ.setdefault("USE_LIBUV", "0")
+
+
+def _apply_quiet_env():
+    """Set env vars to reduce log noise. Call before heavy imports."""
+    os.environ.setdefault("PYTHONWARNINGS", "ignore")
+    os.environ.setdefault("TQDM_DISABLE", "1")
+    os.environ.setdefault("VERL_LOGGING_LEVEL", "WARN")
+    os.environ.setdefault("RAY_LOG_LEVEL", "warning")
+    os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
+
+
+def _should_print_simple(line: str) -> bool:
+    """Return True if line should be shown in --simple-output mode."""
+    line = line.strip()
+    if not line:
+        return False
+    # Block separators
+    if line.startswith("="):
+        return True
+    # Config / model info
+    if any(x in line for x in ("GRubrics", "Config:", "Model:", "Training Progress")):
+        return True
+    # Step / timing
+    if "step:" in line or "timing_s" in line or "reward" in line:
+        return True
+    # Checkpoints
+    if any(x in line for x in ("local_global_step_folder", "Checkpoint", "Saved", "checkpoint")):
+        return True
+    # Errors
+    if any(x in line for x in ("Error", "Traceback", "Exception", "ERROR", "WARN")):
+        return True
+    # Completion / timing summary
+    if any(x in line.lower() for x in ("complete", "done", "total time")):
+        return True
+    return False
 
 from hydra import compose, initialize_config_dir
 from omegaconf import OmegaConf
@@ -187,7 +226,12 @@ def run_simple_training(config_path: str, overrides: Optional[List[str]] = None)
     print(f"GPUs:   {merged.trainer.n_gpus_per_node}")
     print("=" * 60)
 
+    t0 = time.perf_counter()
     run_ppo(merged)
+    elapsed = time.perf_counter() - t0
+    print("=" * 60)
+    print(f"Training complete. Total time: {elapsed:.1f}s ({elapsed/60:.1f} min)")
+    print("=" * 60)
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +262,7 @@ def run_curriculum_training(
 
     boundaries = scheduler.get_phase_boundaries()
     prev_checkpoint = None
+    total_start = time.perf_counter()
 
     for i, phase in enumerate(scheduler.phases):
         phase_steps = boundaries[i] - (boundaries[i - 1] if i > 0 else 0)
@@ -255,7 +300,10 @@ def run_curriculum_training(
         merged = OmegaConf.create(merged_dict)
 
         logger.info("  Starting veRL GRPO training...")
+        t0 = time.perf_counter()
         run_ppo(merged)
+        phase_elapsed = time.perf_counter() - t0
+        logger.info("  Phase %d done in %.1fs (%.1f min)", i + 1, phase_elapsed, phase_elapsed / 60)
 
         ckpt_dir = Path(
             merged_dict["trainer"].get(
@@ -269,8 +317,10 @@ def run_curriculum_training(
                 prev_checkpoint = str(ckpts[-1])
                 logger.info("  Phase %d complete. Checkpoint: %s", i + 1, prev_checkpoint)
 
+    total_elapsed = time.perf_counter() - total_start
     logger.info("\n" + "=" * 60)
     logger.info("Curriculum training complete!")
+    logger.info("Total time: %.1fs (%.1f min)", total_elapsed, total_elapsed / 60)
     if prev_checkpoint:
         logger.info("Final checkpoint: %s", prev_checkpoint)
 
@@ -313,11 +363,41 @@ def main():
         help="Rows per phase parquet (curriculum mode only)",
     )
     parser.add_argument(
+        "--quiet", action="store_true",
+        help="Reduce log noise (warnings, tqdm, Ray, vLLM)",
+    )
+    parser.add_argument(
+        "--simple-output", action="store_true",
+        help="Show only key lines (steps, timing, checkpoints)",
+    )
+    parser.add_argument(
         "overrides", nargs="*",
         help="Extra Hydra-style overrides (e.g. trainer.total_training_steps=5)",
     )
 
     args = parser.parse_args()
+
+    if args.quiet:
+        _apply_quiet_env()
+
+    # --simple-output: re-exec in subprocess with filtered output
+    if args.simple_output:
+        _apply_quiet_env()
+        cmd = [sys.executable, "-u", __file__] + [
+            a for a in sys.argv[1:] if a != "--simple-output"
+        ]
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        for line in proc.stdout:
+            if _should_print_simple(line):
+                print(line, end="", flush=True)
+        proc.wait()
+        sys.exit(proc.returncode)
 
     if args.curriculum:
         from grubrics_science.training.curriculum import CurriculumScheduler, parse_phases
