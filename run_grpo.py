@@ -47,26 +47,45 @@ def _apply_quiet_env():
 
 def _should_print_simple(line: str) -> bool:
     """Return True if line should be shown in --simple-output mode."""
+    raw = line
     line = line.strip()
     if not line:
         return False
-    # Block separators
+
+    # Exclude: warnings and config dumps
+    if "WARNING" in raw or "WARN " in raw:
+        return False
+    if "_target_" in line or "entropy_checkpointing" in line:
+        return False
+    if "'checkpoint':" in line or "'reward_" in line or "ray init kwargs" in line:
+        return False
+    if "TOKENIZERS_PARALLELISM" in line or "LoRA dynamic loading" in line:
+        return False
+    if "lora_extra_vocab_size" in line or "spawn" in line and "multiprocessing" in line:
+        return False
+    if "Default sampling parameters" in line:
+        return False
+
+    # Include: our banner and key lines only
     if line.startswith("="):
         return True
-    # Config / model info
-    if any(x in line for x in ("GRubrics", "Config:", "Model:", "Training Progress")):
+    if line.startswith("Config:") or line.startswith("Model:") or "GRubrics" in line:
         return True
-    # Step / timing
-    if "step:" in line or "timing_s" in line or "reward" in line:
+    if "Training Progress" in line:
         return True
-    # Checkpoints
-    if any(x in line for x in ("local_global_step_folder", "Checkpoint", "Saved", "checkpoint")):
+    # Step metrics (the long line with timing_s/step)
+    if "step:" in line and "timing_s/step" in line:
         return True
-    # Errors
-    if any(x in line for x in ("Error", "Traceback", "Exception", "ERROR", "WARN")):
+    # Checkpoint paths (not config keys)
+    if "local_global_step_folder:" in line:
         return True
-    # Completion / timing summary
-    if any(x in line.lower() for x in ("complete", "done", "total time")):
+    if "Load from checkpoint" in line or "Resuming from" in line or "Found checkpoint" in line:
+        return True
+    # Errors (real errors, not WARNING)
+    if "Traceback" in line or "Exception" in line or "Error:" in line or "RuntimeError" in line:
+        return True
+    # Completion
+    if "complete" in line.lower() or "Total time" in line:
         return True
     return False
 
