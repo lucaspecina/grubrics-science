@@ -128,7 +128,7 @@ def _get_judge():
         except ImportError:
             from grubrics_science.judge.judge import Judge
 
-        model = os.environ.get("JUDGE_MODEL", "gpt-4o-mini")
+        model = os.environ.get("JUDGE_MODEL") or os.environ.get("RUBRIC_JUDGE_MODEL", "gpt-4o-mini")
         _judge = Judge(model=model)
         logger.info("Judge initialised for API-based reward (model=%s).", model)
     return _judge

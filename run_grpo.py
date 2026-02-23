@@ -43,17 +43,15 @@ def _patch_verl_dataset():
 
     Parquet stores ``extra_info`` and ``reward_model`` as JSON strings.
     veRL's ``__getitem__`` calls ``.get()`` on them expecting dicts, which
-    raises ``AttributeError``.
+    raises ``AttributeError``.  The error happens *inside* __getitem__ before
+    it returns, so we must inject deserialisation *before* the first use of
+    extra_info, not after.
 
-    Because veRL runs inside Ray actors (separate processes), an in-memory
-    monkey-patch applied here would not propagate.  Instead we inject a small
-    deserialisation block directly into the source file so that every process
-    that imports it — including Ray workers — picks up the fix.
-
-    The patch is idempotent: if the marker comment is already present the
-    function returns immediately.
+    We do an inline search-replace to add the deserialisation block right
+    before ``index = row_dict.get("extra_info", {}).get("index", 0)``.
     """
     import importlib.util
+    import re
 
     spec = importlib.util.find_spec("verl.utils.dataset.rl_dataset")
     if spec is None or spec.origin is None:
@@ -62,32 +60,53 @@ def _patch_verl_dataset():
     src_path = Path(spec.origin)
     src = src_path.read_text()
 
-    MARKER = "# --- grubrics json-string patch ---"
-    if MARKER in src:
-        logger.info("veRL rl_dataset.py already patched (marker found)")
+    INLINE_MARKER = 'for _gk in ("extra_info", "reward_model")'
+    if INLINE_MARKER in src:
+        logger.info("veRL rl_dataset.py already patched (inline marker found)")
         return
 
-    PATCH = (
-        "\n"
-        f"{MARKER}\n"
-        "import json as _json_patch\n"
-        "_orig_getitem = RLHFDataset.__getitem__\n"
-        "def _patched_getitem(self, item):\n"
-        "    row = _orig_getitem(self, item)\n"
-        "    for _k in ('extra_info', 'reward_model'):\n"
-        "        _v = row.get(_k)\n"
-        "        if isinstance(_v, str):\n"
-        "            try:\n"
-        "                row[_k] = _json_patch.loads(_v)\n"
-        "            except Exception:\n"
-        "                row[_k] = {}\n"
-        "    return row\n"
-        "RLHFDataset.__getitem__ = _patched_getitem\n"
-        f"{MARKER}\n"
-    )
+    MARKER = "# --- grubrics json-string patch ---"
 
-    src_path.write_text(src + PATCH)
-    logger.info("Patched veRL rl_dataset.py on disk: %s", src_path)
+    # Remove any old append-style patch (from previous run_grpo versions)
+    old_patch_start = "\n" + MARKER + "\nimport json as _json_patch"
+    if old_patch_start in src:
+        idx = src.find(old_patch_start)
+        src = src[:idx].rstrip() + "\n"
+
+    # Inline patch: add deserialisation before the line that uses extra_info.
+    # Match: "index = row_dict.get("extra_info", {}).get("index", 0)"
+    # with any leading whitespace.
+    pattern = r'(\s*)(index = row_dict\.get\("extra_info", \{\}\)\.get\("index", 0\))'
+
+    def _replacer(match: re.Match) -> str:
+        indent = match.group(1)
+        old_line = match.group(2)
+        return (
+            f'{indent}{MARKER}\n'
+            f'{indent}for _gk in ("extra_info", "reward_model"):\n'
+            f'{indent}    _gv = row_dict.get(_gk)\n'
+            f'{indent}    if _gv is None:\n'
+            f'{indent}        row_dict[_gk] = {{}}\n'
+            f'{indent}    elif isinstance(_gv, str):\n'
+            f'{indent}        import json as _gjson\n'
+            f'{indent}        try:\n'
+            f'{indent}            row_dict[_gk] = _gjson.loads(_gv)\n'
+            f'{indent}        except Exception:\n'
+            f'{indent}            row_dict[_gk] = {{}}\n'
+            f'{indent}{MARKER}\n'
+            f'{indent}{old_line}'
+        )
+
+    new_src, n = re.subn(pattern, _replacer, src, count=1)
+    if n == 0:
+        logger.warning(
+            "Could not find target line in verl rl_dataset.py for inline patch; "
+            "extra_info/reward_model may be JSON strings and cause AttributeError"
+        )
+        return
+
+    src_path.write_text(new_src)
+    logger.info("Patched veRL rl_dataset.py on disk (inline): %s", src_path)
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
