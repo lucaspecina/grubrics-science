@@ -89,6 +89,7 @@ class TestGrubricsRewardRouting:
 
     def test_verifiable_without_precompute_raises(self):
         """All verifiable sources must raise without precomputed data."""
+        import asyncio
         import pytest
         from grubrics_science.rewards.grubrics_reward import compute_score
 
@@ -101,14 +102,15 @@ class TestGrubricsRewardRouting:
 
         for source in ["gsm8k", "math", "medqa", "medmcqa"]:
             with pytest.raises(ValueError, match="Missing precomputed"):
-                compute_score(
+                asyncio.run(compute_score(
                     data_source=source,
                     solution_str=good_rubric,
                     extra_info={"question": "What is 2+2?", "question_id": "test"},
-                )
+                ))
 
     def test_open_domain_without_precompute_raises(self):
         """Open domain without precomputed data must raise."""
+        import asyncio
         import pytest
         from grubrics_science.rewards.grubrics_reward import compute_score
 
@@ -118,7 +120,7 @@ class TestGrubricsRewardRouting:
         )
 
         with pytest.raises(ValueError, match="Missing precomputed"):
-            compute_score(
+            asyncio.run(compute_score(
                 data_source="frontierscience",
                 solution_str=good_rubric,
                 extra_info={
@@ -127,7 +129,7 @@ class TestGrubricsRewardRouting:
                     "answers": [],
                     "gold_scores": [],
                 },
-            )
+            ))
 
 
 # =========================================================================
@@ -358,7 +360,7 @@ class TestAdapterCacheIntegration:
         row = adapter.to_verl_format(items[0])
         extra = row["extra_info"]
 
-        # These are the keys _reward_open_sync reads from extra_info
+        # These are the keys _reward_open reads from extra_info
         assert "answers" in extra
         assert "gold_scores" in extra
         assert "question" in extra
@@ -369,6 +371,7 @@ class TestAdapterCacheIntegration:
 
     def test_reward_verifiable_without_precompute_raises(self):
         """Verifiable reward must raise without precomputed data."""
+        import asyncio
         import pytest
         from grubrics_science.rewards.grubrics_reward import compute_score
 
@@ -378,15 +381,16 @@ class TestAdapterCacheIntegration:
             "Points: 3.0, Item: Arrives at the correct final answer"
         )
         with pytest.raises(ValueError, match="Missing precomputed"):
-            compute_score(
+            asyncio.run(compute_score(
                 data_source="gsm8k",
                 solution_str=rubric,
                 ground_truth="42",
                 extra_info={"question": "What is 6*7?", "question_id": "test"},
-            )
+            ))
 
     def test_reward_open_without_precompute_raises(self):
         """Open domain without precomputed data must raise."""
+        import asyncio
         import pytest
         from grubrics_science.rewards.grubrics_reward import compute_score
 
@@ -395,7 +399,7 @@ class TestAdapterCacheIntegration:
             "Points: 5.0, Item: Proper treatment of boundary conditions"
         )
         with pytest.raises(ValueError, match="Missing precomputed"):
-            compute_score(
+            asyncio.run(compute_score(
                 data_source="frontierscience",
                 solution_str=rubric,
                 extra_info={
@@ -404,7 +408,7 @@ class TestAdapterCacheIntegration:
                     "answers": [],
                     "gold_scores": [],
                 },
-            )
+            ))
 
     def test_parquet_roundtrip_preserves_cache_data(self, cache_file, dataset_file, tmp_path):
         """Parquet write/read preserves answers and gold_scores in extra_info."""

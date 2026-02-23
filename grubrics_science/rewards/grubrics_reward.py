@@ -10,14 +10,19 @@ Routes based on ``data_source``:
 
 veRL calls ``compute_score(data_source, solution_str, ground_truth, extra_info)``.
 
+This function is **async** so that veRL's reward loop can run all rollouts
+concurrently via ``asyncio.gather``.  The Judge's ``asyncio.Semaphore``
+(``max_concurrent``) controls how many API calls run simultaneously,
+providing built-in rate limiting.
+
 Reward weights are configurable via environment variables:
   REWARD_LAMBDA_LEN      — length penalty weight (default: 0.1)
   REWARD_LAMBDA_INFO     — info value bonus weight (default: 0.3)
   REWARD_LAMBDA_DEFENSE  — defense penalty weight (default: 0.3)
   REWARD_CHAR_THRESHOLD  — chars before length penalty kicks in (default: 3000)
+  JUDGE_MAX_CONCURRENT   — max parallel Judge API calls (default: 10)
 """
 
-import asyncio
 import logging
 import os
 import sys
@@ -30,7 +35,6 @@ try:
         compute_alignment,
         compute_defense_penalty,
         compute_info_value,
-        length_penalty,
     )
 except ImportError:
     _rewards_dir = str(Path(__file__).resolve().parent)
@@ -41,7 +45,6 @@ except ImportError:
         compute_alignment,
         compute_defense_penalty,
         compute_info_value,
-        length_penalty,
     )
 
 logger = logging.getLogger(__name__)
@@ -129,8 +132,12 @@ def _get_judge():
             from grubrics_science.judge.judge import Judge
 
         model = os.environ.get("JUDGE_MODEL") or os.environ.get("RUBRIC_JUDGE_MODEL", "gpt-4o-mini")
-        _judge = Judge(model=model, max_cache_size=0)  # 0 = no cache during RL (rubrics unique each step)
-        logger.info("Judge initialised for API-based reward (model=%s).", model)
+        max_concurrent = int(os.environ.get("JUDGE_MAX_CONCURRENT", "10"))
+        _judge = Judge(model=model, max_cache_size=0, max_concurrent=max_concurrent)
+        logger.info(
+            "Judge initialised for API-based reward (model=%s, max_concurrent=%d).",
+            model, max_concurrent,
+        )
     return _judge
 
 
@@ -141,7 +148,7 @@ def _get_judge():
 VERIFIABLE_SOURCES = {"gsm8k", "math", "medqa", "medmcqa"}
 
 
-def _reward_verifiable(
+async def _reward_verifiable(
     solution_str: str,
     ground_truth: str,
     extra_info: Dict[str, Any],
@@ -161,14 +168,14 @@ def _reward_verifiable(
             f"Run precompute before training. All rows must have precomputed data."
         )
 
-    return _reward_functional_alignment(solution_str, extra_info)
+    return await _reward_functional_alignment(solution_str, extra_info)
 
 
 # ---------------------------------------------------------------------------
 # Functional alignment reward (shared by verifiable + open domains)
 # ---------------------------------------------------------------------------
 
-def _reward_functional_alignment(
+async def _reward_functional_alignment(
     solution_str: str,
     extra_info: Dict[str, Any],
 ) -> float:
@@ -186,35 +193,26 @@ def _reward_functional_alignment(
     gold_scores: List[float] = extra_info.get("gold_scores", [])
     question: str = extra_info.get("question", "")
 
-    # The solution_str IS the generated rubric — evaluate answers with it
     rubric = solution_str
     judge = _get_judge()
 
-    scores = _run_async(
-        judge.evaluate_answers_batched(
-            question=question,
-            answers=answers,
-            rubric=rubric,
-        )
+    scores = await judge.evaluate_answers_batched(
+        question=question,
+        answers=answers,
+        rubric=rubric,
     )
 
     config = get_reward_config()
 
-    # Functional alignment: how well does this rubric's ranking match the gold ranking?
     alignment = compute_alignment(scores, gold_scores, metric="spearman")
 
-    # Length penalty: only penalise rubrics longer than a reasonable threshold.
     rubric_chars = len(rubric)
     excess_chars = max(0, rubric_chars - config.char_threshold)
     len_pen = excess_chars / max(config.char_threshold, 1)
 
-    # Info value bonus
     info_val = compute_info_value(scores)
-
-    # Defense penalty
     defense_pen = compute_defense_penalty(scores)
 
-    # Combine components (weights from config)
     reward = (
         alignment
         - config.lambda_len * len_pen
@@ -234,11 +232,11 @@ def _reward_functional_alignment(
 # Open domain reward (Judge API)
 # ---------------------------------------------------------------------------
 
-def _reward_open_sync(
+async def _reward_open(
     solution_str: str,
     extra_info: Dict[str, Any],
 ) -> float:
-    """Reward for open domains. Calls the Judge API synchronously.
+    """Reward for open domains.
 
     Requires precomputed answers + gold_scores in extra_info.
     Raises if data is missing — all training rows must have precompute.
@@ -253,32 +251,14 @@ def _reward_open_sync(
             f"Run precompute before training. All rows must have precomputed data."
         )
 
-    return _reward_functional_alignment(solution_str, extra_info)
-
-
-def _run_async(coro):
-    """Run an async coroutine from synchronous code."""
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-
-    if loop is not None and loop.is_running():
-        # We're inside an existing event loop (e.g. Jupyter, or veRL's Ray workers).
-        # Create a new loop in a thread to avoid deadlock.
-        import concurrent.futures
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(asyncio.run, coro).result()
-    else:
-        return asyncio.run(coro)
+    return await _reward_functional_alignment(solution_str, extra_info)
 
 
 # ---------------------------------------------------------------------------
 # Public entry point (veRL calls this)
 # ---------------------------------------------------------------------------
 
-def compute_score(
+async def compute_score(
     data_source: str,
     solution_str: str,
     ground_truth: str = "",
@@ -287,6 +267,9 @@ def compute_score(
     """Compute reward for a generated rubric.
 
     This is the function veRL's custom_reward_function calls after each rollout.
+    It is **async** so that veRL's reward loop can run all rollouts concurrently
+    via ``asyncio.gather``, with the Judge's ``Semaphore(max_concurrent)``
+    controlling how many API calls happen simultaneously.
 
     Args:
         data_source: Dataset identifier (e.g. "gsm8k", "frontierscience").
@@ -300,6 +283,6 @@ def compute_score(
     extra_info = extra_info or {}
 
     if data_source in VERIFIABLE_SOURCES:
-        return _reward_verifiable(solution_str, ground_truth, extra_info)
+        return await _reward_verifiable(solution_str, ground_truth, extra_info)
     else:
-        return _reward_open_sync(solution_str, extra_info)
+        return await _reward_open(solution_str, extra_info)

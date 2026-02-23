@@ -229,6 +229,7 @@ class TestUnifiedRewardRouting:
 
     def test_verifiable_without_cache_raises(self):
         """Without precomputed data, verifiable reward must raise."""
+        import asyncio
         import pytest
         from grubrics_science.rewards.grubrics_reward import _reward_verifiable
 
@@ -238,14 +239,15 @@ class TestUnifiedRewardRouting:
         )
 
         with pytest.raises(ValueError, match="Missing precomputed"):
-            _reward_verifiable(
+            asyncio.run(_reward_verifiable(
                 solution_str=rubric,
                 ground_truth="4",
                 extra_info={"question": "What is 2+2?", "question_id": "test"},
-            )
+            ))
 
     def test_verifiable_without_cache_compute_score_raises(self):
         """compute_score must raise for verifiable without precompute."""
+        import asyncio
         import pytest
         from grubrics_science.rewards.grubrics_reward import compute_score
 
@@ -255,12 +257,12 @@ class TestUnifiedRewardRouting:
             "Points: 4.0, Item: Final result"
         )
         with pytest.raises(ValueError, match="Missing precomputed"):
-            compute_score(
+            asyncio.run(compute_score(
                 data_source="gsm8k",
                 solution_str=rubric,
                 ground_truth="42",
                 extra_info={"question": "What is 6*7?", "question_id": "test"},
-            )
+            ))
 
 
 # =========================================================================

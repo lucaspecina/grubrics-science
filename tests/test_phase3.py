@@ -134,19 +134,20 @@ class TestRewardWeightsIntegration:
 
     def test_missing_precompute_raises_open(self):
         """Without precomputed data, open-domain reward must raise."""
-        from grubrics_science.rewards.grubrics_reward import _reward_open_sync
+        import asyncio
+        from grubrics_science.rewards.grubrics_reward import _reward_open
         import grubrics_science.rewards.grubrics_reward as mod
 
         mod._reward_config = None
 
         with pytest.raises(ValueError, match="Missing precomputed"):
-            _reward_open_sync(
+            asyncio.run(_reward_open(
                 solution_str="Points: 5.0, Item: A\nPoints: 5.0, Item: B",
                 extra_info={
                     "question": "What causes chest pain?",
                     "prompt_id": "test_p",
                 },
-            )
+            ))
 
         mod._reward_config = None
 
