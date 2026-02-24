@@ -1,0 +1,4 @@
+{
+  "python.defaultInterpreterPath": "/anaconda/envs/rl/bin/python",
+  "python.terminal.activateEnvironment": true
+}
