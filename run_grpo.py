@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import sys
+import time
 from pathlib import Path
 from typing import List, Optional
 
@@ -109,6 +110,39 @@ def _patch_verl_dataset():
     logger.info("Patched veRL rl_dataset.py on disk (inline): %s", src_path)
 
 
+def _patch_verl_wandb_cleanup():
+    """Patch veRL's Tracking.__del__ to suppress wandb teardown errors.
+
+    wandb + Ray + asyncio conflict: the event loop/transport closes before
+    wandb finishes its teardown, causing RuntimeError noise.  This wraps
+    the __del__ in try/except so it doesn't pollute the output.
+    """
+    import importlib.util
+
+    spec = importlib.util.find_spec("verl.utils.tracking")
+    if spec is None or spec.origin is None:
+        return
+    src_path = Path(spec.origin)
+    src = src_path.read_text()
+
+    MARKER = "# --- grubrics wandb cleanup patch ---"
+    if MARKER in src:
+        return
+
+    old = 'self.logger["wandb"].finish(exit_code=0)'
+    new = (
+        f'{MARKER}\n'
+        '            try:\n'
+        '                self.logger["wandb"].finish(exit_code=0)\n'
+        '            except Exception:\n'
+        '                pass'
+    )
+    if old in src:
+        src = src.replace(old, new, 1)
+        src_path.write_text(src)
+        logger.info("Patched veRL tracking.py (wandb cleanup): %s", src_path)
+
+
 def _deep_merge(base: dict, override: dict) -> dict:
     """Deep merge two dicts. Override values take priority."""
     result = base.copy()
@@ -162,9 +196,39 @@ def load_config(config_path: str, overrides: Optional[List[str]] = None) -> dict
 # Simple (single-phase) training
 # ---------------------------------------------------------------------------
 
+def _wandb_sync():
+    """Sync offline wandb run to the server (best-effort)."""
+    import subprocess
+
+    wandb_dir = Path("wandb")
+    if not wandb_dir.exists():
+        return
+    latest = sorted(wandb_dir.glob("offline-run-*"), key=lambda p: p.stat().st_mtime)
+    if not latest:
+        return
+    run_dir = latest[-1]
+    print(f">>> Sincronizando wandb (offline → server): {run_dir.name}...", flush=True)
+    try:
+        result = subprocess.run(
+            ["wandb", "sync", str(run_dir)],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode == 0:
+            print(">>> wandb sync OK.", flush=True)
+        else:
+            print(f">>> wandb sync falló (code {result.returncode}): {result.stderr[:200]}", flush=True)
+    except Exception as e:
+        print(f">>> wandb sync error: {e}", flush=True)
+
+
 def run_simple_training(config_path: str, overrides: Optional[List[str]] = None):
     """Run single-phase GRPO training."""
     _patch_verl_dataset()
+    _patch_verl_wandb_cleanup()
+
+    # wandb offline: evita perder datos por crash del transport en Ray workers.
+    # Se sincroniza al final automáticamente.
+    os.environ.setdefault("WANDB_MODE", "offline")
 
     from verl.trainer.main_ppo import run_ppo
 
@@ -185,9 +249,18 @@ def run_simple_training(config_path: str, overrides: Optional[List[str]] = None)
     print(f"Data:   {merged.data.train_files}")
     print(f"Steps:  {merged.trainer.total_training_steps}")
     print(f"GPUs:   {merged.trainer.n_gpus_per_node}")
-    print("=" * 60)
+    wandb_mode = os.environ.get("WANDB_MODE", "online")
+    print(f"WandB:  {wandb_mode}" + (" (auto-sync al final)" if wandb_mode == "offline" else ""))
+    print("=" * 60 + "\n")
 
-    run_ppo(merged)
+    t0 = time.perf_counter()
+    try:
+        run_ppo(merged)
+    finally:
+        elapsed = time.perf_counter() - t0
+        print(f"\nTotal time: {elapsed:.1f}s ({elapsed/60:.1f} min)")
+        if os.environ.get("WANDB_MODE") == "offline":
+            _wandb_sync()
 
 
 # ---------------------------------------------------------------------------
