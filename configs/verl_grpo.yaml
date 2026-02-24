@@ -80,8 +80,8 @@ data:
   trust_remote_code: true
   filter_overlong_prompts: true
   truncation: left
-  # Reduce DataLoader workers to lower RAM (avoids OOM at end of training)
-  num_workers: 1
+  # num_workers=0 evita OOM al final (DataLoader worker killed). Con 1+ puede fallar tras save_checkpoint.
+  num_workers: 0
 
 # --- Custom Reward Function ---
 # grubrics_reward.py routes by data_source: verifiable → local, open → Judge API
@@ -121,5 +121,8 @@ trainer:
   save_freq: 200
   test_freq: 100
   val_before_train: true
+  # Checkpoints: default is relative to cwd. When project is on CIFS (e.g. /afh/.../shared),
+  # run_grpo.py auto-redirects to /afh/temp/grubrics-checkpoints for faster load/save.
+  # Override with env: GRUBRICS_CHECKPOINT_DIR=/path/to/local
   default_local_dir: checkpoints/${trainer.project_name}/${trainer.experiment_name}
   device: cuda

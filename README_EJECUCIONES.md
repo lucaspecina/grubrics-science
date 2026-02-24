@@ -219,6 +219,12 @@ python run_grpo.py --config configs/verl_grpo_debug.yaml \
     data.train_batch_size=2
 ```
 
+### Checkpoints en disco local (GPU con CIFS)
+
+Si el proyecto está en `/afh/.../shared` (Azure Files), los checkpoints se guardan por defecto en disco local (`/afh/temp/grubrics-checkpoints`) para evitar carga lenta al hacer resume. Se aplica automáticamente. Para otro path: `export GRUBRICS_CHECKPOINT_DIR=/tu/path/local`.
+
+Si tenías checkpoints en `shared` y quieres resumir, cópialos primero: `cp -r checkpoints/grubrics-transfer/healthbench-grpo /afh/temp/grubrics-checkpoints/grubrics-transfer/`
+
 ### Si crashea al final (DataLoader worker killed)
 
 El entrenamiento puede completar bien pero fallar al guardar o cerrar. Mitigaciones:

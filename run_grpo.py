@@ -70,7 +70,9 @@ def _should_print_simple(line: str) -> bool:
     # Include: our banner, progress, and key lines only
     if line.startswith("="):
         return True
-    if "Progress:" in line:
+    if "Checkpoints:" in line:
+        return True
+    if any(x in line for x in ("Progress:", "GUARDANDO CHECKPOINT", "Al final verás", "CHECKPOINT COMPLETO", "CHECKPOINT INCOMPLETO", "EL PROCESO FALLÓ", ">>> ")):
         return True
     if line.startswith("Config:") or line.startswith("Model:") or "GRubrics" in line:
         return True
@@ -181,6 +183,33 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
+def _get_checkpoint_base_dir() -> Optional[str]:
+    """Return local checkpoint base dir when project is on slow storage (e.g. CIFS).
+
+    - If GRUBRICS_CHECKPOINT_DIR is set, use it.
+    - Else if cwd is under /afh/*/shared (Azure Files) and /afh/temp exists, use /afh/temp/grubrics-checkpoints.
+    - Else return None (keep default).
+    """
+    if base := os.environ.get("GRUBRICS_CHECKPOINT_DIR"):
+        return base.rstrip("/")
+    cwd = os.getcwd()
+    if "/afh/" in cwd and "/shared" in cwd and Path("/afh/temp").exists():
+        return "/afh/temp/grubrics-checkpoints"
+    return None
+
+
+def _apply_checkpoint_dir_override(merged_dict: dict) -> None:
+    """Override default_local_dir to use local storage when project is on CIFS."""
+    base = _get_checkpoint_base_dir()
+    if not base:
+        return
+    trainer = merged_dict.get("trainer", {})
+    project = trainer.get("project_name", "grubrics-transfer")
+    experiment = trainer.get("experiment_name", "healthbench-grpo")
+    merged_dict["trainer"]["default_local_dir"] = f"{base}/{project}/{experiment}"
+    logger.info("Checkpoints on local storage: %s", merged_dict["trainer"]["default_local_dir"])
+
+
 def _apply_reward_config_env(reward_config: dict) -> None:
     """Bridge YAML reward_config values to env vars read by grubrics_reward.py."""
     env_map = {
@@ -241,6 +270,7 @@ def run_simple_training(config_path: str, overrides: Optional[List[str]] = None)
 
     merged_dict = load_config(config_path, overrides)
     _apply_reward_config_env(merged_dict.get("reward_config", {}))
+    _apply_checkpoint_dir_override(merged_dict)
     merged = OmegaConf.create(merged_dict)
     print("Progress: Config loaded.", flush=True)
 
@@ -257,7 +287,10 @@ def run_simple_training(config_path: str, overrides: Optional[List[str]] = None)
     print(f"Data:   {merged.data.train_files}")
     print(f"Steps:  {merged.trainer.total_training_steps}")
     print(f"GPUs:   {merged.trainer.n_gpus_per_node}")
+    print(f"Checkpoints: {merged.trainer.default_local_dir}")
     print("=" * 60)
+    print("(Al final verás '>>> GUARDANDO CHECKPOINT' cuando empiece el guardado, ~3-5 min)")
+    print("")
 
     print("Progress: Starting veRL (Ray init → model load → vLLM). May take 5-10 min...", flush=True)
     stop_event = threading.Event()
@@ -265,15 +298,48 @@ def run_simple_training(config_path: str, overrides: Optional[List[str]] = None)
     heartbeat.start()
 
     t0 = time.perf_counter()
+    exc = None
     try:
         run_ppo(merged)
+    except Exception as e:
+        exc = e
     finally:
         stop_event.set()
+        elapsed = time.perf_counter() - t0
 
-    elapsed = time.perf_counter() - t0
-    print("=" * 60)
-    print(f"Training complete. Total time: {elapsed:.1f}s ({elapsed/60:.1f} min)")
-    print("=" * 60)
+        # SIEMPRE verificar checkpoint (aunque haya fallado)
+        ckpt_dir = Path(merged.trainer.default_local_dir)
+        print("\n" + "=" * 60)
+        if exc:
+            print(">>> EL PROCESO FALLÓ (verificando si el checkpoint se guardó antes del error)...")
+            print(f">>> Error: {exc}")
+            if "DataLoader worker" in str(exc) and "killed" in str(exc).lower():
+                print(">>> (Si falla al final: usa data.num_workers=0 en el config)")
+        else:
+            print(f"Training complete. Total time: {elapsed:.1f}s ({elapsed/60:.1f} min)")
+
+        if ckpt_dir.exists():
+            latest = ckpt_dir / "latest_checkpointed_iteration.txt"
+            if latest.exists():
+                step = latest.read_text().strip()
+                step_dir = ckpt_dir / f"global_step_{step}"
+                actor_dir = step_dir / "actor"
+                if step_dir.exists() and actor_dir.exists():
+                    size_mb = sum(f.stat().st_size for f in step_dir.rglob("*") if f.is_file()) / (1024 * 1024)
+                    print(">>> CHECKPOINT COMPLETO - guardado correctamente.")
+                    print(f">>> Ubicación: {step_dir} ({size_mb:.0f} MB)")
+                else:
+                    print(">>> CHECKPOINT INCOMPLETO - guardado interrumpido.")
+                    print(f">>> Carpeta: {step_dir}")
+            else:
+                print(">>> Sin checkpoint (latest_checkpointed_iteration.txt no existe)")
+        else:
+            print(f">>> Directorio no encontrado: {ckpt_dir}")
+
+        print("=" * 60 + "\n")
+
+        if exc:
+            raise exc
 
 
 # ---------------------------------------------------------------------------
@@ -339,6 +405,7 @@ def run_curriculum_training(
             logger.info("  Resuming from checkpoint: %s", prev_checkpoint)
             merged_dict["actor_rollout_ref"]["model"]["path"] = prev_checkpoint
 
+        _apply_checkpoint_dir_override(merged_dict)
         merged = OmegaConf.create(merged_dict)
 
         logger.info("  Starting veRL GRPO training...")
@@ -436,6 +503,10 @@ def main():
             bufsize=1,
         )
         for line in proc.stdout:
+            if "local_global_step_folder:" in line:
+                print("\n>>> " + "=" * 52 + " <<<", flush=True)
+                print(">>> GUARDANDO CHECKPOINT - puede tardar 3-5 min. NO interrumpir. <<<", flush=True)
+                print(">>> " + "=" * 52 + " <<<\n", flush=True)
             if _should_print_simple(line):
                 print(line, end="", flush=True)
         proc.wait()
