@@ -72,7 +72,7 @@ def _should_print_simple(line: str) -> bool:
         return True
     if "Checkpoints:" in line:
         return True
-    if any(x in line for x in ("Progress:", "GUARDANDO CHECKPOINT", "Al final verás", "CHECKPOINT COMPLETO", "CHECKPOINT INCOMPLETO", "EL PROCESO FALLÓ", ">>> ")):
+    if any(x in line for x in ("Progress:", "GUARDANDO CHECKPOINT", "CHECKPOINT GUARDADO. Siguiente", "Al final verás", "CHECKPOINT COMPLETO", "CHECKPOINT INCOMPLETO", "EL PROCESO FALLÓ", ">>> ")):
         return True
     if line.startswith("Config:") or line.startswith("Model:") or "GRubrics" in line:
         return True
@@ -289,7 +289,7 @@ def run_simple_training(config_path: str, overrides: Optional[List[str]] = None)
     print(f"GPUs:   {merged.trainer.n_gpus_per_node}")
     print(f"Checkpoints: {merged.trainer.default_local_dir}")
     print("=" * 60)
-    print("(Al final verás '>>> GUARDANDO CHECKPOINT' cuando empiece el guardado, ~3-5 min)")
+    print("(Al final: '>>> GUARDANDO CHECKPOINT' = empieza | '>>> CHECKPOINT GUARDADO' = terminó)")
     print("")
 
     print("Progress: Starting veRL (Ray init → model load → vLLM). May take 5-10 min...", flush=True)
@@ -507,6 +507,8 @@ def main():
                 print("\n>>> " + "=" * 52 + " <<<", flush=True)
                 print(">>> GUARDANDO CHECKPOINT - puede tardar 3-5 min. NO interrumpir. <<<", flush=True)
                 print(">>> " + "=" * 52 + " <<<\n", flush=True)
+            if "timing_s/save_checkpoint" in line:
+                print("\n>>> CHECKPOINT GUARDADO. Siguiente: cierre (DataLoader, Ray, wandb)... <<<\n", flush=True)
             if _should_print_simple(line):
                 print(line, end="", flush=True)
         proc.wait()
