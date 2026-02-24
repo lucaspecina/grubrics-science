@@ -88,6 +88,8 @@ data:
   trust_remote_code: true
   filter_overlong_prompts: true
   truncation: left
+  dataloader_num_workers: 0
+  filter_overlong_prompts_workers: 1
 
 # --- Custom Reward Function ---
 # grubrics_reward.py routes by data_source: verifiable → local, open → Judge API
