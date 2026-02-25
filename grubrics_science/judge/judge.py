@@ -9,6 +9,7 @@ import hashlib
 import json
 import logging
 import re
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..llm.client import AzureOpenAIClient
@@ -96,10 +97,13 @@ class Judge:
         """
         self.client = client or AzureOpenAIClient(model=model, use_azure=use_azure)
         self._semaphore = asyncio.Semaphore(max_concurrent)
+        self._max_concurrent = max_concurrent
         self._max_retries = max_retries
         self._timeout = timeout
         self._max_cache_size = max_cache_size
         self._cache: Dict[str, Tuple[List[float], List[Dict[str, Any]]]] = {}
+        # Timing stats for training diagnostics
+        self._call_timings: List[Tuple[float, float]] = []  # (sem_wait, api_time)
 
     async def _call_with_retry(
         self, prompt: str, system_prompt: Optional[str] = None, max_tokens: int = 5000,
@@ -110,7 +114,9 @@ class Judge:
 
         for attempt in range(self._max_retries):
             try:
+                _t_enter = time.perf_counter()
                 async with self._semaphore:
+                    _t_acquired = time.perf_counter()
                     response = await asyncio.wait_for(
                         self.client.generate(
                             prompt=prompt,
@@ -119,6 +125,11 @@ class Judge:
                         ),
                         timeout=self._timeout,
                     )
+                    _t_done = time.perf_counter()
+                    self._call_timings.append((
+                        _t_acquired - _t_enter,  # sem_wait
+                        _t_done - _t_acquired,   # api_time
+                    ))
                 return response
             except Exception as exc:
                 last_error = exc
@@ -135,6 +146,15 @@ class Judge:
         raise RuntimeError(
             f"Judge API call failed after {self._max_retries} retries: {last_error}"
         )
+
+    def get_and_reset_timings(self) -> List[Tuple[float, float]]:
+        """Return accumulated (sem_wait, api_time) tuples and reset.
+
+        Used by the reward function to log per-step timing summaries.
+        """
+        timings = list(self._call_timings)
+        self._call_timings.clear()
+        return timings
 
     def _parse_response(
         self, response: str, num_rubrics: int, return_details: bool

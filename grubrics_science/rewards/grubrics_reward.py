@@ -23,9 +23,11 @@ Reward weights are configurable via environment variables:
   JUDGE_MAX_CONCURRENT   — max parallel Judge API calls (default: 10)
 """
 
+import atexit
 import logging
 import os
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -48,6 +50,124 @@ except ImportError:
     )
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Step-level timing for training diagnostics
+# ---------------------------------------------------------------------------
+
+class _StepTimer:
+    """Tracks per-step reward timing to identify training bottlenecks.
+
+    veRL dispatches all compute_score() calls via asyncio.gather(), so they
+    start nearly simultaneously.  Between steps there is a GPU phase (rollout
+    generation + gradient update) that creates a time gap.  We detect step
+    boundaries when the gap between the last call start and a new call
+    exceeds GAP_THRESHOLD seconds.
+
+    Each step logs one summary line at WARNING level with:
+      - gpu_gap: time outside the reward phase (rollout + gradient + veRL overhead)
+      - reward_wall: wall-clock time of the entire reward phase
+      - sem_wait: time coroutines spent waiting for the Judge semaphore
+      - api: actual gpt API latency
+      - per_reward: total time per compute_score call
+    """
+
+    GAP_THRESHOLD = 2.0  # seconds — GPU phases are always longer than this
+
+    def __init__(self):
+        self.step_num = 0
+        self._batch_start = None
+        self._batch_end = None
+        self._prev_step_end = None
+        self._last_call_time = 0.0
+        self._n_calls = 0
+        self._reward_times = []
+
+    def on_call_start(self) -> float:
+        """Called at the beginning of compute_score. Returns timestamp."""
+        now = time.perf_counter()
+
+        # Detect new step: gap from last call's start > threshold
+        if (self._batch_start is not None
+                and self._n_calls > 0
+                and (now - self._last_call_time) > self.GAP_THRESHOLD):
+            self._flush_summary()
+
+        if self._batch_start is None:
+            self.step_num += 1
+            self._batch_start = now
+            self._batch_end = None
+            self._n_calls = 0
+            self._reward_times = []
+
+            # Log GPU gap (time between prev step's reward end and this start)
+            if self._prev_step_end is not None:
+                gpu_gap = now - self._prev_step_end
+                logger.warning(
+                    "STEP_TIMING step=%d gpu_phase=%.1fs "
+                    "(rollout + gradient + veRL overhead)",
+                    self.step_num, gpu_gap,
+                )
+
+        self._last_call_time = now
+        return now
+
+    def on_call_end(self, call_start: float):
+        """Called when compute_score finishes."""
+        now = time.perf_counter()
+        self._batch_end = now
+        self._n_calls += 1
+        self._reward_times.append(now - call_start)
+
+    def _flush_summary(self):
+        """Log timing summary for the completed step and reset."""
+        if self._n_calls == 0:
+            return
+
+        n = self._n_calls
+        wall = (self._batch_end or time.perf_counter()) - self._batch_start
+
+        r = self._reward_times
+        avg_r = sum(r) / n
+        max_r = max(r)
+        min_r = min(r)
+
+        # Collect Judge-level timing if available
+        judge_info = ""
+        if _judge is not None:
+            timings = _judge.get_and_reset_timings()
+            if timings:
+                sem_waits = [t[0] for t in timings]
+                api_times = [t[1] for t in timings]
+                judge_info = (
+                    f" | sem_wait=(avg={sum(sem_waits)/len(sem_waits):.2f}s "
+                    f"max={max(sem_waits):.2f}s)"
+                    f" | api=(avg={sum(api_times)/len(api_times):.2f}s "
+                    f"max={max(api_times):.2f}s "
+                    f"min={min(api_times):.2f}s)"
+                    f" | max_concurrent={_judge._max_concurrent}"
+                )
+
+        logger.warning(
+            "STEP_TIMING step=%d reward_phase: calls=%d wall=%.1fs"
+            " | per_reward=(avg=%.2fs max=%.2fs min=%.2fs)%s",
+            self.step_num, n, wall, avg_r, max_r, min_r, judge_info,
+        )
+
+        # Preserve end time for GPU gap calculation
+        self._prev_step_end = self._batch_end
+
+        # Reset
+        self._batch_start = None
+        self._batch_end = None
+        self._last_call_time = 0.0
+        self._n_calls = 0
+        self._reward_times = []
+
+
+_step_timer = _StepTimer()
+atexit.register(lambda: _step_timer._flush_summary())
 
 
 # ---------------------------------------------------------------------------
@@ -282,7 +402,12 @@ async def compute_score(
     """
     extra_info = extra_info or {}
 
+    t_start = _step_timer.on_call_start()
+
     if data_source in VERIFIABLE_SOURCES:
-        return await _reward_verifiable(solution_str, ground_truth, extra_info)
+        result = await _reward_verifiable(solution_str, ground_truth, extra_info)
     else:
-        return await _reward_open(solution_str, extra_info)
+        result = await _reward_open(solution_str, extra_info)
+
+    _step_timer.on_call_end(t_start)
+    return result
