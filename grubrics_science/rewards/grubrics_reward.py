@@ -24,6 +24,7 @@ Reward weights are configurable via environment variables:
 """
 
 import atexit
+import json
 import logging
 import os
 import sys
@@ -155,6 +156,9 @@ class _StepTimer:
             self.step_num, n, wall, avg_r, max_r, min_r, judge_info,
         )
 
+        # Save rubric texts for this step
+        _flush_rubric_log_for_step(self.step_num)
+
         # Preserve end time for GPU gap calculation
         self._prev_step_end = self._batch_end
 
@@ -168,6 +172,55 @@ class _StepTimer:
 
 _step_timer = _StepTimer()
 atexit.register(lambda: _step_timer._flush_summary())
+
+
+# ---------------------------------------------------------------------------
+# Rubric text saving (for post-hoc inspection and checkpoint comparison)
+# ---------------------------------------------------------------------------
+
+_rubric_log: List[Dict] = []
+_rubric_output_dir_cache: Optional[str] = None  # None = not yet initialised
+
+
+def _get_rubric_output_dir() -> Optional[str]:
+    """Return the output dir for rubric JSONL files, or None if disabled.
+
+    Controlled by env vars:
+      SAVE_RUBRICS=0        — disable saving (default: enabled)
+      RUBRICS_OUTPUT_DIR    — output directory (default: data/results/rubrics)
+    """
+    global _rubric_output_dir_cache
+    if _rubric_output_dir_cache is None:
+        if os.environ.get("SAVE_RUBRICS", "1") in ("0", "false", "False"):
+            _rubric_output_dir_cache = ""  # empty string = disabled sentinel
+        else:
+            out_dir = os.environ.get("RUBRICS_OUTPUT_DIR", "data/results/rubrics")
+            Path(out_dir).mkdir(parents=True, exist_ok=True)
+            _rubric_output_dir_cache = out_dir
+    return _rubric_output_dir_cache or None
+
+
+def _flush_rubric_log_for_step(step_num: int) -> None:
+    """Write accumulated rubric samples for ``step_num`` to a JSONL file.
+
+    Called at the end of each reward phase (via _StepTimer._flush_summary).
+    Each line in the output file is a JSON object with:
+      step, question_id, question, rubric, alignment, reward,
+      judge_scores, gold_scores, n_chars
+    """
+    global _rubric_log
+    if not _rubric_log:
+        return
+    out_dir = _get_rubric_output_dir()
+    if not out_dir:
+        _rubric_log = []
+        return
+    out_path = Path(out_dir) / f"step_{step_num:04d}.jsonl"
+    with open(out_path, "w", encoding="utf-8") as f:
+        for entry in _rubric_log:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    logger.warning("Saved %d rubric samples → %s", len(_rubric_log), out_path)
+    _rubric_log = []
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +397,18 @@ async def _reward_functional_alignment(
         "Functional alignment reward: alignment=%.3f info=%.3f defense=%.3f len=%.3f -> %.3f",
         alignment, info_val, defense_pen, len_pen, reward,
     )
+
+    _rubric_log.append({
+        "step": _step_timer.step_num,
+        "question_id": extra_info.get("question_id", extra_info.get("prompt_id", "")),
+        "question": question[:500],
+        "rubric": rubric,
+        "alignment": float(alignment),
+        "reward": float(reward),
+        "judge_scores": [float(s) for s in scores],
+        "gold_scores": [float(s) for s in gold_scores],
+        "n_chars": len(rubric),
+    })
 
     return float(reward)
 
