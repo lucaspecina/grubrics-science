@@ -73,9 +73,25 @@ Además, hay un **problema bloqueante con la carga de checkpoints**: tanto SFT c
 
 | Fase | Qué | Criterio de éxito |
 |------|-----|-------------------|
-| **A** | GRPO end-to-end from scratch (~3 steps, config prod, Qwen3-8B en H100) | Termina sin error, reward no NaN, STEP_TIMING aparece |
-| **B** | Checkpoint + resume de GRPO (5 steps, save_freq=2, reiniciar desde checkpoint) | El segundo run arranca sin descargar de HF y termina OK |
-| **C** | SFT checkpoint → GRPO (SFT corto → iniciar GRPO desde ese checkpoint) | GRPO carga el modelo SFT en tiempo razonable (<10 min) |
+| Fase | Qué | Estado |
+|------|-----|--------|
+| **A** | GRPO end-to-end from scratch (2 steps, config prod, Qwen3-8B) | ✅ COMPLETADO 2026-03-02 |
+| **B** | Checkpoint + resume de GRPO | PENDIENTE |
+| **C** | SFT checkpoint → GRPO | PENDIENTE |
+
+### [DEBUG-A] GRPO end-to-end from scratch — 2 steps ✅
+**Fecha**: 2026-03-02 | **Config**: `verl_grpo.yaml` + overrides (batch=4, mini=4, micro=2)
+**Resultado**: Pipeline completo funciona. 2/2 steps, 10.6 min total (~65s/step + 178s checkpoint save).
+**Métricas step 2**:
+- reward mean=-0.095, max=0.863, min=-0.3 — reward discrimina correctamente
+- pg_loss=0.008, entropy=0.569, grad_norm=0.169 — gradientes estables
+- memory=104.7 GB allocated — cabe en H100 NVL
+- validation reward mean=0.606
+**Checkpoint guardado**: `global_step_2/actor/` con model, optim, extra_state + `huggingface/` (config+tokenizer)
+**wandb crash al final**: esperado, no afecta el training.
+**Observaciones pendientes**:
+- `prompt_length/mean=3.0` — sospechosamente bajo, pero el modelo genera rúbricas y el reward funciona. Puede ser una métrica interna de veRL.
+- `response_length/clip_ratio=0.83-0.92` — mayoría de respuestas llegan al límite de 512 tokens.
 
 ---
 

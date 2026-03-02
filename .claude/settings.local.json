@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:verl.readthedocs.io)",
+      "WebFetch(domain:github.com)"
+    ]
+  }
+}

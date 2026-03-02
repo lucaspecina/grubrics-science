@@ -49,6 +49,7 @@ Entrena Qwen3-8B con RL (GRPO) para generar rúbricas de evaluación médica y c
 - **Judge cache en RL**: siempre `max_cache_size=0` durante training (RAM unbounded si no)
 - **BLOQUEANTE — Carga de checkpoints en GRPO**: cargar un checkpoint (SFT o GRPO previo) como punto de partida para `run_grpo.py` tarda demasiado y no es viable. Causa probable: veRL guarda checkpoints FSDP como sharded state dicts, no formato HF; `from_pretrained()` no los reconoce y cae en descarga desde HuggingFace Hub. Afecta tanto SFT→GRPO como GRPO resume. **Sin resolver.**
 - **GRPO end-to-end nunca completó**: se aplicaron múltiples fixes (OOM, async Judge, wandb, timing) pero no se validaron en conjunto. Debugging en curso, ver `docs/experiment-log.md`.
+- **veRL auto-resume + total_training_steps absoluto**: veRL detecta checkpoints en `default_local_dir` y resume automáticamente. `total_training_steps` es absoluto (no relativo al checkpoint). Si el checkpoint está en step 5 y ponés `total_training_steps=2`, falla porque ya superó el target. **Borrar el directorio de checkpoints antes de un run from scratch con pocos steps.**
 
 ## Docs de referencia
 
@@ -80,12 +81,16 @@ del workflow. No hacerlo degrada la calidad del proyecto entre sesiones.
 
 1. **Proactividad**: si algo nuevo surge en la conversación y es relevante para alguno
    de los archivos de arriba, actualizalo o proponé actualizarlo. NO esperar a que lo pidan.
-2. **Leer antes de escribir**: antes de editar cualquier doc, leerlo para no pisar contenido existente.
+2. **Proporcionalidad**: no todo merece actualización en todos lados. Fixes menores a herramientas
+   auxiliares (notebook, scripts de visualización, etc.) no requieren actualizar toda la documentación.
+   Reservar actualizaciones multi-archivo para cambios que afecten el pipeline principal, decisiones
+   de diseño, o resultados de experimentos.
+3. **Leer antes de escribir**: antes de editar cualquier doc, leerlo para no pisar contenido existente.
    No leer preventivamente al inicio de cada sesión — solo cuando vayas a escribir.
-3. **Contradicciones**: si la conversación contradice lo documentado, preguntar:
+4. **Contradicciones**: si la conversación contradice lo documentado, preguntar:
    "¿Querés que actualice [archivo] con esto, o es solo para esta sesión?"
-4. **Skills**: los archivos en `.claude/commands/` son guías operativas. Si un workflow cambia
+5. **Skills**: los archivos en `.claude/commands/` son guías operativas. Si un workflow cambia
    (nuevo paso, fix, problema descubierto, cambio de approach), actualizar el skill correspondiente.
-5. **Scope completo**: al actualizar, pensar en TODOS los archivos afectados, no solo el más obvio.
+6. **Scope completo**: al actualizar, pensar en TODOS los archivos afectados, no solo el más obvio.
    Un problema nuevo puede requerir actualizar CLAUDE.md (issues conocidos), el skill (guía operativa),
    el experiment-log (resultado), y decisions.md (por qué se tomó cierto approach).

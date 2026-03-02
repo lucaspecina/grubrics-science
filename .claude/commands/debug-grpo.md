@@ -6,7 +6,7 @@ El pipeline GRPO **nunca completó un run exitoso**. Se aplicaron fixes (OOM, as
 
 | Fase | Qué | Estado |
 |------|-----|--------|
-| **A** | GRPO end-to-end from scratch (~3 steps, config prod, Qwen3-8B) | PENDIENTE |
+| **A** | GRPO end-to-end from scratch (2 steps, config prod, Qwen3-8B) | ✅ COMPLETADO 2026-03-02 |
 | **B** | Checkpoint + resume de GRPO | PENDIENTE — bloqueado por formato FSDP vs HF |
 | **C** | SFT checkpoint → GRPO | PENDIENTE — misma causa que B |
 
@@ -29,6 +29,11 @@ echo $AZURE_OPENAI_API_KEY | head -c 10
 ```
 
 ## Fase A: run mínimo from scratch
+
+**IMPORTANTE**: borrar checkpoints de runs anteriores antes de lanzar. veRL auto-resume desde `default_local_dir`, y `total_training_steps` es absoluto (no relativo al checkpoint). Si hay un checkpoint en step 5 y ponés `total_training_steps=2`, falla porque ya superó el target.
+```bash
+rm -rf checkpoints/grubrics-transfer/healthbench-grpo/
+```
 
 ```bash
 # 2 steps, batch mínimo, config de producción (Qwen3-8B + LoRA rank 64, vLLM, H100)
@@ -53,7 +58,22 @@ Overrides elegidos para minimizar carga:
 - ✓ No hay OOM ni "DataLoader worker killed"
 - ✓ Termina sin crash (wandb sync fail al final es OK)
 
-Si esto falla, el problema es de infraestructura. Si pasa, avanzar a Fase B.
+Si esto falla, el problema es de infraestructura. Si pasa, inspeccionar el output con la notebook y avanzar a Fase B.
+
+### Inspeccionar output con la notebook
+
+`notebooks/analyze_rubrics.ipynb` detecta automáticamente checkpoints GRPO en `global_step_*/actor/`.
+Soporta checkpoints FSDP de veRL (no requiere formato HF).
+
+```python
+# En la H100, abrir la notebook y correr §1-§4 (setup)
+# §2 debería mostrar: grpo_step2 → checkpoints/.../global_step_2/actor
+load_checkpoint("grpo_step2")   # carga base + LoRA desde FSDP state dict
+generate_rubric("grpo_step2", holdout_with_scores[0])  # generar rúbrica de prueba
+```
+
+La notebook es una herramienta auxiliar de visualización, no parte crítica del pipeline.
+Útil para inspeccionar qué genera el modelo en cada checkpoint.
 
 ## Fase B: checkpoint + resume
 
@@ -154,9 +174,13 @@ Buscar en los logs de `STEP_TIMING`:
 
 ### Carga de checkpoint tarda demasiado
 
-**Problema conocido sin resolver.** veRL guarda FSDP shards, no formato HF. Posibles soluciones a investigar:
-- Conversor FSDP → HF antes de cargar
+**Problema conocido — parcialmente resuelto.** veRL guarda FSDP shards, no formato HF.
+
+**Notebook** (`analyze_rubrics.ipynb`): RESUELTO — `_load_fsdp_checkpoint()` carga `model_world_size_*.pt`, detecta LoRA keys, aplica config y merge. Pendiente de validar en H100.
+
+**Training resume** (Fases B y C): SIN RESOLVER. `from_pretrained()` no reconoce FSDP format → descarga desde HF Hub. Posibles soluciones a investigar:
 - Mecanismo de resume nativo de veRL (no `model.path`)
+- Conversor FSDP → HF antes de cargar
 - Para SFT: verificar que `save_pretrained()` genera todos los archivos necesarios
 
 ### DataLoader worker killed al final
