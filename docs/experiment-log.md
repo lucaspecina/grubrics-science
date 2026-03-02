@@ -73,7 +73,7 @@ Además, hay un **problema bloqueante con la carga de checkpoints**: tanto SFT c
 
 | Fase | Qué | Criterio de éxito |
 |------|-----|-------------------|
-| **A** | GRPO end-to-end from scratch (~3 steps, debug config, modelo base) | Termina sin error, reward no NaN, STEP_TIMING aparece |
+| **A** | GRPO end-to-end from scratch (~3 steps, config prod, Qwen3-8B en H100) | Termina sin error, reward no NaN, STEP_TIMING aparece |
 | **B** | Checkpoint + resume de GRPO (5 steps, save_freq=2, reiniciar desde checkpoint) | El segundo run arranca sin descargar de HF y termina OK |
 | **C** | SFT checkpoint → GRPO (SFT corto → iniciar GRPO desde ese checkpoint) | GRPO carga el modelo SFT en tiempo razonable (<10 min) |
 

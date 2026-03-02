@@ -36,11 +36,12 @@ python -m grubrics_science.data.prepare_sft --subset all --holdout_size 500
 ## GRPO
 
 ```bash
-# Debug local (RTX 4000, ~12GB VRAM, Qwen2.5-0.5B, 20 steps)
-python run_grpo.py --config configs/verl_grpo_debug.yaml
-
-# Producción (H100, ~10h, Qwen3-8B, 2000 steps)
+# Run completo (H100, ~10h, Qwen3-8B, 2000 steps)
 python run_grpo.py --config configs/verl_grpo.yaml
+
+# Run corto para validar pipeline (~3 steps)
+python run_grpo.py --config configs/verl_grpo.yaml \
+    trainer.total_training_steps=3
 
 # Desde checkpoint SFT (RECOMENDADO para producción)
 python run_grpo.py --config configs/verl_grpo.yaml \

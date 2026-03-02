@@ -326,10 +326,10 @@ class TestYAMLConfig:
         assert rc["char_threshold"] == 3000
         assert rc["use_contrastive"] is True
 
-    def test_debug_yaml_has_reward_config(self):
+    def test_prod_yaml_has_reward_config(self):
         import yaml
 
-        with open("configs/verl_grpo_debug.yaml") as f:
+        with open("configs/verl_grpo.yaml") as f:
             config = yaml.safe_load(f)
 
         assert "reward_config" in config

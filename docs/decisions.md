@@ -149,7 +149,7 @@ Formato: contexto que motivó la decisión, alternativas consideradas, decisión
 - Fixear todo de golpe (descartado: demasiados puntos de fallo simultáneos)
 
 **Decisión**: Debugging incremental en 3 fases:
-1. **Fase A**: GRPO end-to-end from scratch (~3 steps, debug config, sin checkpoint previo)
+1. **Fase A**: GRPO end-to-end from scratch (~3 steps, config prod Qwen3-8B, sin checkpoint previo)
 2. **Fase B**: Checkpoint + resume de GRPO (guardar y recargar checkpoint)
 3. **Fase C**: SFT checkpoint → GRPO (cargar modelo SFT como punto de partida)
 

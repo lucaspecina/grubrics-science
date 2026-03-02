@@ -8,7 +8,7 @@
 # Model: Qwen3-8B + LoRA (rank 64)
 # Algorithm: GRPO (Group Relative Policy Optimization)
 #
-# Debug config: configs/verl_grpo_debug.yaml (Workstation RTX 4000, Qwen2.5-0.5B, HF engine)
+# Short run: python run_grpo.py --config configs/verl_grpo.yaml trainer.total_training_steps=3
 #
 # Usage:
 #   python run_grpo.py --config configs/verl_grpo.yaml

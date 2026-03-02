@@ -2,7 +2,7 @@ $schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
 
 display_name: grubrics-dryrun-3steps
 description: >
-  GRubrics-Transfer dry run: 3 steps de GRPO con Qwen2.5-0.5B + LoRA.
+  GRubrics-Transfer dry run: 3 steps de GRPO con Qwen3-8B + LoRA.
   Valida que el pipeline veRL funciona end-to-end antes de correr produccion.
 
 compute: azureml:YT404321-gpu
@@ -23,7 +23,8 @@ command: |
       --output_dir ./data/processed/ --only-cached
 
   echo "=== [3/4] Run veRL GRPO dry run (3 steps) ==="
-  python run_grpo.py --config configs/verl_grpo_debug.yaml
+  python run_grpo.py --config configs/verl_grpo.yaml \
+      trainer.total_training_steps=3
 
   echo "=== [4/4] Done ==="
   echo "Dry run completed successfully."

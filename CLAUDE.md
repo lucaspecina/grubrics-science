@@ -6,7 +6,7 @@ Entrena Qwen3-8B con RL (GRPO) para generar rúbricas de evaluación médica y c
 
 - **Modelo**: Qwen3-8B + LoRA (rank 64)
 - **RL framework**: veRL (GRPO) | **SFT**: TRL + LoRA
-- **Rollout**: vLLM (prod H100) / HF generate (debug workstation)
+- **Rollout**: vLLM (H100)
 - **Judge**: GPT via Azure OpenAI (async, rate-limited, `max_concurrent=10`)
 - **Tracking**: wandb | **Env**: `conda activate RL`
 
@@ -26,7 +26,7 @@ Entrena Qwen3-8B con RL (GRPO) para generar rúbricas de evaluación médica y c
 
 ## Convenciones del repo
 
-- Configs en `configs/` — prod: `verl_grpo.yaml`, debug: `verl_grpo_debug.yaml`, SFT: `sft_healthbench.yaml`
+- Configs en `configs/` — GRPO: `verl_grpo.yaml`, SFT: `sft_healthbench.yaml`
 - Presets de datos: `configs/training_presets.yaml` (`open_only` default, `verifiable_only`, `curriculum`, `full_mix`)
 - Checkpoints: `checkpoints/grubrics-transfer/`
 - Cache precompute: `data/cache/*.jsonl` — **NO borrar**, cada run cuesta $

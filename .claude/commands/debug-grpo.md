@@ -6,7 +6,7 @@ El pipeline GRPO **nunca completó un run exitoso**. Se aplicaron fixes (OOM, as
 
 | Fase | Qué | Estado |
 |------|-----|--------|
-| **A** | GRPO end-to-end from scratch (~3 steps, debug config) | PENDIENTE |
+| **A** | GRPO end-to-end from scratch (~3 steps, config prod, Qwen3-8B) | PENDIENTE |
 | **B** | Checkpoint + resume de GRPO | PENDIENTE — bloqueado por formato FSDP vs HF |
 | **C** | SFT checkpoint → GRPO | PENDIENTE — misma causa que B |
 
@@ -25,14 +25,14 @@ python -m grubrics_science.data.prepare preset --output_dir data/processed
 
 # 3. Verificar credenciales del Judge
 echo $AZURE_OPENAI_ENDPOINT
-echo $AZURE_OPENAI_API_KEY
+echo $AZURE_OPENAI_API_KEY | head -c 10
 ```
 
 ## Fase A: run mínimo from scratch
 
 ```bash
-# 3 steps, debug config (Qwen2.5-0.5B, vLLM, batch pequeño)
-python run_grpo.py --config configs/verl_grpo_debug.yaml \
+# 3 steps con config de producción (Qwen3-8B + LoRA rank 64, vLLM, H100)
+python run_grpo.py --config configs/verl_grpo.yaml \
     trainer.total_training_steps=3
 ```
 
@@ -49,12 +49,12 @@ Si esto falla, el problema es de infraestructura. Si pasa, avanzar a Fase B.
 
 ```bash
 # 5 steps, guardar cada 2
-python run_grpo.py --config configs/verl_grpo_debug.yaml \
+python run_grpo.py --config configs/verl_grpo.yaml \
     trainer.total_training_steps=5 \
     trainer.save_freq=2
 
 # Verificar checkpoint guardado
-ls checkpoints/grubrics-transfer-debug/debug-local/
+ls checkpoints/grubrics-transfer/healthbench-grpo/
 
 # Intentar resumir desde checkpoint
 # TODO: definir mecanismo correcto (model.path vs resume nativo de veRL)
@@ -71,7 +71,7 @@ python run_sft.py --config configs/sft_healthbench.yaml \
 ls checkpoints/grubrics-transfer/sft-healthbench/final/
 
 # GRPO desde SFT
-python run_grpo.py --config configs/verl_grpo_debug.yaml \
+python run_grpo.py --config configs/verl_grpo.yaml \
     trainer.total_training_steps=3 \
     actor_rollout_ref.model.path=checkpoints/grubrics-transfer/sft-healthbench/final
 ```
@@ -105,23 +105,20 @@ print(df['gold_scores'].isna().sum(), 'rows sin gold_scores de', len(df))
 "
 ```
 
-Si hay NaN → regenerar parquet con `--only-cached`.
-
 ### Reward discrimina mal (std ≈ 0 dentro del grupo)
 
-Significa que todas las K rúbricas generadas para una pregunta reciben el mismo reward. No hay señal de advantage.
+Todas las K rúbricas generadas reciben el mismo reward. No hay señal de advantage.
 
 ```bash
-# Verificar gold_scores del caché
 python scripts/analyze_precompute.py --dataset healthbench \
     --output data/results/debug_analysis.json
 ```
 
 Si `signal_useful_pct < 90%` → problema en el precompute.
 
-### OOM en producción (H100)
+### OOM en H100
 
-Memoria estimada: FSDP actor ~33GB + vLLM ~47GB ≈ ~80GB.
+Memoria estimada: FSDP actor ~33GB + vLLM ~47GB ≈ ~80GB (cabe en 94GB).
 
 ```bash
 # Reducir batch size
@@ -136,23 +133,10 @@ python run_grpo.py --config configs/verl_grpo.yaml \
 ### El run es extremadamente lento (>5 min/step)
 
 Buscar en los logs de `STEP_TIMING`:
-- `gpu_phase`: tiempo de forward/backward del actor (debería ser <30s)
+- `gpu_phase`: forward/backward del actor (debería ser <30s)
 - `reward_phase`: tiempo total del reward (incluye Judge)
 - `sem_wait`: tiempo esperando semáforo → Judge es el bottleneck
 - `api`: latencia de llamadas al Judge
-
-### veRL falla al cargar el parquet
-
-El patch de JSON columns debería aplicarse automáticamente via `run_grpo.py`.
-
-```bash
-python -c "
-import pandas as pd
-df = pd.read_parquet('data/processed/mixed_train.parquet')
-print(df.dtypes)
-print(df.columns.tolist())
-"
-```
 
 ### wandb crash al final del run
 
@@ -167,10 +151,7 @@ print(df.columns.tolist())
 
 ### DataLoader worker killed al final
 
-```bash
-# En config, usar:
-# data.dataloader_num_workers: 0
-```
+En config, `data.dataloader_num_workers: 0` (ya configurado así).
 
 ## Logs útiles para diagnóstico
 

@@ -4,15 +4,12 @@ Loads veRL's default ppo_trainer config, merges project YAML overrides,
 and runs training in either simple (single-phase) or curriculum mode.
 
 Usage:
-    # Simple mode — debug (workstation RTX 4000 Ada):
-    python run_grpo.py --config configs/verl_grpo_debug.yaml
-
-    # Simple mode — production (H100):
+    # Simple mode (H100):
     python run_grpo.py --config configs/verl_grpo.yaml
 
-    # Simple mode with extra Hydra-style overrides:
-    python run_grpo.py --config configs/verl_grpo_debug.yaml \
-        trainer.total_training_steps=5 data.train_batch_size=2
+    # Short run to validate pipeline:
+    python run_grpo.py --config configs/verl_grpo.yaml \
+        trainer.total_training_steps=3
 
     # Curriculum mode (multi-phase):
     python run_grpo.py --config configs/verl_grpo.yaml --curriculum \

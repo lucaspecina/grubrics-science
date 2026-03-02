@@ -311,7 +311,7 @@ El pipeline GRPO **nunca completó un run exitosamente**. Se corrigieron múltip
 
 | Fase | Qué | Criterio de éxito |
 |------|-----|-------------------|
-| **A** | GRPO end-to-end from scratch (~3 steps, debug config, modelo base) | Termina sin error, reward no NaN, STEP_TIMING en logs |
+| **A** | GRPO end-to-end from scratch (~3 steps, config prod, Qwen3-8B en H100) | Termina sin error, reward no NaN, STEP_TIMING en logs |
 | **B** | Checkpoint + resume de GRPO (5 steps, save_freq=2, reiniciar desde checkpoint) | Arranca sin descargar de HF, termina OK |
 | **C** | SFT checkpoint → GRPO (SFT corto → iniciar GRPO desde ese checkpoint) | Carga en <10 min, termina OK |
 

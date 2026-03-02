@@ -52,12 +52,13 @@
             "python": "${command:python.interpreterPath}"
         },
         {
-            "name": "GRPO Debug (20 steps, small model)",
+            "name": "GRPO (3 steps, validation)",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/run_grpo.py",
             "args": [
-                "--config", "${workspaceFolder}/configs/verl_grpo_debug.yaml"
+                "--config", "${workspaceFolder}/configs/verl_grpo.yaml",
+                "trainer.total_training_steps=3"
             ],
             "console": "integratedTerminal",
             "justMyCode": false,
