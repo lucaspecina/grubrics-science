@@ -63,6 +63,22 @@ Bitácora cronológica de runs, validaciones y aprendizajes. El más reciente al
 
 ---
 
+## Fase de debugging del pipeline GRPO (en curso)
+
+El pipeline GRPO nunca completó un run exitoso. Se aplicaron múltiples fixes (JSON columns, OOM, async Judge, wandb crash, timing diagnostics, rubric saving) pero no se validaron en conjunto.
+
+Además, hay un **problema bloqueante con la carga de checkpoints**: tanto SFT como GRPO previo tardan demasiado al usarse como punto de partida para un run de GRPO. Causa probable: veRL guarda checkpoints FSDP como sharded state dicts (no formato HF), y `from_pretrained()` no puede cargarlos → fallback a descarga desde HuggingFace Hub.
+
+### Plan de debugging (en orden)
+
+| Fase | Qué | Criterio de éxito |
+|------|-----|-------------------|
+| **A** | GRPO end-to-end from scratch (~3 steps, debug config, modelo base) | Termina sin error, reward no NaN, STEP_TIMING aparece |
+| **B** | Checkpoint + resume de GRPO (5 steps, save_freq=2, reiniciar desde checkpoint) | El segundo run arranca sin descargar de HF y termina OK |
+| **C** | SFT checkpoint → GRPO (SFT corto → iniciar GRPO desde ese checkpoint) | GRPO carga el modelo SFT en tiempo razonable (<10 min) |
+
+---
+
 ## Pendiente
 
 | # | Run | Qué mide | Costo est. | Tiempo est. | Bloquea |

@@ -299,19 +299,23 @@ notebooks/
 
 ---
 
-## 7. Qué Falta: Debugging y Optimización
+## 7. Qué Falta: Debugging y Puesta en Marcha
 
-### Debug run del proceso GRPO
+### Estado del pipeline GRPO
 
-**Objetivo:** Ejecutar un run corto (50-100 steps) con datos reales en H100 para medir tiempos y encontrar bottlenecks.
+El pipeline GRPO **nunca completó un run exitosamente**. Se corrigieron múltiples bugs (OOM por Judge cache, Judge secuencial, wandb crash, JSON columns de veRL) pero no se validaron todos juntos en un run completo.
 
-**Analizar en los logs: PROFILING**
-- **Si tiempos son aceptables (~2-3 min/step):**
-   - Proceder con precompute full (5K preguntas)
-   - Ejecutar SFT completo (4500 ejemplos)
-   - Ejecutar GRPO completo (2000 steps)
-- **Si tiempos son prohibitivos (>5 min/step) o hay memory issues (OOM):**
-   - Evaluar recursos a utilizar
+**Problema bloqueante adicional:** cargar un checkpoint (SFT o GRPO previo) como punto de partida para GRPO tarda demasiado. Causa: veRL guarda checkpoints FSDP como sharded state dicts que `from_pretrained()` no reconoce.
+
+### Plan de debugging (en orden)
+
+| Fase | Qué | Criterio de éxito |
+|------|-----|-------------------|
+| **A** | GRPO end-to-end from scratch (~3 steps, debug config, modelo base) | Termina sin error, reward no NaN, STEP_TIMING en logs |
+| **B** | Checkpoint + resume de GRPO (5 steps, save_freq=2, reiniciar desde checkpoint) | Arranca sin descargar de HF, termina OK |
+| **C** | SFT checkpoint → GRPO (SFT corto → iniciar GRPO desde ese checkpoint) | Carga en <10 min, termina OK |
+
+Una vez resuelto el debugging, se procede con el pipeline real (precompute full → SFT → GRPO).
 
 ### Configuración actual (referencia)
 

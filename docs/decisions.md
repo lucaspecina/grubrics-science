@@ -137,3 +137,22 @@ Formato: contexto que motivó la decisión, alternativas consideradas, decisión
 **Justificación**: Con cache habilitado, el diccionario crece sin límite durante un run de 2,000 steps × 24 ejemplos × 6 rollouts = 288K entradas → OOM eventual.
 
 **Revisitar si**: Se implementa un esquema de cache con eviction (LRU con tamaño máximo fijo).
+
+---
+
+## DEC-010 — Debugging por fases antes de runs completos
+
+**Contexto**: El pipeline GRPO tuvo múltiples bugs en cascada (JSON columns, OOM, Judge secuencial, wandb crash). Se aplicaron fixes individuales pero nunca se validaron juntos. Además, la carga de checkpoints (SFT o GRPO previo) como punto de partida es prohibitivamente lenta.
+
+**Alternativas**:
+- Lanzar un run largo y ver qué pasa (descartado: desperdicia GPU time y costos de API si falla)
+- Fixear todo de golpe (descartado: demasiados puntos de fallo simultáneos)
+
+**Decisión**: Debugging incremental en 3 fases:
+1. **Fase A**: GRPO end-to-end from scratch (~3 steps, debug config, sin checkpoint previo)
+2. **Fase B**: Checkpoint + resume de GRPO (guardar y recargar checkpoint)
+3. **Fase C**: SFT checkpoint → GRPO (cargar modelo SFT como punto de partida)
+
+**Justificación**: Aísla los problemas. La Fase A valida que el pipeline base funciona. La Fase B ataca el problema de checkpoints FSDP. La Fase C valida el workflow completo SFT→GRPO. Si una fase falla, se sabe exactamente dónde está el problema.
+
+**Revisitar si**: La Fase A pasa sin problemas y se puede saltar directo a C.
