@@ -31,10 +31,20 @@ echo $AZURE_OPENAI_API_KEY | head -c 10
 ## Fase A: run mínimo from scratch
 
 ```bash
-# 3 steps con config de producción (Qwen3-8B + LoRA rank 64, vLLM, H100)
+# 2 steps, batch mínimo, config de producción (Qwen3-8B + LoRA rank 64, vLLM, H100)
 python run_grpo.py --config configs/verl_grpo.yaml \
-    trainer.total_training_steps=3
+    trainer.total_training_steps=2 \
+    data.train_batch_size=4 \
+    actor_rollout_ref.actor.ppo_mini_batch_size=4 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=2 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.5
 ```
+
+Overrides elegidos para minimizar carga:
+- `train_batch_size=4` (prod: 24) — 4 prompts × 6 rollouts = 24 samples/step
+- `ppo_mini_batch_size=4` — 24/4 = 6 mini-batches ✓
+- `ppo_micro_batch_size_per_gpu=2` — 4/2 = 2 micro-batches ✓
+- `gpu_memory_utilization=0.5` — ya es el default de prod
 
 **Qué verificar en los logs:**
 - ✓ `reward/mean` no es NaN
