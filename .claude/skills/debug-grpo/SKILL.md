@@ -1,4 +1,6 @@
-Guía para diagnosticar y debuggear un run de GRPO. Usar cuando un run falla, el reward es 0 o NaN, hay problemas de timing, o el training no converge.
+---
+description: Guía para diagnosticar y debuggear un run de GRPO. Usar cuando un run falla, el reward es 0 o NaN, hay problemas de timing, o el training no converge.
+---
 
 ## Estado actual del debugging
 
@@ -63,17 +65,16 @@ Si esto falla, el problema es de infraestructura. Si pasa, inspeccionar el outpu
 ### Inspeccionar output con la notebook
 
 `notebooks/analyze_rubrics.ipynb` detecta automáticamente checkpoints GRPO en `global_step_*/actor/`.
-Soporta checkpoints FSDP de veRL (no requiere formato HF).
+Usa `lora_adapter/` (peft format, ~682MB) para carga rápida (~30s vs ~5min del FSDP completo).
 
 ```python
 # En la H100, abrir la notebook y correr §1-§4 (setup)
 # §2 debería mostrar: grpo_step2 → checkpoints/.../global_step_2/actor
-load_checkpoint("grpo_step2")   # carga base + LoRA desde FSDP state dict
+load_checkpoint("grpo_step2")   # carga base + LoRA desde lora_adapter/
 generate_rubric("grpo_step2", holdout_with_scores[0])  # generar rúbrica de prueba
 ```
 
 La notebook es una herramienta auxiliar de visualización, no parte crítica del pipeline.
-Útil para inspeccionar qué genera el modelo en cada checkpoint.
 
 ## Fase B: checkpoint + resume
 
@@ -176,7 +177,7 @@ Buscar en los logs de `STEP_TIMING`:
 
 **Problema conocido — parcialmente resuelto.** veRL guarda FSDP shards, no formato HF.
 
-**Notebook** (`analyze_rubrics.ipynb`): RESUELTO — `_load_fsdp_checkpoint()` carga `model_world_size_*.pt`, detecta LoRA keys, aplica config y merge. Pendiente de validar en H100.
+**Notebook** (`analyze_rubrics.ipynb`): RESUELTO — usa `lora_adapter/` (peft format) para carga rápida.
 
 **Training resume** (Fases B y C): SIN RESOLVER. `from_pretrained()` no reconoce FSDP format → descarga desde HF Hub. Posibles soluciones a investigar:
 - Mecanismo de resume nativo de veRL (no `model.path`)

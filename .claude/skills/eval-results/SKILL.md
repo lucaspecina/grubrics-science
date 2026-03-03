@@ -1,4 +1,6 @@
-Guía para evaluar y comparar rúbricas generadas por un checkpoint entrenado. Usar cuando se quiere medir la calidad de un modelo o comparar contra baselines.
+---
+description: Guía para evaluar y comparar rúbricas generadas por un checkpoint entrenado. Usar cuando se quiere medir la calidad de un modelo o comparar contra baselines.
+---
 
 ## Baselines de referencia
 

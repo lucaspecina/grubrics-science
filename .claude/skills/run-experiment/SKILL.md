@@ -1,4 +1,6 @@
-Guía para lanzar un nuevo training run (SFT o GRPO). Usar cuando el usuario quiere ejecutar un experimento de entrenamiento.
+---
+description: Guía para lanzar un nuevo training run (SFT o GRPO). Usar cuando el usuario quiere ejecutar un experimento de entrenamiento.
+---
 
 ## Checklist previo al launch
 

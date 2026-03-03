@@ -1,4 +1,6 @@
-Guía para ejecutar o completar el precompute de gold_scores para cualquier dataset. Usar cuando se necesita generar datos de precompute, verificar su estado, o entender qué hay en caché.
+---
+description: Guía para ejecutar o completar el precompute de gold_scores para cualquier dataset. Usar cuando se necesita generar datos de precompute, verificar su estado, o entender qué hay en caché.
+---
 
 ## Estado actual del caché
 

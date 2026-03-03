@@ -75,7 +75,7 @@ del workflow. No hacerlo degrada la calidad del proyecto entre sesiones.
 | `docs/experiment-log.md` | Resultado o aprendizaje de un experimento |
 | `docs/decisions.md` | Decisión de diseño, cambio de approach, por qué se descartó algo |
 | `docs/research.md` | Avance o respuesta a una pregunta de investigación |
-| `.claude/commands/*.md` | Cambio en un workflow operativo (debug, precompute, run, eval, dataset) |
+| `.claude/skills/*/SKILL.md` | Cambio en un workflow operativo (debug, precompute, run, eval, dataset, h100) |
 
 ### Reglas
 
@@ -89,8 +89,9 @@ del workflow. No hacerlo degrada la calidad del proyecto entre sesiones.
    No leer preventivamente al inicio de cada sesión — solo cuando vayas a escribir.
 4. **Contradicciones**: si la conversación contradice lo documentado, preguntar:
    "¿Querés que actualice [archivo] con esto, o es solo para esta sesión?"
-5. **Skills**: los archivos en `.claude/commands/` son guías operativas. Si un workflow cambia
+5. **Skills**: los archivos en `.claude/skills/*/SKILL.md` son guías operativas. Si un workflow cambia
    (nuevo paso, fix, problema descubierto, cambio de approach), actualizar el skill correspondiente.
+   Skills disponibles: `debug-grpo`, `eval-results`, `new-dataset`, `precompute`, `run-experiment`, `h100-workflow`.
 6. **Scope completo**: al actualizar, pensar en TODOS los archivos afectados, no solo el más obvio.
    Un problema nuevo puede requerir actualizar CLAUDE.md (issues conocidos), el skill (guía operativa),
    el experiment-log (resultado), y decisions.md (por qué se tomó cierto approach).

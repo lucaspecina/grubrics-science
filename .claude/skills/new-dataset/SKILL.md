@@ -1,4 +1,6 @@
-Guía para agregar un nuevo dataset al sistema. Usar cuando se quiere incorporar una nueva fuente de datos para training o evaluación.
+---
+description: Guía para agregar un nuevo dataset al sistema. Usar cuando se quiere incorporar una nueva fuente de datos para training o evaluación.
+---
 
 ## Decidir el tipo de dataset
 
