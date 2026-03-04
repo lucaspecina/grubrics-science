@@ -6,101 +6,121 @@ Source of truth para pendientes del proyecto. Cada item tiene un ID único `TODO
 
 ---
 
-## Bugs y blockers
+## Investigaciones estratégicas
 
-### TODO-001 🔴 Carga de checkpoints FSDP en GRPO
-veRL guarda checkpoints FSDP como sharded state dicts (`model_world_size_1_rank_0.pt`), no formato HF. `from_pretrained()` no los reconoce → fallback a descarga desde HuggingFace Hub. Afecta SFT→GRPO y GRPO resume.
-**Posible fix**: convertir FSDP → HF, o usar mecanismo de resume nativo de veRL.
-Refs: CHG-010, TODO-006, TODO-007
+Responder estas preguntas antes de ejecutar runs de producción. Informan todas las decisiones concretas.
 
-### TODO-002 🟡 wandb + Ray + asyncio crash al final del run
-Crash conocido al cerrar wandb con Ray + asyncio. Workaround: `try/except` + offline mode en `run_grpo.py`.
-No afecta el training, solo el cierre limpio.
+### TODO-001 🟡 Framework y arquitectura de training
 
-### TODO-003 🟡 wandb no loguea métricas correctamente en veRL
-Solo 1 resultado visible en wandb dashboard. Posible issue de integración veRL ↔ wandb con Ray workers.
+¿veRL es el framework adecuado? ¿Cómo escalamos? ¿Los problemas de checkpoints son inherentes al framework o configurables?
 
-### TODO-004 🟡 Rubric saving fragmentation
-6 workers con step counters independientes → data loss en `data/results/rubrics/`. Los archivos se sobreescriben entre workers.
+**Preguntas a responder:**
+- veRL vs TRL vs OpenRLHF para GRPO + LoRA — tradeoffs de cada uno
+- ¿Cómo maneja cada framework los checkpoints? veRL usa FSDP sharded state dicts incompatibles con formato HF — ¿es configurable o inherente?
+- ¿Multi-GPU requiere cambio de framework o solo config?
+- ¿El flujo SFT → GRPO es natural en cada framework, o requiere conversión?
+- ¿Cuál tiene mejor soporte para vLLM rollout en H100?
+- ¿Se pueden guardar checkpoints en formato HF directamente? ¿Convertir post-hoc?
+
+**Contexto**: veRL fue elegido por integración con vLLM (CHG-003), pero los checkpoints FSDP causan problemas de carga (TODO-004) y la integración con wandb no funciona (TODO-002). La pregunta es si estos son problemas puntuales a resolver o síntomas de un framework que no encaja.
+
+### TODO-002 🟡 Profiling y observabilidad
+
+¿Cómo medimos rendimiento? ¿Dónde están los bottlenecks? ¿Cómo mapeamos qué es paralelo y qué es secuencial?
+
+**Preguntas a responder:**
+- ¿Cómo perfilar cada fase del step GRPO? (rollout → reward/judge → policy update)
+- wandb crashea con Ray+asyncio y solo registra 1 punto aunque haya múltiples steps — ¿alternativas? (tensorboard, custom logging, veRL internal metrics)
+- ¿Qué herramientas de profiling existen para veRL/Ray?
+- ¿Los `STEP_TIMING` logs actuales son suficientes o necesitamos granularidad por sub-fase?
+- ¿Cómo visualizar el timeline de un step completo? (qué GPU hace qué, cuándo)
+
+**Contexto**: Fase A (EXP-DEBUG-A) mostró ~65s/step con batch=4 pero no sabemos el breakdown. Sin profiling granular, las optimizaciones de CHG-011 son educated guesses.
+
+### TODO-003 🟡 Judge pipeline — paralelismo y throughput
+
+¿El judge es truly parallel? ¿Es el bottleneck? ¿Cómo funciona realmente el flujo de API calls?
+
+**Preguntas a responder:**
+- Flujo actual: batch de prompts × K rollouts = N rúbricas → ¿cuántas API calls concurrentes se hacen realmente?
+- `max_concurrent=10` — ¿se satura? ¿Se puede subir? ¿Azure tiene rate limits que lo impidan?
+- ¿El judge procesa un batch completo en paralelo, o hay serialización entre mini-batches?
+- ¿Cuánto tiempo del step es judge vs rollout vs training?
+- ¿Judge local (modelo open-source) es viable para eliminar latencia de red?
+- ¿Se puede hacer batching de API calls (enviar múltiples evaluaciones en 1 request)?
+
+**Contexto**: Estimación de Fase A: reward phase ~36s de ~65s total. Si el judge es el bottleneck, la optimización más impactante está ahí (CHG-008, CHG-011).
 
 ---
 
-## Debugging del pipeline GRPO
+## Pipeline milestones
 
-### TODO-005 ✅ Debugging Fase A — GRPO end-to-end from scratch
-2 steps con config prod (Qwen3-8B, vLLM, H100). ~65s/step, reward funciona, checkpoint guardado.
-**Completado**: 2026-03-02.
-Refs: EXP-DEBUG-A, CHG-012
+### TODO-004 🔴 Checkpoint load/resume funcional
 
-### TODO-006 🔴 Debugging Fase B — Checkpoint + resume de GRPO
-Ejecutar run corto (5 steps, save_freq=2), verificar checkpoints, arrancar nuevo run desde checkpoint.
-**Bloqueado por**: TODO-001.
-Refs: CHG-010
+Cargar checkpoints (SFT→GRPO y GRPO resume) sin que falle o tarde minutos.
 
-### TODO-007 🔴 Debugging Fase C — SFT checkpoint → GRPO
-Ejecutar SFT corto (3 steps), iniciar GRPO desde ese checkpoint como `model.path`.
-`run_sft.py` guarda modelo mergeado via `save_pretrained()` (formato HF válido).
-**Bloqueado por**: TODO-001.
-Refs: CHG-010
+**Estado actual:**
+- ✅ Fase A: GRPO from scratch funciona (EXP-DEBUG-A, 2026-03-02)
+- 🔴 Fase B (GRPO resume): no probado. veRL guarda FSDP shards (`model_world_size_1_rank_0.pt`), `from_pretrained()` no los reconoce → fallback a descarga de HF Hub.
+- 🔴 Fase C (SFT→GRPO): no probado. `run_sft.py` guarda formato HF, pero la carga en veRL puede ser lenta (modelo se carga 2x: FSDP + vLLM).
 
-### TODO-008 🟡 Performance tuning GRPO
-Aplicar optimizaciones identificadas en CHG-011 antes del primer run de producción.
-Incluye: `JUDGE_MAX_CONCURRENT=24`, `gpu_memory_utilization: 0.6`, `free_cache_engine: false`, `load_format: safetensors`, chunked prefill, dynamic bsz, micro-batch sizes, env vars H100.
-**Proyección**: batch=24 de ~390s/step a ~150-250s/step.
-**Bloqueado por**: TODO-006, TODO-007.
+**Depende de**: TODO-001 — la solución puede ser cambiar framework, convertir checkpoints, o usar resume nativo de veRL.
+Refs: CHG-010, CHG-012
+
+### TODO-005 🟡 Configuración de producción optimizada
+
+Aplicar optimizaciones basadas en profiling real, no estimaciones.
+
+Optimizaciones identificadas en CHG-011 (por prioridad): `JUDGE_MAX_CONCURRENT`, `gpu_memory_utilization`, `free_cache_engine`, `load_format`, chunked prefill, dynamic bsz, micro-batch sizes, env vars H100.
+
+**Depende de**: TODO-002 (para saber qué optimizar), TODO-003 (para dimensionar judge), TODO-004 (checkpoints funcionales).
 Refs: CHG-011
 
 ---
 
-## Runs pendientes (core)
+## Runs core
 
-### TODO-009 🟡 Precompute HealthBench full — 5K preguntas
-gold_scores para todo el training set. ~$45, ~4h paralelo.
-**Bloquea**: TODO-013, TODO-014.
+### TODO-006 🟡 Precompute completo
+
+- HealthBench full: 5K preguntas (~$45, ~4h paralelo). **Bloquea** TODO-008, TODO-009.
+- FrontierScience: 60 preguntas (~$5, ~1h). Para eval cross-domain.
+
 Refs: EXP-001
 
-### TODO-010 🟡 Precompute FrontierScience — 60 preguntas
-gold_scores para eval cross-domain. ~$5, ~1h.
+### TODO-007 🟡 Baselines
 
-### TODO-011 🟡 Baselines HealthBench (B0, B1, B3)
-Piso y techo de calidad de rúbricas. ~$25, ~2h.
+- HealthBench (B0, B1, B3): piso y techo de calidad (~$25, ~2h)
+- Zero-shot Qwen3-8B: lower bound sin fine-tuning ($0, ~1h GPU)
 
-### TODO-012 🟡 Zero-shot Qwen3-8B (B1)
-Lower bound sin fine-tuning. $0, ~1h GPU.
+### TODO-008 🟡 SFT warm-up
 
-### TODO-013 🟡 SFT Qwen3-8B warm-up
 ¿SFT solo es suficiente? ~$10, ~2h H100.
-**Bloqueado por**: TODO-009.
+**Bloqueado por**: TODO-006.
 
-### TODO-014 🟡 RL Qwen3-8B con curriculum
-Nuestro método principal. ~$90, ~10h H100.
-**Bloqueado por**: TODO-009, TODO-008.
+### TODO-009 🟡 RL GRPO con curriculum — método principal
 
-### TODO-015 🟡 Eval checkpoint verifiable-only
-¿Transfer verificable → abierto funciona? $0, ~30 min.
+~$90, ~10h H100.
+**Bloqueado por**: TODO-004, TODO-005, TODO-006.
 
-### TODO-016 🟡 Eval en FrontierScience holdout
-Generalización cross-domain. ~$5, ~1h.
+### TODO-010 🟡 Evaluación
 
-**Costo total core (TODO-009 a TODO-016)**: ~$190
+- Eval checkpoint verifiable-only: ¿transfer a dominio abierto? ($0, ~30 min)
+- Eval en FrontierScience holdout: generalización cross-domain (~$5, ~1h)
+
+**Costo total core (TODO-006 a TODO-010)**: ~$190
 
 ---
 
 ## Extensiones (post-core)
 
-### TODO-017 🟡 Open-only sin curriculum
-¿Curriculum aporta vs training directo? ~$90.
+### TODO-011 🟡 Ablations y comparaciones
 
-### TODO-018 🟡 Policy training (2 runs D1-D2)
-RQ P1: rubric quality → policy quality. ~$180. Requiere implementar policy training.
-
-### TODO-019 🟡 Ablations reward components (A1-A4)
-¿Qué componentes del reward importan? ~$70 c/u.
-
-### TODO-020 🟡 Benchmark de Judges
-¿Mejor Judge para el dominio? ~$5-15.
-
-### TODO-021 🟡 Inter-judge consistency
-¿Rankings consistentes entre modelos? ~$15.
+| Extensión | RQ | Costo est. |
+|-----------|-----|-----------|
+| Open-only sin curriculum | ¿Curriculum aporta? | ~$90 |
+| Policy training (D1-D2) | Rubric quality → policy quality | ~$180 |
+| Ablations reward (A1-A4) | ¿Qué componentes importan? | ~$70 c/u |
+| Benchmark de Judges | ¿Mejor Judge? | ~$5-15 |
+| Inter-judge consistency | ¿Rankings consistentes? | ~$15 |
 
 **Costo total con extensiones**: ~$820

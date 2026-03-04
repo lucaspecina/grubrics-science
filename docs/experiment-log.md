@@ -70,15 +70,15 @@ Cross-refs a `TODO.md` (TODO-NNN) y `CHANGELOG.md` (CHG-NNN).
 
 El pipeline GRPO nunca completó un run exitoso. Se aplicaron múltiples fixes (JSON columns, OOM, async Judge, wandb crash, timing diagnostics, rubric saving) pero no se validaron en conjunto.
 
-Además, hay un **problema bloqueante con la carga de checkpoints** (TODO-001): veRL guarda checkpoints FSDP como sharded state dicts (no formato HF), y `from_pretrained()` no puede cargarlos.
+Además, hay un **problema bloqueante con la carga de checkpoints** (TODO-004): veRL guarda checkpoints FSDP como sharded state dicts (no formato HF), y `from_pretrained()` no puede cargarlos. Esto conecta con la investigación de framework (TODO-001).
 
 ### Plan de debugging (en orden)
 
 | Fase | Qué | Estado | Ref |
 |------|-----|--------|-----|
-| **A** | GRPO end-to-end from scratch (2 steps, config prod, Qwen3-8B) | ✅ COMPLETADO 2026-03-02 | TODO-005 |
-| **B** | Checkpoint + resume de GRPO | 🔴 Bloqueado por TODO-001 | TODO-006 |
-| **C** | SFT checkpoint → GRPO | 🔴 Bloqueado por TODO-001 | TODO-007 |
+| **A** | GRPO end-to-end from scratch (2 steps, config prod, Qwen3-8B) | ✅ COMPLETADO 2026-03-02 | TODO-004 |
+| **B** | Checkpoint + resume de GRPO | 🔴 Bloqueado por TODO-004 | TODO-004 |
+| **C** | SFT checkpoint → GRPO | 🔴 Bloqueado por TODO-004 | TODO-004 |
 
 ### [EXP-DEBUG-A] GRPO end-to-end from scratch — 2 steps ✅
 **Fecha**: 2026-03-02 | **Config**: `verl_grpo.yaml` + overrides (batch=4, mini=4, micro=2)
@@ -94,8 +94,8 @@ Además, hay un **problema bloqueante con la carga de checkpoints** (TODO-001): 
 - `prompt_length/mean=3.0` — sospechosamente bajo, pero el modelo genera rúbricas y el reward funciona. Puede ser una métrica interna de veRL.
 - `response_length/clip_ratio=0.83-0.92` — mayoría de respuestas llegan al límite de 512 tokens.
 
-Refs: CHG-010, CHG-012, TODO-005
+Refs: CHG-010, CHG-012, TODO-004
 
 ---
 
-Runs pendientes y extensiones: ver `TODO.md` (TODO-009 a TODO-021).
+Runs pendientes y extensiones: ver `TODO.md` (TODO-006 a TODO-011).

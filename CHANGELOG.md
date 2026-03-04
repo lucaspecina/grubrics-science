@@ -101,7 +101,7 @@ Debugging incremental en 3 fases: A (end-to-end from scratch), B (checkpoint + r
 **Descartado**: run largo a ciegas (desperdicia GPU/$), fixear todo de golpe (muchos puntos de fallo).
 
 **Revisitar si**: Fase A pasa y se puede saltar a C.
-Refs: TODO-005, TODO-006, TODO-007
+Refs: TODO-004
 
 ---
 
@@ -121,7 +121,7 @@ Fase A completó a ~65s/step con batch=4. Extrapolación a batch=24: ~390s/step 
 **Issues a evitar**: FSDP2+LoRA (#3470), vLLM v1+LoRA (#3271), reward serial (#2236).
 **Proyección**: ~150-250s/step con optimizaciones.
 **Fuentes**: veRL perf tuning docs, HF engineering handbook GRPO+LoRA, veRL best practices.
-Refs: TODO-008, EXP-DEBUG-A
+Refs: TODO-005, EXP-DEBUG-A
 
 ---
 
@@ -130,7 +130,7 @@ Refs: TODO-008, EXP-DEBUG-A
 GRPO end-to-end from scratch: 2 steps, 10.6 min total, reward discrimina, checkpoint guardado. Pipeline base funciona.
 
 Observaciones: `prompt_length/mean=3.0` (sospechoso pero funcional), `response_length/clip_ratio=0.83-0.92` (mayoría al límite 512 tokens), wandb crash al final (esperado).
-Refs: EXP-DEBUG-A, TODO-005, CHG-010
+Refs: EXP-DEBUG-A, TODO-004, CHG-010
 
 ---
 
@@ -142,3 +142,14 @@ Se migra a un sistema de cross-references con IDs únicos:
 - `docs/experiment-log.md` (EXP-xxx): resultados de runs
 
 Se elimina `docs/decisions.md` (contenido migrado a CHANGELOG.md). Se quitan tablas de pendientes de `experiment-log.md` (migradas a TODO.md).
+
+---
+
+## [CHG-014] 2026-03-04 — Simplificación de TODOs con framing estratégico
+
+21 items granulares consolidados en 11. Los bugs/blockers aislados (FSDP checkpoints, wandb crash, wandb metrics, rubric fragmentation, fases B/C, perf tuning) se absorben en 3 investigaciones estratégicas (framework, profiling, judge pipeline) + 2 milestones concretos (checkpoint load/resume, config producción). Los runs y extensiones se consolidan.
+
+Mapeo de IDs renumerados:
+- TODO-001..004 (bugs) + TODO-005..008 (debugging) → TODO-001 (framework), TODO-002 (profiling), TODO-003 (judge), TODO-004 (checkpoints), TODO-005 (config prod)
+- TODO-009..016 (runs) → TODO-006..010
+- TODO-017..021 (extensiones) → TODO-011

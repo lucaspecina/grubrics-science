@@ -80,25 +80,42 @@ del workflow. No hacerlo degrada la calidad del proyecto entre sesiones.
 | `docs/research.md` | Framing del paper y preguntas de investigación | Avance o respuesta a una pregunta de investigación |
 | `.claude/skills/*/SKILL.md` | Guías operativas | Cambio en workflow operativo (debug, precompute, run, eval, dataset, h100) |
 
+### Estructura del TODO.md
+
+`TODO.md` tiene 4 niveles jerárquicos. **Los estratégicos se resuelven primero** porque informan todo lo demás:
+
+1. **Investigaciones estratégicas** (TODO-001..003) — preguntas de arquitectura que informan decisiones concretas. Se resuelven investigando, no ejecutando. Al resolverse, actualizar los milestones y runs que dependen de ellas.
+2. **Pipeline milestones** (TODO-004..005) — hitos concretos del pipeline. Dependen de las investigaciones.
+3. **Runs core** (TODO-006..010) — experimentos a ejecutar. Dependen de los milestones.
+4. **Extensiones** (TODO-011) — post-core, no bloquean nada.
+
+**Estados y transiciones**:
+- 🟡 pendiente → 🟢 en curso (cuando se empieza a trabajar activamente)
+- 🟢 en curso → ✅ hecho (cuando se completa, agregar fecha y resultado)
+- 🔴 bloqueado → 🟡 pendiente (cuando se desbloquea, porque el blocker se resolvió)
+- Al resolver un TODO, revisar si otros TODOs que dependían de él cambian de 🔴 a 🟡.
+
+**Dependencias**: se expresan con "Bloqueado por: TODO-NNN" y "Bloquea: TODO-NNN". Cuando un blocker se resuelve, actualizar los dependientes.
+
+**Nuevo contenido**: asignar el siguiente ID en la sección correspondiente. Preferir absorber en un TODO existente antes de crear uno nuevo — mantener la lista corta y estratégica, no granular.
+
 ### Sistema de cross-references
 
 Los documentos se conectan mediante IDs con formato `{PREFIX}-{NNN}`:
 
 | Prefijo | Archivo | Ejemplo |
 |---------|---------|---------|
-| `TODO-NNN` | `TODO.md` | TODO-001, TODO-008 |
-| `CHG-NNN` | `CHANGELOG.md` | CHG-010, CHG-011 |
+| `TODO-NNN` | `TODO.md` | TODO-001, TODO-004 |
+| `CHG-NNN` | `CHANGELOG.md` | CHG-010, CHG-014 |
 | `EXP-xxx` | `docs/experiment-log.md` | EXP-001, EXP-DEBUG-A, VAL-003 |
 
 **Cómo referenciar**: usar el ID inline en cualquier doc. Ejemplo:
 
 ```
-En TODO.md:   "Bloqueado por: TODO-001. Refs: CHG-011, EXP-DEBUG-A"
-En CHANGELOG:  "Refs: TODO-008, EXP-DEBUG-A"
-En experiment-log: "Refs: CHG-012, TODO-005"
+En TODO.md:   "Depende de: TODO-001. Refs: CHG-011, EXP-DEBUG-A"
+En CHANGELOG:  "Refs: TODO-005, EXP-DEBUG-A"
+En experiment-log: "Refs: CHG-012, TODO-004"
 ```
-
-**Al crear contenido nuevo**: asignar el siguiente ID disponible en la secuencia del archivo correspondiente.
 
 ### Reglas
 
@@ -118,3 +135,7 @@ En experiment-log: "Refs: CHG-012, TODO-005"
 6. **Cross-refs**: al actualizar un doc, agregar refs a IDs relevantes de otros docs.
    Un problema nuevo puede requerir: `TODO.md` (pendiente), `CHANGELOG.md` (decisión), skill (guía operativa),
    `experiment-log.md` (resultado).
+7. **Propagación de estado**: cuando un TODO cambia de estado (especialmente a ✅), revisar:
+   - ¿Hay TODOs bloqueados por este que ahora se desbloquean?
+   - ¿Hay que crear un CHG en CHANGELOG.md para documentar la decisión/cambio?
+   - ¿Algún skill se ve afectado?
