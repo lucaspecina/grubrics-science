@@ -2,6 +2,9 @@
 
 Bitácora cronológica de runs, validaciones y aprendizajes. El más reciente al final.
 
+IDs: `VAL-NNN` (validaciones), `EXP-NNN` (experimentos), `DEBUG-x` (debugging).
+Cross-refs a `TODO.md` (TODO-NNN) y `CHANGELOG.md` (CHG-NNN).
+
 ---
 
 ## Fase 0 — Infraestructura y validaciones end-to-end
@@ -67,19 +70,17 @@ Bitácora cronológica de runs, validaciones y aprendizajes. El más reciente al
 
 El pipeline GRPO nunca completó un run exitoso. Se aplicaron múltiples fixes (JSON columns, OOM, async Judge, wandb crash, timing diagnostics, rubric saving) pero no se validaron en conjunto.
 
-Además, hay un **problema bloqueante con la carga de checkpoints**: tanto SFT como GRPO previo tardan demasiado al usarse como punto de partida para un run de GRPO. Causa probable: veRL guarda checkpoints FSDP como sharded state dicts (no formato HF), y `from_pretrained()` no puede cargarlos → fallback a descarga desde HuggingFace Hub.
+Además, hay un **problema bloqueante con la carga de checkpoints** (TODO-001): veRL guarda checkpoints FSDP como sharded state dicts (no formato HF), y `from_pretrained()` no puede cargarlos.
 
 ### Plan de debugging (en orden)
 
-| Fase | Qué | Criterio de éxito |
-|------|-----|-------------------|
-| Fase | Qué | Estado |
-|------|-----|--------|
-| **A** | GRPO end-to-end from scratch (2 steps, config prod, Qwen3-8B) | ✅ COMPLETADO 2026-03-02 |
-| **B** | Checkpoint + resume de GRPO | PENDIENTE |
-| **C** | SFT checkpoint → GRPO | PENDIENTE |
+| Fase | Qué | Estado | Ref |
+|------|-----|--------|-----|
+| **A** | GRPO end-to-end from scratch (2 steps, config prod, Qwen3-8B) | ✅ COMPLETADO 2026-03-02 | TODO-005 |
+| **B** | Checkpoint + resume de GRPO | 🔴 Bloqueado por TODO-001 | TODO-006 |
+| **C** | SFT checkpoint → GRPO | 🔴 Bloqueado por TODO-001 | TODO-007 |
 
-### [DEBUG-A] GRPO end-to-end from scratch — 2 steps ✅
+### [EXP-DEBUG-A] GRPO end-to-end from scratch — 2 steps ✅
 **Fecha**: 2026-03-02 | **Config**: `verl_grpo.yaml` + overrides (batch=4, mini=4, micro=2)
 **Resultado**: Pipeline completo funciona. 2/2 steps, 10.6 min total (~65s/step + 178s checkpoint save).
 **Métricas step 2**:
@@ -93,32 +94,8 @@ Además, hay un **problema bloqueante con la carga de checkpoints**: tanto SFT c
 - `prompt_length/mean=3.0` — sospechosamente bajo, pero el modelo genera rúbricas y el reward funciona. Puede ser una métrica interna de veRL.
 - `response_length/clip_ratio=0.83-0.92` — mayoría de respuestas llegan al límite de 512 tokens.
 
----
-
-## Pendiente
-
-| # | Run | Qué mide | Costo est. | Tiempo est. | Bloquea |
-|---|-----|----------|------------|-------------|---------|
-| 5 | **Precompute HealthBench full** (5K preguntas) | gold_scores para todo el training set | ~$45 | ~4h (paralelo) | Todo lo siguiente |
-| 6 | Precompute FrontierScience (60 preguntas) | gold_scores para eval cross-domain | ~$5 | ~1h | P3 |
-| 7 | Baselines HealthBench (B0, B1, B3) | Piso y techo de calidad de rúbricas | ~$25 | ~2h | P2a |
-| 8 | Zero-shot Qwen3-8B (B1) | Lower bound sin fine-tuning | $0 | ~1h GPU | P2a |
-| 9 | **SFT Qwen3-8B** (warm-up) | ¿SFT solo es suficiente? | ~$10 | ~2h H100 | P2a |
-| 10 | **RL Qwen3-8B con curriculum** | Nuestro método | ~$90 | ~10h H100 | P2a, P2b |
-| 11 | Eval checkpoint verifiable-only | Transfer verificable → abierto funciona? | $0 | ~30 min | P2b |
-| 12 | Eval en FrontierScience holdout | Generalización cross-domain | ~$5 | ~1h | P3 |
-
-**Costo total core (runs 5-12)**: ~$190
-**Costo total con extensiones**: ~$820 (ver `docs/research.md` sección P1 para policy training)
+Refs: CHG-010, CHG-012, TODO-005
 
 ---
 
-## Extensiones (post-core)
-
-| Extension | RQ | Costo | Requiere |
-|-----------|-----|-------|---------|
-| Open-only (sin curriculum) | Curriculum aporta vs directo? | ~$90 | - |
-| Policy training (2 runs D1-D2) | P1: rubric quality → policy quality | ~$180 | Implementar policy training |
-| Ablations A1-A4 (reward components) | Qué componentes importan? | ~$70 c/u | - |
-| Benchmark de Judges | Mejor Judge para el dominio? | ~$5-15 | - |
-| Inter-judge consistency | Rankings consistentes entre modelos? | ~$15 | - |
+Runs pendientes y extensiones: ver `TODO.md` (TODO-009 a TODO-021).

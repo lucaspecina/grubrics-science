@@ -87,7 +87,7 @@ REWARD_LAMBDA_DEFENSE=0.0 python run_grpo.py ...   # A3: sin defense_penalty
 
 1. Verificar que el checkpoint se guardó en `checkpoints/`
 2. Anotar el resultado en `docs/experiment-log.md` (qué RQ atacaba, config, resultado)
-3. Si hubo decisiones de diseño inesperadas, agregar a `docs/decisions.md`
+3. Si hubo decisiones de diseño inesperadas, agregar a `CHANGELOG.md` (CHG-NNN)
 4. Correr eval: ver skill `/eval-results`
 
 ## Issues conocidos

@@ -3,7 +3,11 @@
     "allow": [
       "WebSearch",
       "WebFetch(domain:verl.readthedocs.io)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(python3:*)",
+      "Bash(xargs grep:*)",
+      "Bash(mkdir:*)",
+      "Bash(rm:*)"
     ]
   }
 }

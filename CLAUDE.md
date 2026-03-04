@@ -42,22 +42,24 @@ Entrena Qwen3-8B con RL (GRPO) para generar rúbricas de evaluación médica y c
 - `notebooks/analyze_rubrics.ipynb` — análisis post-training
 - `scripts/` — download_datasets, run_baselines, validate_judge, analyze_precompute
 
-## Issues conocidos (no "arreglar" sin entender)
+## Comportamientos conocidos de veRL
 
-- **wandb + Ray + asyncio**: crash al final del run — try/except ya en `run_grpo.py`, es conocido
-- **veRL JSON columns**: parche auto-aplicado al cargar datos en rl_dataset.py
+Estos no son bugs sino comportamientos del framework que hay que tener en cuenta:
+
+- **veRL JSON columns**: parche auto-aplicado al cargar datos en `rl_dataset.py`
 - **Judge cache en RL**: siempre `max_cache_size=0` durante training (RAM unbounded si no)
-- **BLOQUEANTE — Carga de checkpoints en GRPO**: cargar un checkpoint (SFT o GRPO previo) como punto de partida para `run_grpo.py` tarda demasiado y no es viable. Causa probable: veRL guarda checkpoints FSDP como sharded state dicts, no formato HF; `from_pretrained()` no los reconoce y cae en descarga desde HuggingFace Hub. Afecta tanto SFT→GRPO como GRPO resume. **Sin resolver.**
-- **GRPO end-to-end nunca completó**: se aplicaron múltiples fixes (OOM, async Judge, wandb, timing) pero no se validaron en conjunto. Debugging en curso, ver `docs/experiment-log.md`.
-- **veRL auto-resume + total_training_steps absoluto**: veRL detecta checkpoints en `default_local_dir` y resume automáticamente. `total_training_steps` es absoluto (no relativo al checkpoint). Si el checkpoint está en step 5 y ponés `total_training_steps=2`, falla porque ya superó el target. **Borrar el directorio de checkpoints antes de un run from scratch con pocos steps.**
+- **veRL auto-resume + total_training_steps absoluto**: veRL detecta checkpoints en `default_local_dir` y resume automáticamente. `total_training_steps` es absoluto (no relativo al checkpoint). Borrar el directorio de checkpoints antes de un run from scratch con pocos steps.
+
+Para bugs y blockers activos ver `TODO.md`.
 
 ## Docs de referencia
 
+- `TODO.md` — source of truth de pendientes (IDs: `TODO-NNN`)
+- `CHANGELOG.md` — decisiones de diseño y cambios significativos (IDs: `CHG-NNN`)
 - `PROYECTO_ACTUAL.md` — descripción del proyecto para personas externas (mantener actualizado)
-- `@docs/research.md` — framing del paper, preguntas de investigación, landscape de la literatura
-- `@docs/experiment-log.md` — bitácora cronológica de runs y resultados
-- `@docs/decisions.md` — historial de decisiones de diseño DEC-NNN
-- `@docs/related-work.md` — revisión de literatura detallada
+- `docs/experiment-log.md` — bitácora cronológica de runs y resultados (IDs: `EXP-xxx`)
+- `docs/research.md` — framing del paper, preguntas de investigación, landscape de la literatura
+- `docs/related-work.md` — revisión de literatura detallada
 
 ## Mantenimiento de documentación y skills — CRÍTICO
 
@@ -66,16 +68,37 @@ que debería quedar documentada, actualizá el archivo correspondiente SIN esper
 el usuario lo pida.** Proponer las actualizaciones proactivamente es parte fundamental
 del workflow. No hacerlo degrada la calidad del proyecto entre sesiones.
 
-### Archivos a mantener
+### Archivos y cuándo actualizar
 
-| Archivo | Cuándo actualizar |
-|---------|-------------------|
-| `CLAUDE.md` | Nueva convención, issue conocido, cambio de stack o workflow |
-| `PROYECTO_ACTUAL.md` | Cambio significativo que afecte la descripción externa del proyecto |
-| `docs/experiment-log.md` | Resultado o aprendizaje de un experimento |
-| `docs/decisions.md` | Decisión de diseño, cambio de approach, por qué se descartó algo |
-| `docs/research.md` | Avance o respuesta a una pregunta de investigación |
-| `.claude/skills/*/SKILL.md` | Cambio en un workflow operativo (debug, precompute, run, eval, dataset, h100) |
+| Archivo | Qué contiene | Cuándo actualizar |
+|---------|-------------|-------------------|
+| `TODO.md` | Pendientes con IDs `TODO-NNN` | Nuevo bug, blocker, run pendiente, extensión |
+| `CHANGELOG.md` | Decisiones y cambios con IDs `CHG-NNN` | Decisión de diseño, cambio de approach, por qué se descartó algo |
+| `docs/experiment-log.md` | Resultados de runs con IDs `EXP-xxx` | Resultado o aprendizaje de un experimento |
+| `CLAUDE.md` | Convenciones del repo y workflow | Nueva convención, cambio de stack o workflow |
+| `PROYECTO_ACTUAL.md` | Descripción externa del proyecto | Cambio significativo que afecte la descripción pública |
+| `docs/research.md` | Framing del paper y preguntas de investigación | Avance o respuesta a una pregunta de investigación |
+| `.claude/skills/*/SKILL.md` | Guías operativas | Cambio en workflow operativo (debug, precompute, run, eval, dataset, h100) |
+
+### Sistema de cross-references
+
+Los documentos se conectan mediante IDs con formato `{PREFIX}-{NNN}`:
+
+| Prefijo | Archivo | Ejemplo |
+|---------|---------|---------|
+| `TODO-NNN` | `TODO.md` | TODO-001, TODO-008 |
+| `CHG-NNN` | `CHANGELOG.md` | CHG-010, CHG-011 |
+| `EXP-xxx` | `docs/experiment-log.md` | EXP-001, EXP-DEBUG-A, VAL-003 |
+
+**Cómo referenciar**: usar el ID inline en cualquier doc. Ejemplo:
+
+```
+En TODO.md:   "Bloqueado por: TODO-001. Refs: CHG-011, EXP-DEBUG-A"
+En CHANGELOG:  "Refs: TODO-008, EXP-DEBUG-A"
+En experiment-log: "Refs: CHG-012, TODO-005"
+```
+
+**Al crear contenido nuevo**: asignar el siguiente ID disponible en la secuencia del archivo correspondiente.
 
 ### Reglas
 
@@ -92,6 +115,6 @@ del workflow. No hacerlo degrada la calidad del proyecto entre sesiones.
 5. **Skills**: los archivos en `.claude/skills/*/SKILL.md` son guías operativas. Si un workflow cambia
    (nuevo paso, fix, problema descubierto, cambio de approach), actualizar el skill correspondiente.
    Skills disponibles: `debug-grpo`, `eval-results`, `new-dataset`, `precompute`, `run-experiment`, `h100-workflow`.
-6. **Scope completo**: al actualizar, pensar en TODOS los archivos afectados, no solo el más obvio.
-   Un problema nuevo puede requerir actualizar CLAUDE.md (issues conocidos), el skill (guía operativa),
-   el experiment-log (resultado), y decisions.md (por qué se tomó cierto approach).
+6. **Cross-refs**: al actualizar un doc, agregar refs a IDs relevantes de otros docs.
+   Un problema nuevo puede requerir: `TODO.md` (pendiente), `CHANGELOG.md` (decisión), skill (guía operativa),
+   `experiment-log.md` (resultado).
