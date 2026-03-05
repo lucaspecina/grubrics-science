@@ -4,15 +4,30 @@ description: Guía para diagnosticar y debuggear un run de GRPO. Usar cuando un 
 
 ## Estado actual del debugging
 
-El pipeline GRPO **nunca completó un run exitoso**. Se aplicaron fixes (OOM, async Judge, wandb, JSON columns) pero no se validaron juntos. Debugging en curso por fases:
+| Fase | Qué | Estado | Ref |
+|------|-----|--------|-----|
+| **A** | GRPO end-to-end from scratch (2 steps, config prod, Qwen3-8B) | ✅ COMPLETADO 2026-03-02 | TODO-004 |
+| **B** | Checkpoint + resume de GRPO | 🟡 PENDIENTE — nunca se probó | TODO-004 |
+| **C** | SFT checkpoint → GRPO | 🟡 PENDIENTE — nunca se probó | TODO-004 |
 
-| Fase | Qué | Estado |
-|------|-----|--------|
-| **A** | GRPO end-to-end from scratch (2 steps, config prod, Qwen3-8B) | ✅ COMPLETADO 2026-03-02 |
-| **B** | Checkpoint + resume de GRPO | PENDIENTE — bloqueado por formato FSDP vs HF |
-| **C** | SFT checkpoint → GRPO | PENDIENTE — misma causa que B |
+**Hallazgo (2026-03-05):** veRL guarda AMBOS formatos en cada checkpoint: FSDP shards + HF format (`huggingface/` subdir) + LoRA adapter (`lora_adapter/`). La hipótesis original de que "FSDP no es compatible con HF" era incorrecta. El resume nativo de veRL usa sus propios FSDP shards (no `from_pretrained`). Las Fases B y C probablemente funcionan — hay que probarlas. Refs: TODO-001, CHG-010.
 
-**Problema bloqueante (Fases B y C):** veRL guarda checkpoints FSDP como sharded state dicts (`model_world_size_1_rank_0.pt`), no formato HuggingFace. `from_pretrained()` no los reconoce y cae en descarga desde HF Hub → tardanza prohibitiva.
+## GPU integration tests (checkpoint)
+
+Antes de lanzar runs largos, validar mecánica de checkpoints:
+
+```bash
+conda activate RL
+pytest tests/test_gpu_checkpoint.py -v -s
+```
+
+Tests disponibles:
+- `test_load_base_model` — timing de carga de Qwen3-8B (¿cacheado o descarga?)
+- `test_load_existing_sft_checkpoint` — carga SFT real + aplica LoRA fresco (Phase C path)
+- `test_sft_save_load_roundtrip` — save/load completo con medición de I/O
+- `test_grpo_run_and_resume` — mini GRPO real: 2 steps → save → resume a step 4 (Phase B)
+
+El test de resume ejecuta `run_grpo.py` real (necesita data + Judge API).
 
 ## Prerequisitos para cualquier run
 
@@ -175,14 +190,13 @@ Buscar en los logs de `STEP_TIMING`:
 
 ### Carga de checkpoint tarda demasiado
 
-**Problema conocido — parcialmente resuelto.** veRL guarda FSDP shards, no formato HF.
+**Notebook** (`analyze_rubrics.ipynb`): RESUELTO — usa `lora_adapter/` (peft format, ~682MB) para carga rápida.
 
-**Notebook** (`analyze_rubrics.ipynb`): RESUELTO — usa `lora_adapter/` (peft format) para carga rápida.
+**Training resume (Phase B)**: veRL auto-detecta checkpoints en `default_local_dir` y carga FSDP shards con su propio `FSDPCheckpointManager`. NO usa `from_pretrained()` para el resume — primero carga el base model desde `model.path` (HF cache), luego sobreescribe con los shards. Debería funcionar, nunca se probó.
 
-**Training resume** (Fases B y C): SIN RESOLVER. `from_pretrained()` no reconoce FSDP format → descarga desde HF Hub. Posibles soluciones a investigar:
-- Mecanismo de resume nativo de veRL (no `model.path`)
-- Conversor FSDP → HF antes de cargar
-- Para SFT: verificar que `save_pretrained()` genera todos los archivos necesarios
+**SFT→GRPO (Phase C)**: Se cambia `model.path` al directorio del SFT. `from_pretrained()` carga el modelo mergeado, veRL aplica LoRA fresco encima. Debería funcionar.
+
+Correr `pytest tests/test_gpu_checkpoint.py -v -s` para validar ambos paths.
 
 ### DataLoader worker killed al final
 
