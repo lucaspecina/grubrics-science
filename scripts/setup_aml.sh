@@ -11,10 +11,11 @@ set -e
 MODE="${1:-test}"
 echo "=== setup_aml.sh mode=$MODE ==="
 
-# ── Install dependencies ──
-echo "--- Installing dependencies ---"
-pip install -r requirements.txt 2>&1 | tail -3
-pip install verl vllm 2>&1 | tail -3
+# ── Install remaining dependencies ──
+# Core deps (torch, vllm, verl, flash-attn) come from the Docker image.
+# Only install lightweight deps not in the image.
+echo "--- Installing project dependencies ---"
+pip install -q openai python-dotenv pyarrow 2>&1 | tail -3
 
 # ── Prepare training data ──
 echo "--- Preparing data ---"
