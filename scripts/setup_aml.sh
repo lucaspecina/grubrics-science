@@ -19,7 +19,7 @@ pip install verl vllm 2>&1 | tail -3
 # ── Prepare training data ──
 echo "--- Preparing data ---"
 if [ ! -f data/processed/mixed_train.parquet ]; then
-    python -m grubrics_science.data.prepare preset --only-cached
+    python -m grubrics_science.data.prepare preset
     echo "Data prepared."
 else
     echo "Data already exists."
