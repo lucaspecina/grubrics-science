@@ -295,10 +295,10 @@ class TestGRPOResume:
 
         if not Path("data/processed/mixed_train.parquet").exists():
             pytest.skip("No training data — run: python -m grubrics_science.data.prepare preset")
-        if not os.environ.get("AZURE_OPENAI_ENDPOINT"):
-            pytest.skip("No AZURE_OPENAI_ENDPOINT — Judge API not available")
-        if not os.environ.get("AZURE_OPENAI_API_KEY"):
-            pytest.skip("No AZURE_OPENAI_API_KEY — Judge API not available")
+        if not os.environ.get("AZURE_API_BASE"):
+            pytest.skip("No AZURE_API_BASE — Judge API not available")
+        if not os.environ.get("AZURE_API_KEY"):
+            pytest.skip("No AZURE_API_KEY — Judge API not available")
 
     def test_grpo_run_and_resume(self):
         """Phase B: run 2 steps, save checkpoint, resume to step 4."""

@@ -30,7 +30,7 @@ Entrena Qwen3-8B con RL (GRPO) para generar rúbricas de evaluación médica y c
 - Presets de datos: `configs/training_presets.yaml` (`open_only` default, `verifiable_only`, `curriculum`, `full_mix`)
 - Checkpoints: `checkpoints/grubrics-transfer/`
 - Cache precompute: `data/cache/*.jsonl` — **NO borrar**, cada run cuesta $
-- Vars de entorno: `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `JUDGE_MODEL`, `REWARD_LAMBDA_*`
+- Vars de entorno: `AZURE_API_BASE`, `AZURE_API_KEY`, `AZURE_API_VERSION`, `RUBRIC_JUDGE_MODEL`, `REWARD_LAMBDA_*`
 - Tests: `pytest tests/ -v` (181 tests, todos deben pasar antes de commitear)
 
 ## Dónde está cada cosa

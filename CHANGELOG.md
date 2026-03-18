@@ -153,3 +153,25 @@ Mapeo de IDs renumerados:
 - TODO-001..004 (bugs) + TODO-005..008 (debugging) → TODO-001 (framework), TODO-002 (profiling), TODO-003 (judge), TODO-004 (checkpoints), TODO-005 (config prod)
 - TODO-009..016 (runs) → TODO-006..010
 - TODO-017..021 (extensiones) → TODO-011
+
+---
+
+## [CHG-015] 2026-03-18 — Decisión de framework: seguir con veRL
+
+Investigación completa de alternativas (TODO-001). Conclusión: **seguir con veRL**.
+
+**Frameworks evaluados:**
+- **TRL**: ~3x más lento que veRL, vLLM+LoRA buggy. Descartado.
+- **OpenRLHF**: viable como backup, `--save_hf_ckpt` es plus, pero migración no justificada.
+- **prime-rl (Prime Intellect)**: LoRA saving roto (issue #1707 abierto sin respuesta), v0.4 con breaking changes cada 2-3 semanas, no usa HuggingFace PEFT (implementación custom), training hangs (issue #1713), arquitectura async off-policy introduce staleness en reward. **Descartado.**
+
+**Hallazgos clave:**
+- veRL guarda AMBOS formatos en cada checkpoint: FSDP shards + HuggingFace (`huggingface/` subdir) + LoRA adapter (`lora_adapter/`). La hipótesis "FSDP incompatible con HF" era incorrecta.
+- Hybrid engine (FSDP + vLLM en 1 GPU) es feature clave para single H100.
+- Workarounds aplicados en veRL son menores (~100 líneas de patches one-time).
+- ~80% del código es framework-agnostic (adapters, judge, reward, precompute, alignment).
+
+**Descartado**: migrar a prime-rl (inmaduro, bugs críticos, 15-25h de esfuerzo para llegar al mismo punto), migrar a TRL (lento).
+
+**Revisitar si**: veRL bloquea en multi-GPU o los workarounds se acumulan. OpenRLHF como primer backup.
+Refs: TODO-001, TODO-004

@@ -10,19 +10,22 @@ Source of truth para pendientes del proyecto. Cada item tiene un ID único `TODO
 
 Responder estas preguntas antes de ejecutar runs de producción. Informan todas las decisiones concretas.
 
-### TODO-001 🟡 Framework y arquitectura de training
+### TODO-001 ✅ Framework y arquitectura de training (resuelto 2026-03-18)
 
-¿veRL es el framework adecuado? ¿Cómo escalamos? ¿Los problemas de checkpoints son inherentes al framework o configurables?
+**Conclusión: seguir con veRL.** Los problemas son puntuales, no síntomas de un framework inadecuado.
 
-**Preguntas a responder:**
-- veRL vs TRL vs OpenRLHF para GRPO + LoRA — tradeoffs de cada uno
-- ¿Cómo maneja cada framework los checkpoints? veRL usa FSDP sharded state dicts incompatibles con formato HF — ¿es configurable o inherente?
-- ¿Multi-GPU requiere cambio de framework o solo config?
-- ¿El flujo SFT → GRPO es natural en cada framework, o requiere conversión?
-- ¿Cuál tiene mejor soporte para vLLM rollout en H100?
-- ¿Se pueden guardar checkpoints en formato HF directamente? ¿Convertir post-hoc?
+**Análisis realizado:**
+- **veRL vs TRL**: TRL ~3x más lento, vLLM+LoRA buggy. Descartado.
+- **veRL vs OpenRLHF**: OpenRLHF viable como backup (`--save_hf_ckpt`), pero no justifica migración ahora.
+- **veRL vs prime-rl**: prime-rl tiene LoRA saving roto (issue #1707), v0.4 inestable, no usa PEFT, training hangs (issue #1713). Descartado.
+- **Checkpoints**: veRL guarda AMBOS formatos (FSDP shards + HuggingFace en `huggingface/` subdir + LoRA en `lora_adapter/`). La hipótesis "FSDP incompatible con HF" era incorrecta — nunca se probó.
+- **Multi-GPU**: veRL escala nativamente con FSDP, no requiere cambio de framework.
+- **SFT→GRPO**: cambiar `model.path` al dir del SFT, `from_pretrained()` lo carga, veRL crea LoRA fresco.
+- **Hybrid engine** (FSDP + vLLM en 1 GPU): feature clave de veRL para single H100.
 
-**Contexto**: veRL fue elegido por integración con vLLM (CHG-003), pero los checkpoints FSDP causan problemas de carga (TODO-004) y la integración con wandb no funciona (TODO-002). La pregunta es si estos son problemas puntuales a resolver o síntomas de un framework que no encaja.
+**Workarounds en veRL son menores**: ~100 líneas de patches one-time (JSON columns, wandb cleanup), ya aplicados.
+
+Refs: CHG-015
 
 ### TODO-002 🟡 Profiling y observabilidad
 
@@ -55,17 +58,18 @@ Responder estas preguntas antes de ejecutar runs de producción. Informan todas 
 
 ## Pipeline milestones
 
-### TODO-004 🔴 Checkpoint load/resume funcional
+### TODO-004 🟡 Checkpoint load/resume funcional
 
 Cargar checkpoints (SFT→GRPO y GRPO resume) sin que falle o tarde minutos.
 
 **Estado actual:**
 - ✅ Fase A: GRPO from scratch funciona (EXP-DEBUG-A, 2026-03-02)
-- 🔴 Fase B (GRPO resume): no probado. veRL guarda FSDP shards (`model_world_size_1_rank_0.pt`), `from_pretrained()` no los reconoce → fallback a descarga de HF Hub.
-- 🔴 Fase C (SFT→GRPO): no probado. `run_sft.py` guarda formato HF, pero la carga en veRL puede ser lenta (modelo se carga 2x: FSDP + vLLM).
+- 🟡 Fase B (GRPO resume): nunca probado. veRL guarda FSDP shards + HF format + LoRA adapter. Resume usa `FSDPCheckpointManager` (no `from_pretrained`). GPU tests creados (`test_gpu_checkpoint.py::test_grpo_run_and_resume`).
+- 🟡 Fase C (SFT→GRPO): nunca probado. Cambiar `model.path` al SFT dir. GPU test creado (`test_gpu_checkpoint.py::test_load_existing_sft_checkpoint`).
 
-**Depende de**: TODO-001 — la solución puede ser cambiar framework, convertir checkpoints, o usar resume nativo de veRL.
-Refs: CHG-010, CHG-012
+**Decisión de framework**: seguir con veRL (TODO-001 ✅). Usar resume nativo de veRL para Fase B, `from_pretrained` para Fase C.
+**Siguiente paso**: correr GPU tests en H100 (`pytest tests/test_gpu_checkpoint.py -v -s`).
+Refs: CHG-010, CHG-012, CHG-015
 
 ### TODO-005 🟡 Configuración de producción optimizada
 
