@@ -52,7 +52,8 @@ def dir_size_mb(path: Path) -> float:
 
 def gpu_mem_gb() -> str:
     alloc = torch.cuda.memory_allocated() / 1e9
-    total = torch.cuda.get_device_properties(0).total_mem / 1e9
+    props = torch.cuda.get_device_properties(0)
+    total = getattr(props, "total_memory", getattr(props, "total_mem", 0)) / 1e9
     return f"{alloc:.1f}/{total:.0f} GB"
 
 
