@@ -21,6 +21,7 @@ actor_rollout_ref:
   model:
     path: Qwen/Qwen3-8B
     trust_remote_code: true
+    dtype: bfloat16
     enable_gradient_checkpointing: true
     use_remove_padding: true
     # LoRA config
