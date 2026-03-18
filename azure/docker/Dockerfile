@@ -1,18 +1,21 @@
 FROM nvidia/cuda:12.9.1-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV PATH="/opt/conda/bin:${PATH}"
 
-# System deps
+# System deps + Python 3.12
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git wget curl build-essential ninja-build \
+    software-properties-common \
     libcudnn9-cuda-12 libcudnn9-dev-cuda-12 \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y python3.12 python3.12-dev python3.12-venv \
     && rm -rf /var/lib/apt/lists/*
 
-# Miniconda + Python 3.12
-RUN wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/mc.sh && \
-    bash /tmp/mc.sh -b -p /opt/conda && rm /tmp/mc.sh && \
-    conda install -y python=3.12 && conda clean -afy
+# Set Python 3.12 as default + install pip
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 && \
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1 && \
+    curl -sS https://bootstrap.pypa.io/get-pip.py | python3.12
 
 # PyTorch (must be installed FIRST)
 RUN pip install --no-cache-dir \
@@ -32,9 +35,6 @@ RUN pip install --no-cache-dir \
     peft accelerate datasets \
     wandb scipy pandas pyyaml \
     openai python-dotenv pyarrow \
-    hydra-core omegaconf
-
-# Test deps
-RUN pip install --no-cache-dir pytest
+    hydra-core omegaconf pytest
 
 WORKDIR /workspace
