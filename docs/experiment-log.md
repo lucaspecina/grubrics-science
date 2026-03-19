@@ -136,4 +136,52 @@ Refs: CHG-016, TODO-004
 
 ---
 
+## Fase 2 — Profiling y optimización
+
+### [EXP-PROF-1A] Profiling baseline — batch=8, concurrent=10
+**Fecha**: 2026-03-19 | **Config**: `verl_grpo.yaml` + overrides (batch=8, mini=8, micro=4, save_freq=5, test_freq=0, val_before_train=false)
+**Duración**: 578s total (275s startup + 303s training)
+
+**Resultado**: GPU domina sobre Judge. Reward API no es bottleneck.
+
+**Timing por step (segundos)**:
+
+| Componente | Step 1 (warmup) | Steps 2-4 (steady) | Step 5 (+save) |
+|-----------|-----------------|---------------------|----------------|
+| gen (vLLM) | 21.6 | 11.4 | 12.0 |
+| update_actor | 14.4 | 10.4 | 10.4 |
+| update_weights | 8.4 | 8.0 | 7.6 |
+| old_log_prob | 6.0 | 2.7 | 2.7 |
+| save_checkpoint | — | — | 121.9 |
+| **total** | **50.4** | **32.5** | **154.6** |
+
+**Reward (Judge API per worker)**:
+
+| Step | wall | api_avg | sem_wait | calls |
+|------|------|---------|----------|-------|
+| 1 | 9.8s | 6.2s | 0.37s | 11 |
+| 2 | 8.0s | 5.9s | 0.00s | 9 |
+| 3 | 10.2s | 5.9s | 0.00s | 8 |
+| 4 | 8.0s | 6.4s | 0.00s | 6 |
+
+**Recursos**: VRAM 33.2/95.8 GB (35%), CPU RAM 56.4/320 GB (18%)
+
+**Hallazgos clave**:
+1. GPU = 75% del step (gen 35% + update_actor 32% + update_weights 25%)
+2. Reward async (Ray workers), NO en critical path. sem_wait ≈ 0.
+3. Checkpoint save = 122s (3.7× step time). save_freq alto es crítico.
+4. Startup = 275s (modelo + FSDP + vLLM + CUDA graphs). Costo fijo, se amortiza.
+5. VRAM con 65% headroom → se puede subir gpu_memory_utilization y micro_batch.
+6. Step 1 warmup: gen tarda 2× por compilación de CUDA graphs.
+
+**Impacto en plan de optimización**: se descarta subir JUDGE_MAX_CONCURRENT (era la optimización principal estimada). El foco cambia a optimización GPU: micro_batch sizes, gpu_memory_utilization.
+
+**Fix descubierto**: `ppo_mini_batch_size: 64` era bug (debe ser ≤ train_batch_size). Corregido a 24.
+
+Refs: TODO-002, TODO-003, TODO-005, CHG-011, CHG-017
+
+**Documento de referencia**: `docs/performance-profile.md` (referencia viva, mantener actualizado)
+
+---
+
 Runs pendientes y extensiones: ver `TODO.md` (TODO-006 a TODO-011).

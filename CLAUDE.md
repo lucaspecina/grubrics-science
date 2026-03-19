@@ -77,6 +77,7 @@ Para reproducir el entorno desde cero: `docs/h100-setup.md`
 
 - `TODO.md` — source of truth de pendientes (IDs: `TODO-NNN`)
 - `CHANGELOG.md` — decisiones de diseño y cambios significativos (IDs: `CHG-NNN`)
+- `docs/performance-profile.md` — **referencia viva de profiling, bottlenecks y optimizaciones** (mantener actualizado)
 - `PROYECTO_ACTUAL.md` — descripción del proyecto para personas externas (mantener actualizado)
 - `docs/experiment-log.md` — bitácora cronológica de runs y resultados (IDs: `EXP-xxx`)
 - `docs/research.md` — framing del paper, preguntas de investigación, landscape de la literatura

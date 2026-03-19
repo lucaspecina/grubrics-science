@@ -198,3 +198,22 @@ TODO-004 resuelto. Las 3 fases de debugging del pipeline GRPO están completadas
 **Observación**: checkpoint save tarda ~165-184s/step (~80% del step time con batch=4). Esto es el siguiente bottleneck a investigar (TODO-005).
 
 Refs: TODO-004, EXP-DEBUG-B, EXP-DEBUG-C
+
+---
+
+## [CHG-017] 2026-03-19 — Profiling cambia prioridad de optimizaciones
+
+EXP-PROF-1A (batch=8, 5 steps, H100 NVL) reveló que **GPU domina sobre Judge API** — contrario a la hipótesis original (CHG-011).
+
+**Hallazgo clave**: el reward (Judge API) se computa async vía Ray workers y termina antes que la GPU. sem_wait ≈ 0s. El bottleneck es compute GPU (gen 35% + update_actor 32% + update_weights 25%).
+
+**Impacto en optimizaciones de CHG-011**:
+- ~~`JUDGE_MAX_CONCURRENT=24`~~ → **descartado** (sem_wait ya es 0, sin efecto)
+- `gpu_memory_utilization`, micro-batch sizes → **priorizados** (VRAM 35% usada, 65% headroom)
+- `save_freq` → **confirmado como crítico** (checkpoint save = 122s = 3.7× step time)
+
+**Fix descubierto**: `ppo_mini_batch_size: 64` era bug en verl_grpo.yaml (debe ser ≤ train_batch_size). Corregido a 24.
+
+**Nuevo artefacto**: `docs/performance-profile.md` — documento de referencia vivo para profiling y optimizaciones.
+
+Refs: TODO-002, TODO-003, TODO-005, EXP-PROF-1A
