@@ -183,7 +183,7 @@ class TestSFTtoGRPO:
             with torch.no_grad():
                 out = model(**inputs)
 
-        assert out.logits.shape[-1] == tokenizer.vocab_size
+        assert out.logits.shape[-1] == model.config.vocab_size
         print(f"  forward pass:  OK (logits shape {out.logits.shape})")
         print(f"{'='*60}")
 
