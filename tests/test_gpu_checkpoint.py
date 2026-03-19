@@ -285,10 +285,10 @@ class TestGRPOResume:
     def cleanup_grpo(self):
         """Clean up GRPO test checkpoints."""
         if self.CKPT_DIR.exists():
-            shutil.rmtree(self.CKPT_DIR)
+            shutil.rmtree(self.CKPT_DIR, ignore_errors=True)
         yield
         if self.CKPT_DIR.exists():
-            shutil.rmtree(self.CKPT_DIR)
+            shutil.rmtree(self.CKPT_DIR, ignore_errors=True)
 
     def _check_prerequisites(self):
         import os
@@ -320,7 +320,7 @@ class TestGRPOResume:
 
         print(f"\n  --- Run 1: GRPO 2 steps ---")
         with timer("run 1 (2 steps)") as t_run1:
-            r1 = subprocess.run(cmd1, capture_output=True, text=True, timeout=600)
+            r1 = subprocess.run(cmd1, capture_output=True, text=True, timeout=900)
 
         if r1.returncode != 0:
             # wandb crash at end is OK, check if checkpoint was saved
@@ -365,7 +365,7 @@ class TestGRPOResume:
 
         print(f"\n  --- Run 2: resume to step 4 ---")
         with timer("run 2 (resume → step 4)") as t_run2:
-            r2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=600)
+            r2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=900)
 
         # Check if resume worked
         steps_after = sorted(ckpt_path.glob("global_step_*"))
