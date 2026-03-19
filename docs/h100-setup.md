@@ -234,10 +234,15 @@ python scripts/validate_e2e_pipeline.py
 **Causa**: TRL 0.15.2 con `remove_unused_columns=false` pasa columnas no-tensor al DataCollator
 **Fix**: Usar `training.remove_unused_columns=true` en el override (o en el config)
 
+### PYTORCH_CUDA_ALLOC_CONF expandable_segments
+**Síntoma**: `AssertionError: Expandable segments are not compatible with memory pool`
+**Causa**: vLLM 0.17 usa `CuMemAllocator` que es incompatible con `expandable_segments:True` (pytorch/pytorch#147851)
+**Fix**: NO usar `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` con vLLM 0.17
+
 ### Checkpoint save time
-**Observación**: Checkpoint save tarda ~150-185s por step (~80% del step time con batch=4)
+**Observación**: Checkpoint save tarda ~122-185s por step
 **Causa**: veRL guarda 3 formatos: FSDP shard + HuggingFace + LoRA adapter
-**Status**: No es un bug. Para producción, usar `save_freq` alto (ej: 200)
+**Status**: No es un bug. Para producción, usar `save_freq` alto (ej: 50-200)
 
 ---
 

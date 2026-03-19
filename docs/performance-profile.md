@@ -128,10 +128,10 @@ step 5: 154.6s (incluye checkpoint save de 121.9s)
 
 ### Hallazgos
 
-- **Semáforo NO es bottleneck**: sem_wait ≈ 0s en estado estable. Con batch=8 (48 API calls/step) y concurrent=10, hay capacidad de sobra.
-- **API latency**: ~6s promedio por call (Azure OpenAI). Es la latencia del modelo, no se puede optimizar desde nuestro lado.
-- **Reward es async**: los Ray RewardLoopWorkers computan rewards en paralelo con el GPU phase. El reward termina antes que la GPU (~10s reward vs ~22-25s gpu_phase).
-- **A batch=24**: 144 calls/step. Con concurrent=10, reward_wall subiría a ~25-30s. Si gpu_phase también escala, probablemente siguen balanceados. Monitorear.
+- **Batch=8**: Semáforo NO es bottleneck (sem_wait ≈ 0s). 48 calls/step con concurrent=10 tiene capacidad de sobra.
+- **Batch=24**: **Reward ES bottleneck** — pero por **rate limiting de Azure (429 errors), no por el semáforo**. reward_wall=127s vs gpu_phase=37-49s. sem_wait sube a 12s avg (63s max) por backpressure de retries.
+- **Azure S0 tier**: token rate limit causa 429 errors con 144 calls/step + concurrent=10. El retry logic (espera 1s + retry) amplifica la latencia: api_avg sube de 6s (batch=8) a 20.6s (batch=24).
+- **Reward es async**: los Ray RewardLoopWorkers computan rewards en paralelo con el GPU phase. A batch=8 terminan antes que la GPU; a batch=24, la GPU termina antes que el reward.
 
 ### Costo API por step
 
@@ -200,7 +200,7 @@ Sync de pesos entre FSDP (training) y vLLM (rollout). Es el costo del hybrid eng
 | `gpu_memory_utilization` | 0.5 → 0.6+ | Más VRAM para vLLM → gen más rápido | 🟡 Pendiente |
 | `ppo_micro_batch_size_per_gpu` | 4 → 8 | Menos micro-batches → update más rápido | 🟡 Pendiente |
 | `log_prob_micro_batch_size_per_gpu` | 4 → 8 | Menos micro-batches → old_log_prob más rápido | 🟡 Pendiente |
-| `PYTORCH_CUDA_ALLOC_CONF` | (nada) → `expandable_segments:True` | Menos fragmentación VRAM | 🟡 Pendiente |
+| ~~`PYTORCH_CUDA_ALLOC_CONF`~~ | ~~`expandable_segments:True`~~ | **Incompatible con vLLM 0.17** (CuMemAllocator assert) | ❌ Descartado |
 | `save_freq` | 200 (ya) | OK para producción | ✅ |
 
 ### Tier 2 — Requiere validar con datos
@@ -209,13 +209,15 @@ Sync de pesos entre FSDP (training) y vLLM (rollout). Es el costo del hybrid eng
 |--------|-----------|---------|
 | `gpu_memory_utilization` → 0.7 | Solo si 0.6 no causa OOM | gen más rápido |
 | `enable_chunked_prefill: true` | Si gen sigue dominando | Mejor prefill |
-| `JUDGE_MAX_CONCURRENT` → 24 | Solo si batch=24 muestra sem_wait > 0 | Reward más rápido |
+| Reducir `n: 6 → 4` | Si rate limit sigue siendo problema | -33% API calls (96 vs 144/step) |
+| Upgrade Azure tier S0 → S1+ | Contactar Azure | Elimina 429 errors |
 
 ### Descartadas por profiling
 
 | Optimización original (CHG-011) | Por qué se descarta |
 |----------------------------------|---------------------|
 | `JUDGE_MAX_CONCURRENT=24` (batch=8) | sem_wait=0, reward no es bottleneck |
+| `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` | **Incompatible con vLLM 0.17** — CuMemAllocator assertion (pytorch/pytorch#147851) |
 | `free_cache_engine: false` | Riesgo de OOM, ganancia incierta |
 | `use_dynamic_bsz: true` | Complejidad, batch fijo es más predecible |
 
@@ -225,11 +227,11 @@ Sync de pesos entre FSDP (training) y vLLM (rollout). Es el costo del hybrid eng
 
 | Dataset | Filas precomputadas | Batch máximo viable |
 |---------|--------------------|--------------------|
-| HealthBench | 9 | batch=8 |
+| HealthBench | **88** (actualizado 2026-03-19) | batch=24+ |
 | MedQA | 0 (sin cache) | — |
 | MedMCQA | 0 (sin cache) | — |
 
-**Blocker para batch=24**: necesitamos ≥24 filas precomputadas (idealmente 100+). Ver TODO-006.
+**Resuelto**: 88 entries precomputadas localmente (~$5 API, ~15 min). Cache en `data/cache/healthbench_precompute.jsonl`.
 
 ---
 
@@ -238,13 +240,50 @@ Sync de pesos entre FSDP (training) y vLLM (rollout). Es el costo del hybrid eng
 | ID | Fecha | Config | Steps | Batch | Key finding |
 |----|-------|--------|-------|-------|-------------|
 | EXP-PROF-1A | 2026-03-19 | baseline, concurrent=10 | 5 | 8 | GPU domina (75%), reward async no bloquea, VRAM 35% |
+| EXP-PROF-2 (fail) | 2026-03-19 | +expandable_segments | 0 | 24 | `expandable_segments` incompatible con vLLM 0.17 |
+| EXP-PROF-2b | 2026-03-19 | micro=8, gpu_mem=0.6 | 5 | 24 | Reward bottleneck por Azure 429. GPU sub-lineal. VRAM=33GB (igual que batch=8!) |
 
 ---
 
-## 10. Preguntas abiertas
+## 10. Scaling: batch=8 vs batch=24
 
-- [ ] ¿Cómo escala el step time con batch=24? (necesita más datos precomputados)
+| Métrica | Batch=8 (Run 1A) | Batch=24 (Run 2b) | Factor |
+|---------|-----------------|-------------------|--------|
+| gen (steady) | 11.4s | 77-138s | 7-12x (inflado por reward wait) |
+| update_actor | 10.4s | 16.0s | 1.5x (sub-lineal, micro=8 ayudó) |
+| old_log_prob | 2.7s | 4.1s | 1.5x (sub-lineal) |
+| update_weights | 8.0s | 8.0s | 1.0x (constante, solo depende de model size) |
+| reward_wall | 8-10s | **71-136s** | 7-14x (rate limit 429!) |
+| sem_wait | 0s | 1.5-12s avg | Backpressure por retries |
+| api_avg | 6.2s | 17-22s | 3x (retries 429) |
+| API calls/step | ~48 | ~144 | 3x |
+| checkpoint save | 122s | 130s | ~igual |
+| VRAM | 33.2 GB | **33.2 GB** | **igual** (!) |
+| step (steady) | 32.5s | **105-167s** | 3-5x |
+
+**Conclusiones**:
+1. **GPU escala sub-linealmente**: update_actor 1.5x, update_weights constante. Eficiente.
+2. **Bottleneck a batch=24 es Azure S0 rate limit** (429 errors). Sin rate limit, step sería ~105s.
+3. **VRAM no cambia** entre batch=8 y batch=24 (33.2 GB). El headroom es del modelo, no del batch.
+4. **gen time se infla** porque veRL espera rewards dentro del gen phase. Con rate limit, gen absorbe la espera.
+
+### Proyección a producción (200 steps, batch=24)
+
+| Escenario | Step time | Total | GPU cost | API cost |
+|-----------|-----------|-------|----------|----------|
+| Con rate limit S0 (actual) | ~135s | 7.5h | ~$52 | ~$144 |
+| Sin rate limit (upgrade tier) | ~105s | 5.8h | ~$41 | ~$144 |
+| Sin rate limit + n=4 | ~85s (est.) | 4.7h | ~$33 | ~$96 |
+
+---
+
+## 11. Preguntas abiertas
+
+- [x] ¿Cómo escala el step time con batch=24? → GPU sub-lineal (~1.7x), reward explota por rate limit
+- [ ] ¿Upgrade de Azure tier (S0→S1+) elimina los 429 errors?
+- [ ] ¿Reducir n de 6 a 4 basta para evitar rate limit con S0?
 - [ ] ¿update_weights se puede reducir con `update_weights_bucket_megabytes` más alto?
 - [ ] ¿El checkpoint save se puede optimizar guardando solo LoRA adapter (sin FSDP full)?
 - [ ] ¿`enforce_eager: true` (skip CUDA graphs) reduce startup significativamente? (trade-off: gen más lento)
-- [ ] ¿Cuál es el impacto real de `gpu_memory_utilization: 0.6` en gen time?
+- [x] ¿`gpu_memory_utilization: 0.6` funciona? → Sí, vLLM inicia OK (Run 2b)
+- [x] ¿`expandable_segments:True` es compatible? → **NO**, incompatible con vLLM 0.17

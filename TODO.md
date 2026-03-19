@@ -46,18 +46,26 @@ Refs: CHG-015
 **Referencia**: `docs/performance-profile.md` (documento vivo)
 Refs: EXP-PROF-1A, CHG-017
 
-### TODO-003 ✅ Judge pipeline — paralelismo y throughput (resuelto 2026-03-19)
+### TODO-003 🟢 Judge pipeline — paralelismo y throughput (parcialmente resuelto 2026-03-19)
 
-**Resultado de EXP-PROF-1A**: el Judge NO es el bottleneck.
+**Resultado depende del batch size**:
+- **Batch=8** (EXP-PROF-1A): Judge NO es bottleneck. sem_wait=0, reward termina antes que GPU.
+- **Batch=24** (EXP-PROF-2b): **Judge SÍ es bottleneck** — pero por **rate limiting de Azure S0**, no por el semáforo. reward_wall=127s vs gpu_phase=37-49s. Azure devuelve 429 errors con 144 calls/step.
 
 **Respuestas:**
-- ✅ Flujo: batch=8 × K=6 = 48 API calls/step, distribuidas entre Ray RewardLoopWorkers
-- ✅ `max_concurrent=10` NO se satura — sem_wait ≈ 0s. Capacidad de sobra a batch=8.
-- ✅ Judge procesa en paralelo (async Ray workers). Los workers computan rewards mientras la GPU ejecuta el siguiente ciclo.
-- ✅ Tiempo: reward=8-10s (async) vs GPU=32.5s/step. **GPU domina 3-4x sobre reward.**
-- API latency: ~6s promedio por call (Azure OpenAI). No optimizable desde nuestro lado.
-- Judge local: no necesario para batch=8. Reevaluar si batch=24 muestra bottleneck.
-- Batching: ya implementado (1 call evalúa N respuestas contra 1 rúbrica).
+- ✅ Flujo: batch × K=6 rollouts = N API calls, distribuidas entre Ray RewardLoopWorkers
+- ✅ Judge procesa en paralelo (async Ray workers)
+- ✅ A batch=8: concurrent=10 sobra. A batch=24: rate limit de Azure es el blocker
+- ✅ API latency: ~6s (sin rate limit) → ~20s (con 429 retries a batch=24)
+- ⚠️ Azure S0 tier tiene token rate limit que se excede con 144 calls/step
+
+**Palancas para resolver**:
+- Upgrade Azure tier S0 → S1+ (elimina 429s)
+- Reducir n: 6 → 4 (96 calls/step, -33%)
+- Reducir batch: 24 → 16 (96 calls/step)
+- Judge local (elimina dependencia de Azure)
+
+Refs: EXP-PROF-1A, EXP-PROF-2b, CHG-017
 
 **Nota**: a batch=24 (144 calls), reward_wall subiría a ~25-30s con concurrent=10. Podría acercarse al gpu_phase. Monitorear cuando tengamos datos suficientes.
 

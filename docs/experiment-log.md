@@ -182,6 +182,44 @@ Refs: TODO-002, TODO-003, TODO-005, CHG-011, CHG-017
 
 **Documento de referencia**: `docs/performance-profile.md` (referencia viva, mantener actualizado)
 
+### [EXP-PROF-2] Profiling batch=24 + Tier 1 optimizations
+**Fecha**: 2026-03-19 | **Config**: verl_grpo.yaml + overrides (batch=24, mini=24, micro=8, log_prob_micro=8, gpu_mem=0.6)
+**Duración**: 986s total (16.4 min, 5 steps)
+
+**Run 2a (fail)**: `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` causa `AssertionError` en vLLM 0.17 CuMemAllocator. Incompatible.
+
+**Run 2b (éxito)**:
+
+| Componente | Step 1 (warmup) | Steps 2-4 (steady) | Step 5 (+save) |
+|-----------|-----------------|---------------------|----------------|
+| gen | 140.8s | 77-138s | 140.0s |
+| update_actor | 20.0s | 16.0s | 16.1s |
+| old_log_prob | 7.4s | 4.1s | 4.1s |
+| update_weights | 8.6s | 8.0s | 7.7s |
+| save_checkpoint | — | — | 130.0s |
+| step total | 176.8s | 105-167s | 297.9s |
+| VRAM | 31.8 GB | 33.2 GB | 33.2 GB |
+
+**Reward (429 rate limited)**:
+
+| Step | reward_wall | api_avg | sem_wait | 429s |
+|------|-------------|---------|----------|------|
+| 1 | 127s | 20.6s | 12.3s | sí |
+| 2 | 71s | 20.6s | 1.5s | sí |
+| 3 | 136s | 22.3s | 11.8s | sí |
+| 4 | 74s | 17.1s | 6.6s | sí |
+
+**Hallazgos clave**:
+1. **Azure S0 rate limit es el bottleneck**: 12 errores 429 en 5 steps. reward_wall 71-136s vs gpu_phase 30-49s.
+2. **VRAM no cambió** entre batch=8 y batch=24 (33.2 GB en ambos). El headroom es del modelo.
+3. **GPU escala sub-linealmente**: update_actor 1.5x, update_weights constante, old_log_prob 1.5x. micro_batch=8 ayudó.
+4. **gen absorbe la espera de reward**: veRL bloquea durante gen esperando rewards. Sin rate limit, gen sería ~30-40s.
+5. `expandable_segments:True` incompatible con vLLM 0.17 (pytorch/pytorch#147851).
+
+**Acción requerida**: upgrade de Azure tier (S0→S1+) o reducir n de 6 a 4.
+
+Refs: TODO-002, TODO-003, TODO-005, CHG-017
+
 ---
 
 Runs pendientes y extensiones: ver `TODO.md` (TODO-006 a TODO-011).
