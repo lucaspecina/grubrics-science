@@ -219,6 +219,7 @@ def main():
         f"training.output_dir={SFT_OUTPUT}",
         "training.save_strategy=no",
         "training.logging_steps=5",
+        "training.remove_unused_columns=true",
         "logging.report_to=none",
     ]
 
