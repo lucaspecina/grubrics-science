@@ -87,11 +87,11 @@ data:
   dataloader_num_workers: 0
   filter_overlong_prompts_workers: 1
 
-# --- Custom Reward Function ---
-# grubrics_reward.py routes by data_source: verifiable → local, open → Judge API
-custom_reward_function:
-  path: grubrics_science/rewards/grubrics_reward.py
-  name: compute_score
+# --- Reward (veRL 0.7.1: reward config is under 'reward:' key) ---
+reward:
+  custom_reward_function:
+    path: grubrics_science/rewards/grubrics_reward.py
+    name: compute_score
 
 # --- Reward Weights (Phase 3 configurable) ---
 # These are passed as env vars to the reward function.
@@ -103,10 +103,6 @@ reward_config:
   lambda_defense: 0.3      # Defense penalty weight
   char_threshold: 3000     # Chars before length penalty kicks in
   use_contrastive: true    # false = no contrastive excerpts in prompt (A1 ablation)
-
-# --- Reward Model (disabled — we use custom_reward_function) ---
-reward_model:
-  enable: false
 
 # --- Critic (disabled for GRPO) ---
 critic:
