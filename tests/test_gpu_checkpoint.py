@@ -356,15 +356,15 @@ class TestGRPOResume:
             lora_size = dir_size_mb(actor_dir / "lora_adapter")
             print(f"    LoRA size:      {lora_size:.0f} MB")
 
-        # ── Run 2: resume to step 4 ──
+        # ── Run 2: resume to step 3 (1 additional step) ──
         cmd2 = self.GRPO_BASE_CMD + [
-            "trainer.total_training_steps=4",
+            "trainer.total_training_steps=3",
             "trainer.save_freq=1",
             f"trainer.default_local_dir={ckpt_dir}",
         ]
 
-        print(f"\n  --- Run 2: resume to step 4 ---")
-        with timer("run 2 (resume → step 4)") as t_run2:
+        print(f"\n  --- Run 2: resume to step 3 ---")
+        with timer("run 2 (resume → step 3)") as t_run2:
             r2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=900)
 
         # Check if resume worked
