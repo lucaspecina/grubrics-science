@@ -32,7 +32,7 @@ actor_rollout_ref:
     strategy: fsdp
     fsdp_config:
       model_dtype: bf16           # required: Flash Attention 2 rejects float32
-    ppo_mini_batch_size: 64
+    ppo_mini_batch_size: 24
     ppo_micro_batch_size_per_gpu: 4
     ppo_epochs: 1
     clip_ratio: 0.2
