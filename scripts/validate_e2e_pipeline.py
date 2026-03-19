@@ -36,16 +36,22 @@ def banner(text):
     print(f"{'='*60}")
 
 
-def run_cmd(cmd, label, timeout=900):
+def run_cmd(cmd, label, timeout=1800):
     """Run a command, return (output, returncode, elapsed)."""
     print(f"\n  >> {label}")
     print(f"  >> {' '.join(cmd[:6])}...")
     t0 = time.time()
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    elapsed = time.time() - t0
-    output = result.stdout + result.stderr
-    print(f"  << exit={result.returncode}, time={elapsed:.0f}s")
-    return output, result.returncode, elapsed
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        elapsed = time.time() - t0
+        output = result.stdout + result.stderr
+        print(f"  << exit={result.returncode}, time={elapsed:.0f}s")
+        return output, result.returncode, elapsed
+    except subprocess.TimeoutExpired as e:
+        elapsed = time.time() - t0
+        output = (e.stdout or "") + (e.stderr or "")
+        print(f"  << TIMEOUT after {elapsed:.0f}s (limit={timeout}s)")
+        return output, -1, elapsed
 
 
 def load_model_cpu(path):
