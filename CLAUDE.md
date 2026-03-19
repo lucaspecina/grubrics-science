@@ -12,11 +12,13 @@ Entrena Qwen3-8B con RL (GRPO) para generar rúbricas de evaluación médica y c
 
 ## Workflow de desarrollo
 
-- **Desarrollo local**: MacBook — editar código, leer logs, planear experimentos
-- **Ejecución**: H100 remota (Linux) — training, precompute, baselines
+- **Desarrollo local**: Windows — editar código, leer logs, planear experimentos
+- **Ejecución**: H100 remota (Linux, Azure ML) — training, precompute, baselines
+- **SSH directo**: Claude puede ejecutar comandos via `ssh azure-ml "comando"` (key auth, sin password)
 - **Env de training**: `conda activate RL` (siempre, en la H100)
-- **Dinámica**: el usuario edita en Mac, pushea, ejecuta en H100, y reporta resultados acá
+- **Dinámica**: editar local → push → Claude ejecuta en H100 via SSH (o el usuario reporta)
 - **Nunca asumir** que un comando se puede ejecutar localmente — preguntar siempre si hay duda
+- **Setup de la VM**: ver `docs/h100-setup.md` para reproducir el entorno desde cero
 
 ## Los tres actores
 
@@ -41,6 +43,8 @@ Entrena Qwen3-8B con RL (GRPO) para generar rúbricas de evaluación médica y c
 - `run_sft.py` / `run_grpo.py` — launchers principales
 - `notebooks/analyze_rubrics.ipynb` — análisis post-training
 - `scripts/` — download_datasets, run_baselines, validate_judge, analyze_precompute
+- `scripts/validate_e2e_pipeline.py` — validación E2E completa: SFT→GRPO→Resume (~35 min en H100)
+- `docs/h100-setup.md` — guía para reproducir el entorno de la H100 desde cero
 
 ## Comportamientos conocidos de veRL
 
@@ -49,8 +53,25 @@ Estos no son bugs sino comportamientos del framework que hay que tener en cuenta
 - **veRL JSON columns**: parche auto-aplicado al cargar datos en `rl_dataset.py`
 - **Judge cache en RL**: siempre `max_cache_size=0` durante training (RAM unbounded si no)
 - **veRL auto-resume + total_training_steps absoluto**: veRL detecta checkpoints en `default_local_dir` y resume automáticamente. `total_training_steps` es absoluto (no relativo al checkpoint). Borrar el directorio de checkpoints antes de un run from scratch con pocos steps.
+- **veRL checkpoints**: guarda 3 formatos en cada step: FSDP shard (`model_world_size_*.pt`), HuggingFace (solo config+tokenizer en `huggingface/`), LoRA adapter (`lora_adapter/`). Resume usa el FSDP shard, no HF format.
+- **Checkpoint save time**: ~150-185s por step (~80% del step time con batch=4). No es un bug — usar `save_freq` alto en producción.
+- **veRL config `reward:`**: `custom_reward_function` debe estar bajo `reward:` key, no top-level.
+- **TRL compatibility**: veRL 0.7.1 requiere TRL ≤0.15.2 (0.29+ rompe imports).
+- **SFT `remove_unused_columns`**: TRL 0.15.2 necesita `remove_unused_columns=true` para evitar error con columnas no-tensor.
 
 Para bugs y blockers activos ver `TODO.md`.
+
+## Pipeline validado (E2E)
+
+El pipeline completo fue validado el 2026-03-19 en H100:
+
+1. **SFT** (`run_sft.py`): Qwen3-8B + LoRA → merge → checkpoint HF merged
+2. **GRPO** (`run_grpo.py`): carga SFT checkpoint → LoRA fresco → training con FSDP+vLLM
+3. **Resume**: veRL auto-detecta `latest_checkpointed_iteration.txt` → carga FSDP shard → continúa
+
+Script de validación: `python scripts/validate_e2e_pipeline.py` (~35 min)
+
+Para reproducir el entorno desde cero: `docs/h100-setup.md`
 
 ## Docs de referencia
 
@@ -60,6 +81,7 @@ Para bugs y blockers activos ver `TODO.md`.
 - `docs/experiment-log.md` — bitácora cronológica de runs y resultados (IDs: `EXP-xxx`)
 - `docs/research.md` — framing del paper, preguntas de investigación, landscape de la literatura
 - `docs/related-work.md` — revisión de literatura detallada
+- `docs/h100-setup.md` — **guía de setup de la VM H100 desde cero** (driver, conda, paquetes, validación)
 
 ## Mantenimiento de documentación y skills — CRÍTICO
 
