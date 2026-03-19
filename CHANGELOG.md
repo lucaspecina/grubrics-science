@@ -175,3 +175,26 @@ Investigación completa de alternativas (TODO-001). Conclusión: **seguir con ve
 
 **Revisitar si**: veRL bloquea en multi-GPU o los workarounds se acumulan. OpenRLHF como primer backup.
 Refs: TODO-001, TODO-004
+
+---
+
+## [CHG-016] 2026-03-19 — Debugging completado: Fases B y C validadas
+
+TODO-004 resuelto. Las 3 fases de debugging del pipeline GRPO están completadas:
+
+- **Fase A** (2026-03-02): GRPO from scratch — 2 steps OK
+- **Fase B** (2026-03-19): GRPO resume — Run 1 (2 steps) + Run 2 (resume → step 3) OK. veRL auto-detect + FSDP checkpoint load funcionan.
+- **Fase C** (2026-03-19): SFT→GRPO — `from_pretrained(sft_dir)` + fresh LoRA + forward pass OK. Save/load roundtrip con weights match.
+
+**Fixes aplicados en la sesión**:
+1. NVIDIA driver 535 → 580 (CUDA 12.9 requiere driver ≥565)
+2. TRL 0.29 → 0.15.2 (incompatible con veRL 0.7.1)
+3. `dtype: bfloat16` removido de model config (veRL 0.7.1 no lo tiene en HFModelConfig)
+4. `custom_reward_function` movido bajo `reward:` key (veRL 0.7.1 lo busca ahí)
+5. `.env` limpiado de `\r` (Windows line endings causaban httpx InvalidURL)
+6. `RUBRIC_JUDGE_MODEL` cambiado a `gpt-5.2-chat` (deployment válido)
+7. `model.config.vocab_size` en test (Qwen3 151936 embeddings ≠ 151643 vocab)
+
+**Observación**: checkpoint save tarda ~165-184s/step (~80% del step time con batch=4). Esto es el siguiente bottleneck a investigar (TODO-005).
+
+Refs: TODO-004, EXP-DEBUG-B, EXP-DEBUG-C

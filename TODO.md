@@ -58,18 +58,21 @@ Refs: CHG-015
 
 ## Pipeline milestones
 
-### TODO-004 🟡 Checkpoint load/resume funcional
+### TODO-004 ✅ Checkpoint load/resume funcional (resuelto 2026-03-19)
 
-Cargar checkpoints (SFT→GRPO y GRPO resume) sin que falle o tarde minutos.
+Cargar checkpoints (SFT→GRPO y GRPO resume) sin que falle.
 
-**Estado actual:**
+**Resultado:**
 - ✅ Fase A: GRPO from scratch funciona (EXP-DEBUG-A, 2026-03-02)
-- 🟡 Fase B (GRPO resume): nunca probado. veRL guarda FSDP shards + HF format + LoRA adapter. Resume usa `FSDPCheckpointManager` (no `from_pretrained`). GPU tests creados (`test_gpu_checkpoint.py::test_grpo_run_and_resume`).
-- 🟡 Fase C (SFT→GRPO): nunca probado. Cambiar `model.path` al SFT dir. GPU test creado (`test_gpu_checkpoint.py::test_load_existing_sft_checkpoint`).
+- ✅ Fase B: GRPO resume funciona (EXP-DEBUG-B, 2026-03-19). veRL auto-detecta `latest_checkpointed_iteration.txt`, carga FSDP checkpoint, continúa desde el step correcto. Run 1 (2 steps) → Run 2 (resume → step 3) completado.
+- ✅ Fase C: SFT→GRPO funciona (EXP-DEBUG-C, 2026-03-19). `from_pretrained(sft_dir)` + fresh LoRA + forward pass OK. Save/load roundtrip con weights match confirmado.
 
-**Decisión de framework**: seguir con veRL (TODO-001 ✅). Usar resume nativo de veRL para Fase B, `from_pretrained` para Fase C.
-**Siguiente paso**: correr GPU tests en H100 (`pytest tests/test_gpu_checkpoint.py -v -s`).
-Refs: CHG-010, CHG-012, CHG-015
+**Timings observados** (batch=4, 1×H100 NVL):
+- Step: ~200-220s (gen ~13s, actor update ~11-14s, checkpoint save ~165-184s)
+- Checkpoint save domina (~80% del step time) — explorar en TODO-005
+- Resume startup: ~8 min (model load + checkpoint load + vLLM init)
+
+Refs: CHG-010, CHG-012, CHG-015, CHG-016, EXP-DEBUG-A, EXP-DEBUG-B, EXP-DEBUG-C
 
 ### TODO-005 🟡 Configuración de producción optimizada
 
@@ -104,7 +107,7 @@ Refs: EXP-001
 ### TODO-009 🟡 RL GRPO con curriculum — método principal
 
 ~$90, ~10h H100.
-**Bloqueado por**: TODO-004, TODO-005, TODO-006.
+**Bloqueado por**: TODO-005, TODO-006.
 
 ### TODO-010 🟡 Evaluación
 

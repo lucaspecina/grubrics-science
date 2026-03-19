@@ -77,8 +77,8 @@ Además, hay un **problema bloqueante con la carga de checkpoints** (TODO-004): 
 | Fase | Qué | Estado | Ref |
 |------|-----|--------|-----|
 | **A** | GRPO end-to-end from scratch (2 steps, config prod, Qwen3-8B) | ✅ COMPLETADO 2026-03-02 | TODO-004 |
-| **B** | Checkpoint + resume de GRPO | 🔴 Bloqueado por TODO-004 | TODO-004 |
-| **C** | SFT checkpoint → GRPO | 🔴 Bloqueado por TODO-004 | TODO-004 |
+| **B** | Checkpoint + resume de GRPO | ✅ COMPLETADO 2026-03-19 | TODO-004 |
+| **C** | SFT checkpoint → GRPO | ✅ COMPLETADO 2026-03-19 | TODO-004 |
 
 ### [EXP-DEBUG-A] GRPO end-to-end from scratch — 2 steps ✅
 **Fecha**: 2026-03-02 | **Config**: `verl_grpo.yaml` + overrides (batch=4, mini=4, micro=2)
@@ -95,6 +95,44 @@ Además, hay un **problema bloqueante con la carga de checkpoints** (TODO-004): 
 - `response_length/clip_ratio=0.83-0.92` — mayoría de respuestas llegan al límite de 512 tokens.
 
 Refs: CHG-010, CHG-012, TODO-004
+
+### [EXP-DEBUG-B] GRPO checkpoint resume — step 2 → step 3 ✅
+**Fecha**: 2026-03-19 | **Config**: `verl_grpo.yaml` + overrides (batch=4, mini=4, micro=2)
+**Procedimiento**: Run 1 (2 steps from scratch) → verificar checkpoints → Run 2 (resume → step 3)
+**Resultado**: Resume funciona correctamente. veRL auto-detecta `latest_checkpointed_iteration.txt`, carga FSDP checkpoint de `global_step_2`, entrena solo step 3.
+
+**Run 1 (from scratch)**:
+- 2/2 steps, 12.1 min total
+- Step 1: 208s, Step 2: 197s
+- Checkpoints: `global_step_1`, `global_step_2` (FSDP + HF + LoRA + optimizer)
+- Reward mean: 0.567 (step 1), 0.688 (step 2)
+- GPU: 33 GB actor, checkpoint save ~165-168s/step (~80% del step time)
+
+**Run 2 (resume)**:
+- Log: `Found checkpoint: .../global_step_2` → `Setting global step to 2` → `Resuming from .../global_step_2`
+- Progress: `67%|██████▋ | 2/3` → `100%|██████████| 3/3` (solo entrenó step 3)
+- 13.4 min total (incluye startup + checkpoint load + 1 step + save)
+- Step 3: 218.7s, checkpoint save: 184.2s
+- `global_step_3` guardado correctamente, `latest_checkpointed_iteration.txt` = 3
+
+**Observaciones**:
+- Checkpoint save domina el step time (~80%). Para producción explorar optimizaciones (TODO-005).
+- Resume startup incluye full model load + vLLM init + FSDP checkpoint load (~8 min overhead).
+- wandb crash at exit: esperado (offline mode, sin login).
+
+Refs: CHG-016, TODO-004
+
+### [EXP-DEBUG-C] SFT checkpoint → GRPO loading ✅
+**Fecha**: 2026-03-19 | **Tests**: `test_gpu_checkpoint.py` (tests 1-3)
+**Resultado**: Los 3 tests pasan en H100.
+
+1. **Load base model** (Qwen3-8B): ~3-9s, params OK, GPU memory OK
+2. **Load SFT checkpoint → apply LoRA → forward pass**: carga desde `from_pretrained(sft_dir)`, aplica fresh LoRA (rank 64), forward pass produce logits correctos
+3. **SFT save/load roundtrip**: save merged model → reload → weights match (torch.allclose, atol=1e-5)
+
+**Fix aplicado**: `model.config.vocab_size` en vez de `tokenizer.vocab_size` (Qwen3 tiene 151936 embeddings vs 151643 vocab tokens).
+
+Refs: CHG-016, TODO-004
 
 ---
 
