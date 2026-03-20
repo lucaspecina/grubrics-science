@@ -133,6 +133,24 @@ step 5: 154.6s (incluye checkpoint save de 121.9s)
 - **Azure S0 tier**: token rate limit causa 429 errors con 144 calls/step + concurrent=10. El retry logic (espera 1s + retry) amplifica la latencia: api_avg sube de 6s (batch=8) a 20.6s (batch=24).
 - **Reward es async**: los Ray RewardLoopWorkers computan rewards en paralelo con el GPU phase. A batch=8 terminan antes que la GPU; a batch=24, la GPU termina antes que el reward.
 
+### Selección de modelo Judge (2026-03-19)
+
+Validación de 5 modelos como Judge contra physician binary labels (50 entries HealthBench):
+
+| Modelo | Kappa | Accuracy | Recurso | Latencia/call | Veredicto |
+|--------|-------|----------|---------|-------------|-----------|
+| gpt-5.2-chat | ~0.43 | ~0.68 | development-cursor-models (S0) | ~6s | ✅ Bueno pero rate limited |
+| **gpt-5-mini** | **0.440** | **0.720** | development-cursor-models | ~10s | ✅ **Seleccionado** |
+| gpt-5 | 0.400 | 0.700 | amalia-resource (4.8K RPM) | ~20s | ✅ Viable como backup |
+| gpt-4o | 0.000 | 0.500 | amalia-resource | ~3s | ❌ No discrimina |
+| gpt-4.1 | 0.000 | 0.000 | development-cursor-models | ~3s | ❌ No discrimina |
+
+**Hallazgos**:
+- Los modelos GPT-4.x **no sirven como Judge** — dan scores altos a todo (Mean>0.87), kappa=0.
+- Solo los modelos GPT-5.x discriminan correctamente entre respuestas buenas y malas.
+- **gpt-5-mini** es el mejor: mayor kappa, mayor accuracy, y al ser mini tiene rate limits más altos y menor costo.
+- **Decisión**: cambiar de gpt-5.2-chat a gpt-5-mini como Judge para training.
+
 ### Costo API por step
 
 | Batch | Calls/step | Cost/step (est.) | Cost/100 steps |

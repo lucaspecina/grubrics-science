@@ -217,3 +217,23 @@ EXP-PROF-1A (batch=8, 5 steps, H100 NVL) reveló que **GPU domina sobre Judge AP
 **Nuevo artefacto**: `docs/performance-profile.md` — documento de referencia vivo para profiling y optimizaciones.
 
 Refs: TODO-002, TODO-003, TODO-005, EXP-PROF-1A
+
+---
+
+## [CHG-018] 2026-03-19 — Judge cambia de gpt-5.2-chat a gpt-5-mini
+
+Comparación de 5 modelos como Judge (EXP-JUDGE-001). gpt-5-mini superó a todos en kappa (0.440) y accuracy (0.720).
+
+**Hallazgo clave**: los modelos GPT-4.x (gpt-4o, gpt-4.1) **no sirven como Judge** — dan scores altos a todo, kappa=0, no discriminan entre respuestas buenas y malas. Solo la familia GPT-5.x produce señal útil para RL.
+
+**Por qué gpt-5-mini sobre gpt-5.2-chat**:
+- Mejor kappa (0.440 vs ~0.43) y accuracy (0.720 vs ~0.68)
+- Rate limits más altos (mini model)
+- Más rápido y barato por call
+- Elimina el bottleneck de rate limit (429 errors) observado en EXP-PROF-2b
+
+**Backup**: gpt-5 en amalia-resource (kappa=0.400, 4,875 RPM) si gpt-5-mini tiene problemas.
+
+**Descartados**: gpt-4o (kappa=0), gpt-4.1 (kappa=0).
+
+Refs: TODO-003, EXP-JUDGE-001, EXP-PROF-2b

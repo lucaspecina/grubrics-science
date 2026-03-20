@@ -220,6 +220,27 @@ Refs: TODO-002, TODO-003, TODO-005, CHG-011, CHG-017
 
 Refs: TODO-002, TODO-003, TODO-005, CHG-017
 
+### [EXP-JUDGE-001] Comparación de modelos Judge — 5 modelos
+**Fecha**: 2026-03-19 | **Config**: `validate_judge.py --limit 50 --max_concurrent 10`
+**Motivación**: el rate limit de gpt-5.2-chat (S0 tier) es bottleneck a batch=24. Buscar alternativa con mejores rate limits.
+
+| Modelo | Kappa | Accuracy | Recurso |
+|--------|-------|----------|---------|
+| gpt-5.2-chat (baseline) | ~0.43 | ~0.68 | development-cursor-models |
+| **gpt-5-mini** | **0.440** | **0.720** | development-cursor-models |
+| gpt-5 | 0.400 | 0.700 | amalia-resource |
+| gpt-4o | 0.000 | 0.500 | amalia-resource |
+| gpt-4.1 | 0.000 | 0.000 | development-cursor-models |
+
+**Hallazgos**:
+1. Modelos GPT-4.x NO sirven como Judge (kappa=0, no discriminan, scores todos altos)
+2. gpt-5-mini = mejor kappa Y accuracy que gpt-5.2-chat y gpt-5 full
+3. gpt-5-mini es más rápido, barato, y con rate limits más altos que gpt-5.2
+
+**Decisión**: cambiar Judge de gpt-5.2-chat a gpt-5-mini (CHG-018)
+
+Refs: TODO-003, CHG-018
+
 ---
 
 Runs pendientes y extensiones: ver `TODO.md` (TODO-006 a TODO-011).

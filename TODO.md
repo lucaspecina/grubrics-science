@@ -46,30 +46,22 @@ Refs: CHG-015
 **Referencia**: `docs/performance-profile.md` (documento vivo)
 Refs: EXP-PROF-1A, CHG-017
 
-### TODO-003 🟢 Judge pipeline — paralelismo y throughput (parcialmente resuelto 2026-03-19)
+### TODO-003 ✅ Judge pipeline — paralelismo y throughput (resuelto 2026-03-19)
 
-**Resultado depende del batch size**:
-- **Batch=8** (EXP-PROF-1A): Judge NO es bottleneck. sem_wait=0, reward termina antes que GPU.
-- **Batch=24** (EXP-PROF-2b): **Judge SÍ es bottleneck** — pero por **rate limiting de Azure S0**, no por el semáforo. reward_wall=127s vs gpu_phase=37-49s. Azure devuelve 429 errors con 144 calls/step.
+**Problema**: gpt-5.2-chat en Azure S0 tier causaba 429 rate limit errors a batch=24 (reward_wall=127s).
 
-**Respuestas:**
-- ✅ Flujo: batch × K=6 rollouts = N API calls, distribuidas entre Ray RewardLoopWorkers
-- ✅ Judge procesa en paralelo (async Ray workers)
-- ✅ A batch=8: concurrent=10 sobra. A batch=24: rate limit de Azure es el blocker
-- ✅ API latency: ~6s (sin rate limit) → ~20s (con 429 retries a batch=24)
-- ⚠️ Azure S0 tier tiene token rate limit que se excede con 144 calls/step
+**Solución**: cambiar Judge de gpt-5.2-chat a **gpt-5-mini** (CHG-018).
+- gpt-5-mini: kappa=0.440, accuracy=0.720 (mejor que gpt-5.2-chat)
+- Rate limits más altos (mini model), más rápido, más barato
+- Validado en EXP-JUDGE-001 (5 modelos comparados, 50 entries HealthBench)
 
-**Palancas para resolver**:
-- Upgrade Azure tier S0 → S1+ (elimina 429s)
-- Reducir n: 6 → 4 (96 calls/step, -33%)
-- Reducir batch: 24 → 16 (96 calls/step)
-- Judge local (elimina dependencia de Azure)
+**Hallazgo importante**: modelos GPT-4.x (gpt-4o, gpt-4.1) NO sirven como Judge — kappa=0, no discriminan. Solo GPT-5.x produce señal útil.
 
-Refs: EXP-PROF-1A, EXP-PROF-2b, CHG-017
+**Backup**: gpt-5 en amalia-resource (kappa=0.400, 4,875 RPM).
 
-**Nota**: a batch=24 (144 calls), reward_wall subiría a ~25-30s con concurrent=10. Podría acercarse al gpu_phase. Monitorear cuando tengamos datos suficientes.
+**Pendiente**: validar que gpt-5-mini no tenga rate limit a batch=24 (próximo profiling run).
 
-Refs: EXP-PROF-1A, CHG-017
+Refs: EXP-PROF-1A, EXP-PROF-2b, EXP-JUDGE-001, CHG-017, CHG-018
 
 ---
 
