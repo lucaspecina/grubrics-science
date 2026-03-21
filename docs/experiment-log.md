@@ -241,6 +241,30 @@ Refs: TODO-002, TODO-003, TODO-005, CHG-017
 
 Refs: TODO-003, CHG-018
 
+### [EXP-PROF-4] Profiling batch=24 + gpt-5-mini @ amalia-resource (4,875 RPM)
+**Fecha**: 2026-03-21 | **Config**: verl_grpo.yaml + overrides (batch=24, micro=8, gpu_mem=0.6, gpt-5-mini @ amalia)
+**Duración**: 830.6s (13.8 min, 5 steps)
+
+| Step | step_time | gen | update_actor | reward_wall | api_avg | 429s |
+|------|-----------|-----|-------------|-------------|---------|------|
+| 1 (warmup) | 93.2s | 56.9s | 20.2s | 35-53s | 12-13s | 1 |
+| 2 | ~69s | ~44s | 16s | 31s | 11s | 0 |
+| 3 | ~77s | ~56s | 16s | 30s | 16s | 0 |
+| 4 | ~79s | ~56s | 16s | 38s | 16s | 0 |
+| 5 (+save) | 230.4s | 56.1s | 16.1s | — | — | — |
+
+**VRAM**: 33.2 GB (igual que todos los runs anteriores)
+**Checkpoint save**: 146.4s
+
+**Hallazgos**:
+1. **Rate limit resuelto**: solo 1 x 429 (vs 12 con dev-cursor). amalia-resource funciona.
+2. **Step steady ~75s**: 2.3x más rápido que Run 2b (rate limited). GPU domina de nuevo.
+3. **sem_wait 3-9s**: concurrent=10 es algo ajustado para 144 calls. Subir a 20 podría ganar ~10s/step.
+4. **api_avg 11-16s**: gpt-5-mini es más lento por call que gpt-5.2 (~6s), pero sin rate limit el throughput neto es mucho mejor.
+5. **Proyección 200 steps**: ~4.2h, ~$173 (GPU $29 + API $144).
+
+Refs: TODO-002, TODO-005, CHG-018
+
 ---
 
 Runs pendientes y extensiones: ver `TODO.md` (TODO-006 a TODO-011).

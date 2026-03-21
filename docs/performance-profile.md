@@ -260,6 +260,8 @@ Sync de pesos entre FSDP (training) y vLLM (rollout). Es el costo del hybrid eng
 | EXP-PROF-1A | 2026-03-19 | baseline, concurrent=10 | 5 | 8 | GPU domina (75%), reward async no bloquea, VRAM 35% |
 | EXP-PROF-2 (fail) | 2026-03-19 | +expandable_segments | 0 | 24 | `expandable_segments` incompatible con vLLM 0.17 |
 | EXP-PROF-2b | 2026-03-19 | micro=8, gpu_mem=0.6 | 5 | 24 | Reward bottleneck por Azure 429. GPU sub-lineal. VRAM=33GB (igual que batch=8!) |
+| EXP-PROF-3 | 2026-03-20 | gpt-5-mini, dev-cursor | 2 | 24 | Mismo rate limit problem en dev-cursor |
+| **EXP-PROF-4** | 2026-03-21 | **gpt-5-mini, amalia (4.8K RPM)** | 5 | 24 | **~75s/step steady, reward 30-53s, GPU domina de nuevo** |
 
 ---
 
@@ -287,11 +289,13 @@ Sync de pesos entre FSDP (training) y vLLM (rollout). Es el costo del hybrid eng
 
 ### Proyección a producción (200 steps, batch=24)
 
+**Config validada**: gpt-5-mini @ amalia-resource (4,875 RPM), micro=8, gpu_mem=0.6
+
 | Escenario | Step time | Total | GPU cost | API cost |
 |-----------|-----------|-------|----------|----------|
-| Con rate limit S0 (actual) | ~135s | 7.5h | ~$52 | ~$144 |
-| Sin rate limit (upgrade tier) | ~105s | 5.8h | ~$41 | ~$144 |
-| Sin rate limit + n=4 | ~85s (est.) | 4.7h | ~$33 | ~$96 |
+| **Actual (Run 4, amalia)** | **~75s** | **4.2h** | **~$29** | **~$144** |
+| + JUDGE_MAX_CONCURRENT=20 | ~65s (est.) | 3.6h | ~$25 | ~$144 |
+| + n=4 (en vez de 6) | ~55s (est.) | 3.1h | ~$22 | ~$96 |
 
 ---
 
