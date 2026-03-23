@@ -108,12 +108,28 @@ Refs: CHG-011, CHG-017, EXP-PROF-1A, `docs/performance-profile.md`
 
 ## Runs core
 
-### TODO-006 🟡 Precompute completo
+### TODO-006 🟢 Preparar datos para training (en curso 2026-03-23)
 
-- HealthBench full: 5K preguntas (~$45, ~4h paralelo). **Bloquea** TODO-008, TODO-009.
-- FrontierScience: 60 preguntas (~$5, ~1h). Para eval cross-domain.
+**Referencia**: `docs/data-guide.md` — leer para entender splits y flujo completo.
 
-Refs: EXP-001
+**Splits (sin contaminación)**:
+- **SFT**: 1,329 preguntas SIN respuestas (`--subset no_answers`). Modelo ve rúbrica gold, OK porque nunca en GRPO.
+- **GRPO**: ~500 preguntas CON respuestas, precomputadas, excluyendo holdout. Modelo NO ve rúbrica gold.
+- **Eval**: 500 holdout (fijo, seed=42). No en SFT ni GRPO.
+- **Reserva**: ~2,671 preguntas con respuestas para futuros GRPO runs.
+
+**Pasos concretos**:
+1. ⬜ Regenerar SFT: `python -m grubrics_science.data.prepare_sft --subset no_answers` → 1,329 examples
+2. ⬜ Limpiar cache: borrar `data/cache/healthbench_precompute.jsonl` actual (mal filtrado)
+3. ⬜ Precompute limpio: ~500 preguntas with_answers, excluyendo holdout_ids y no_answers. Judge=gpt-5-mini @ amalia.
+4. ⬜ Precompute holdout: precomputar 500 holdout questions para eval.
+5. ⬜ Generar parquet GRPO: `prepare preset --only-cached` (filtrando holdout del train).
+
+**Estado actual**: 444 entries precomputadas con gpt-5-mini pero sin filtrar holdout/no_answers. Hay que rehacer.
+
+**Costo**: ~$15 (precompute 500 GRPO) + ~$15 (precompute 500 eval) = ~$30 API.
+
+Refs: `docs/data-guide.md`, CHG-018
 
 ### TODO-007 🟡 Baselines
 
@@ -122,8 +138,8 @@ Refs: EXP-001
 
 ### TODO-008 🟡 SFT warm-up
 
-¿SFT solo es suficiente? ~$10, ~2h H100.
-**Bloqueado por**: TODO-006.
+SFT con `--subset no_answers` (1,329 examples). ~$5, ~30 min H100.
+**Bloqueado por**: TODO-006 paso 1.
 
 ### TODO-009 🟡 RL GRPO con curriculum — método principal
 
