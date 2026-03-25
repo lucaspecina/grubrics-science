@@ -2,39 +2,42 @@
 description: Guía para ejecutar o completar el precompute de gold_scores para cualquier dataset. Usar cuando se necesita generar datos de precompute, verificar su estado, o entender qué hay en caché.
 ---
 
-## Estado actual del caché
+## Estado actual del caché (actualizado 2026-03-25)
 
 ```bash
-ls -la data/cache/
-# Archivos esperados:
-# healthbench_precompute.jsonl  — actualmente: 43 preguntas (full: ~5K pendiente)
-# medqa_precompute.jsonl        — 10 preguntas (mini)
-# medmcqa_precompute.jsonl      — 15 preguntas (mini)
-# frontierscience_precompute.jsonl — 2 preguntas (mini)
-
-# Ver cuántas preguntas hay en el caché de HealthBench
-wc -l data/cache/healthbench_precompute.jsonl
+# Ver estado rápido
+python -c "
+import json
+with open('data/cache/healthbench_precompute.jsonl', encoding='utf-8') as f:
+    entries = [json.loads(l) for l in f]
+good = [e for e in entries if any(s > 0 for s in e['gold_scores'])]
+print(f'Total: {len(entries)} | Good: {len(good)} | Bad: {len(entries)-len(good)}')
+"
 ```
 
-**IMPORTANTE**: `data/cache/` no se borra. Cada pregunta precomputada costó ~$0.003.
+Último conteo: **560 entries** (todas buenas, 0 all-zero). 406 GRPO pool, 92 holdout.
 
-## HealthBench (requiere Azure API, ~$0.003/pregunta)
+**IMPORTANTE**: `data/cache/` no se borra. Cada pregunta precomputada cuesta ~$0.03 (con num_evals=3).
+
+## HealthBench (requiere Azure API, ~$0.03/pregunta con num_evals=3)
+
+**Judge**: gpt-5-mini @ amalia-resource (CHG-018). Es un reasoning model — ver Issues conocidos.
 
 ```bash
-# Mini — para validar que todo funciona (~1 min, ~$0.50)
+# Validación rápida (3 entries, ~$0.10, ~2 min)
 python -m grubrics_science.data.precompute_healthbench \
-    --limit 20 --num_evals 1 --max_concurrent 10
+    --model gpt-5-mini --num_evals 3 --max_concurrent 5 --limit 10
 
-# Precompute completo (~4h, ~$45) — SIGUIENTE PASO
+# Precompute incremental (salta entries ya cacheadas)
 python -m grubrics_science.data.precompute_healthbench \
-    --num_evals 1 --max_concurrent 10
+    --model gpt-5-mini --num_evals 3 --max_concurrent 5
 
-# Con 3 evaluaciones para estabilizar scores (~13h, ~$135)
+# Con filtro de prompt_ids específicos (más eficiente)
 python -m grubrics_science.data.precompute_healthbench \
-    --num_evals 3 --max_concurrent 10
+    --oss_eval_path data/cache/target_oss_eval.jsonl \
+    --model gpt-5-mini --num_evals 3 --max_concurrent 5
 ```
 
-El precompute es **incremental**: si ya hay entradas en el caché, continúa desde donde quedó.
 Cache: `data/cache/healthbench_precompute.jsonl`
 
 ## MedQA / MedMCQA (gratis, programático)
@@ -57,7 +60,7 @@ Cache: `data/cache/frontierscience_precompute.jsonl`
 
 ## Análisis del precompute
 
-Después de cualquier precompute, verificar calidad de la señal:
+Después de cualquier precompute, verificar calidad:
 
 ```bash
 python scripts/analyze_precompute.py \
@@ -65,30 +68,23 @@ python scripts/analyze_precompute.py \
     --output data/results/healthbench_analysis.json
 ```
 
-Métricas clave a verificar:
-- **Signal útil**: debe ser >90% (porcentaje de preguntas con varianza en gold_scores)
-- **Spearman global vs physicians**: debe ser >0.4 (p<0.001)
-- **Parse failures**: debe ser 0%
-- **Score distribution**: mean ~0.5, std >0.25 (distribución no degenerada)
-
-Referencia de resultados conocidos (43 preguntas validadas):
-- Signal útil: 93% (40/43)
-- Spearman=0.431 (p<0.0001)
-- Parse failures: 0%
+Métricas clave:
+- **Signal útil**: >90% (preguntas con varianza en gold_scores)
+- **All-zero entries**: debe ser 0% (si hay, revisar max_tokens — ver Issues)
+- **Score distribution**: mean ~0.5, std >0.25
 
 ## Convertir caché a parquet para training
-
-Después del precompute, generar el parquet que usa veRL:
 
 ```bash
 python -m grubrics_science.data.prepare preset \
     --output_dir data/processed --only-cached
 ```
 
-`--only-cached` filtra solo las preguntas con precompute. **Obligatorio.**
+`--only-cached` filtra solo preguntas con precompute. **Obligatorio.**
 
 ## Issues conocidos
 
+- **gpt-5-mini reasoning tokens (CHG-019)**: gpt-5-mini es un reasoning model — gasta tokens internos "pensando" antes de responder. `max_tokens` debe ser ≥16000 (ya configurado en `judge.py`). Con <16000, rúbricas largas agotan el budget en reasoning → respuesta vacía → scores `[0.0]*n`. Si aparecen entries all-zero, verificar `max_tokens` en `evaluate_answers_batched`.
+- **Parse failure retry**: `evaluate_answers_batched` reintenta hasta 3 veces si el JSON no parsea. Si los 3 intentos fallan, devuelve `[0.0]*n` y loguea warning.
 - **Rate limit Azure**: si hay errores 429, reducir `--max_concurrent` a 5
-- **Preguntas skipped en MedMCQA**: normal, algunas no tienen `gold_answer` en el dataset
-- **JSON truncado**: ya manejado (max_tokens=4000 + JSON repair). Si aparece parse failure, revisar `JUDGE_MODEL`
+- **Entries no-answers**: entran al cache pero se ignoran al generar parquet GRPO (filtradas por falta de respuestas en meta_eval)

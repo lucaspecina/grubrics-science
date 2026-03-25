@@ -293,6 +293,9 @@ class Judge:
         of one rubric + many answers (1 call instead of N). The model can
         also compare answers in context, producing more consistent rankings.
 
+        Retries up to 3 times on parse failure (empty/malformed JSON from
+        reasoning models that exhaust token budget on thinking).
+
         Args:
             question: The original question.
             answers: List of answers to evaluate.
@@ -309,13 +312,26 @@ class Judge:
 
         prompt = get_judge_batched_prompt(question, answers, rubric)
 
-        response = await self._call_with_retry(
-            prompt,
-            system_prompt=JUDGE_BATCHED_SYSTEM_PROMPT,
-            max_tokens=4000,
-        )
+        max_parse_retries = 3
+        scores = None
+        for attempt in range(max_parse_retries):
+            response = await self._call_with_retry(
+                prompt,
+                system_prompt=JUDGE_BATCHED_SYSTEM_PROMPT,
+                max_tokens=16000,
+            )
+            scores = self._parse_batched_response(response, len(answers))
+            if scores is not None:
+                break
+            if attempt < max_parse_retries - 1:
+                logger.warning(
+                    "Batched eval parse failed, retrying (%d/%d)...",
+                    attempt + 1, max_parse_retries,
+                )
 
-        scores = self._parse_batched_response(response, len(answers))
+        if scores is None:
+            logger.warning("All %d parse retries failed for batched eval", max_parse_retries)
+            scores = [0.0] * len(answers)
 
         if self._max_cache_size > 0:
             key = _cache_key(question, json.dumps(answers), [rubric])
@@ -325,15 +341,19 @@ class Judge:
 
     def _parse_batched_response(
         self, response: str, num_answers: int
-    ) -> List[float]:
-        """Parse batched Judge response into a list of scores."""
+    ) -> Optional[List[float]]:
+        """Parse batched Judge response into a list of scores.
+
+        Returns None on parse failure (caller should retry), or a list of
+        scores on success (which may legitimately be all zeros).
+        """
         result = extract_json_from_response(response)
 
         if not result or "evaluations" not in result:
             logger.warning(
                 "Failed to parse batched judge response: %s...", response[:300]
             )
-            return [0.0] * num_answers
+            return None
 
         evaluations = result["evaluations"]
 

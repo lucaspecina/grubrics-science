@@ -4,9 +4,9 @@ description: Guía para lanzar un nuevo training run (SFT o GRPO). Usar cuando e
 
 ## Checklist previo al launch
 
-Antes de lanzar cualquier run, verificar:
+Antes de lanzar cualquier run en la H100, verificar:
 1. `conda activate RL` está activo
-2. Variables de entorno configuradas: `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`
+2. Variables de entorno: `source .env` (contiene `AZURE_API_BASE`, `AZURE_API_KEY`, etc.)
 3. El config a usar existe en `configs/`
 4. Para GRPO: `data/processed/mixed_train.parquet` existe (sino, ver sección Preparar datos)
 5. Para GRPO desde SFT: checkpoint en `checkpoints/grubrics-transfer/sft-healthbench/final/`
@@ -14,10 +14,12 @@ Antes de lanzar cualquier run, verificar:
 
 ## SFT warm-up
 
-Usar antes de GRPO. Enseña al modelo el formato de rúbricas.
+Enseña al modelo el formato de rúbricas. Usar antes de GRPO.
+
+**Datos**: `data/sft/train.jsonl` (1,329 entries, subset=no_answers) + `data/sft/holdout_ids.json` (500 IDs).
 
 ```bash
-# Producción (H100, ~1-2h, Qwen3-8B)
+# Producción (H100, ~30 min, Qwen3-8B + LoRA)
 python run_sft.py --config configs/sft_healthbench.yaml
 
 # Dry run — 3 steps para verificar que no rompe
@@ -29,16 +31,16 @@ python run_sft.py --config configs/sft_healthbench.yaml training.num_train_epoch
 
 Checkpoint de salida: `checkpoints/grubrics-transfer/sft-healthbench/final/`
 
-Preparar datos SFT primero si no existen:
+Regenerar datos SFT si es necesario:
 ```bash
-python -m grubrics_science.data.prepare_sft --subset all --holdout_size 500
+python -m grubrics_science.data.prepare_sft --subset no_answers --holdout_size 500
 # Salida: data/sft/train.jsonl, data/sft/holdout_ids.json
 ```
 
 ## GRPO
 
 ```bash
-# Run completo (H100, ~10h, Qwen3-8B, 2000 steps)
+# Run completo (H100, ~4-10h dependiendo de steps/batch, Qwen3-8B)
 python run_grpo.py --config configs/verl_grpo.yaml
 
 # Run corto para validar pipeline (~3 steps)
@@ -55,6 +57,8 @@ python run_grpo.py --config configs/verl_grpo.yaml --curriculum \
     --phases 0.8:0.2:0.4 0.5:0.5:0.3 0.2:0.8:0.3 \
     --generate_data
 ```
+
+**Config de producción validada** (EXP-PROF-4): batch=24, micro_batch=8, gpu_mem=0.6. Step ~75s. 200 steps ~4.2h.
 
 ## Preparar datos GRPO (parquets)
 
@@ -96,3 +100,5 @@ REWARD_LAMBDA_DEFENSE=0.0 python run_grpo.py ...   # A3: sin defense_penalty
 - **DataLoader worker killed**: reducir `data.num_workers=1` en el config si persiste.
 - **OOM en producción**: reducir `data.train_batch_size` o `actor_rollout_ref.rollout.n` (rollout samples).
 - **Credenciales en workers**: correr `set -a && source .env && set +a` antes del script.
+- **veRL auto-resume**: si hay checkpoints en `default_local_dir`, veRL resume automáticamente. Borrar el dir para run from scratch.
+- **`expandable_segments:True`**: incompatible con vLLM 0.17. No usar.

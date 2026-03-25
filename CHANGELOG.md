@@ -237,3 +237,26 @@ Comparación de 5 modelos como Judge (EXP-JUDGE-001). gpt-5-mini superó a todos
 **Descartados**: gpt-4o (kappa=0), gpt-4.1 (kappa=0).
 
 Refs: TODO-003, EXP-JUDGE-001, EXP-PROF-2b
+
+---
+
+## [CHG-019] 2026-03-25 — Judge max_tokens 4000→16000 + retry on parse failure
+
+**Problema**: gpt-5-mini es un **reasoning model** — usa tokens internos de "pensamiento" que consumen el budget de `max_completion_tokens`. Con `max_tokens=4000`, rúbricas largas (>2000 chars) agotaban todo el budget en reasoning, dejando 0 tokens para output → respuesta vacía → scores `[0.0]*n`.
+
+**Diagnóstico** (2026-03-23/25):
+- `finish_reason: length` + `content: ""` + `reasoning_tokens: 8000/8000` confirmó que el modelo "piensa" internamente antes de responder
+- Rúbricas largas (p75=4650, max=10669 chars) requieren ~7000-10000 reasoning tokens
+- El output real es ~80 tokens (un JSON con scores)
+- `reasoning_effort: "low"` reduce tokens pero **degrada calidad** (scores inflados, sin discriminación)
+
+**Fix en `judge.py`**:
+1. `max_tokens=4000` → `max_tokens=16000` (da headroom para reasoning + output)
+2. `_parse_batched_response` devuelve `None` on failure (antes devolvía `[0.0]*n` silenciosamente)
+3. `evaluate_answers_batched` reintenta hasta 3 veces on parse failure
+
+**Validado**: rúbrica de 4513 chars (antes fallaba 5/5) ahora funciona. Rúbrica más larga (10669 chars) también OK. Batch test 3/3 éxito.
+
+**Impacto en costos**: cada call usa ~10k completion tokens (vs ~4k antes) pero la alternativa era 69% de entries corruptas. Sin fix, el precompute era inútil.
+
+Refs: TODO-006, CHG-018

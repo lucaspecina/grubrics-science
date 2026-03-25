@@ -108,28 +108,35 @@ Refs: CHG-011, CHG-017, EXP-PROF-1A, `docs/performance-profile.md`
 
 ## Runs core
 
-### TODO-006 🟢 Preparar datos para training (en curso 2026-03-23)
+### TODO-006 🟢 Preparar datos para training (en curso 2026-03-25)
 
 **Referencia**: `docs/data-guide.md` — leer para entender splits y flujo completo.
 
 **Splits (sin contaminación)**:
 - **SFT**: 1,329 preguntas SIN respuestas (`--subset no_answers`). Modelo ve rúbrica gold, OK porque nunca en GRPO.
-- **GRPO**: ~500 preguntas CON respuestas, precomputadas, excluyendo holdout. Modelo NO ve rúbrica gold.
+- **GRPO**: 3,171 preguntas CON respuestas, precomputadas, excluyendo holdout. Modelo NO ve rúbrica gold.
 - **Eval**: 500 holdout (fijo, seed=42). No en SFT ni GRPO.
-- **Reserva**: ~2,671 preguntas con respuestas para futuros GRPO runs.
+
+**Estado del cache** (actualizado 2026-03-25):
+- 560 entries precomputadas con gpt-5-mini @ amalia-resource (todas buenas, 0 all-zero)
+- 406 usables para GRPO (with_answers, no holdout)
+- 92 en holdout (de 500 necesarios para eval)
+- **NO hay que borrar el cache** — es incremental, entries existentes son válidas
+
+**Fix aplicado (CHG-019)**: gpt-5-mini es reasoning model — usaba todo el token budget en "pensamiento interno". Se subió `max_tokens` de 4000→16000 y se agregó retry on parse failure. Testeado y validado.
 
 **Pasos concretos**:
-1. ⬜ Regenerar SFT: `python -m grubrics_science.data.prepare_sft --subset no_answers` → 1,329 examples
-2. ⬜ Limpiar cache: borrar `data/cache/healthbench_precompute.jsonl` actual (mal filtrado)
-3. ⬜ Precompute limpio: ~500 preguntas with_answers, excluyendo holdout_ids y no_answers. Judge=gpt-5-mini @ amalia.
-4. ⬜ Precompute holdout: precomputar 500 holdout questions para eval.
-5. ⬜ Generar parquet GRPO: `prepare preset --only-cached` (filtrando holdout del train).
+1. ✅ Regenerar SFT: `--subset no_answers` → 1,329 examples + 500 holdout IDs (2026-03-23)
+2. ⬜ Precompute holdout (408 entries faltantes, ~$6, imprescindible para eval)
+   - `python -m grubrics_science.data.precompute_healthbench --model gpt-5-mini --num_evals 3 --max_concurrent 5`
+3. ⬜ Generar parquet GRPO: `python -m grubrics_science.data.prepare preset --only-cached` (filtra holdout del train).
+4. ⬜ Sincronizar datos a H100: `git push` o `scp` de `data/sft/` + `data/processed/` + `data/cache/`
 
-**Estado actual**: 444 entries precomputadas con gpt-5-mini pero sin filtrar holdout/no_answers. Hay que rehacer.
+**Estrategia**: empezar con 406 entries GRPO cacheadas. Si GRPO aprende → precomputar más (2,765 restantes, ~$40). Si no aprende → el problema es otro y no gastamos de más.
 
-**Costo**: ~$15 (precompute 500 GRPO) + ~$15 (precompute 500 eval) = ~$30 API.
+**Costo mínimo**: ~$6 (holdout). **Costo completo**: ~$46 (holdout + GRPO pool completo).
 
-Refs: `docs/data-guide.md`, CHG-018
+Refs: `docs/data-guide.md`, CHG-018, CHG-019
 
 ### TODO-007 🟡 Baselines
 
@@ -139,12 +146,14 @@ Refs: `docs/data-guide.md`, CHG-018
 ### TODO-008 🟡 SFT warm-up
 
 SFT con `--subset no_answers` (1,329 examples). ~$5, ~30 min H100.
-**Bloqueado por**: TODO-006 paso 1.
+**Datos listos**: `data/sft/train.jsonl` (1,329 entries) + `data/sft/holdout_ids.json` (500 IDs).
+**Comando**: `python run_sft.py --config configs/sft_healthbench.yaml` (en H100, `conda activate RL`).
+**No depende de precompute** — SFT solo necesita pares (pregunta, rúbrica gold).
 
 ### TODO-009 🟡 RL GRPO con curriculum — método principal
 
 ~$90, ~10h H100.
-**Bloqueado por**: TODO-005, TODO-006.
+**Bloqueado por**: TODO-006 (precompute holdout + parquet), TODO-008 (SFT checkpoint).
 
 ### TODO-010 🟡 Evaluación
 
