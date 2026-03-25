@@ -260,3 +260,23 @@ Refs: TODO-003, EXP-JUDGE-001, EXP-PROF-2b
 **Impacto en costos**: cada call usa ~10k completion tokens (vs ~4k antes) pero la alternativa era 69% de entries corruptas. Sin fix, el precompute era inútil.
 
 Refs: TODO-006, CHG-018
+
+---
+
+## [CHG-020] 2026-03-25 — Precompute timeout 120→300s para gpt-5-mini reasoning
+
+**Problema**: el precompute se trababa en entries aleatorias con `TimeoutError` (mensaje vacío en logs). Algunas calls funcionaban, otras no. El error parecía intermitente pero era determinista: gpt-5-mini con `max_tokens=16000` tarda >120s razonando en rúbricas complejas.
+
+**Diagnóstico**:
+- Logging mejorado en `judge.py` mostró `[TimeoutError: '']` — `asyncio.TimeoutError` tiene str vacío
+- El timeout estaba en 120s en `precompute_healthbench.py` (60s default en `Judge.__init__`)
+- gpt-5-mini genera ~10k reasoning tokens internos antes de responder → calls lentas
+- Con timeout=300s: 3/3 éxito, 0 retries
+
+**Fix**:
+1. `precompute_healthbench.py`: timeout `120.0` → `300.0`
+2. `judge.py`: logging ahora incluye `type(exc).__name__` y `repr(exc)` para diagnóstico futuro
+
+**Lección**: reasoning models tienen latencia variable alta. Siempre usar timeouts generosos (≥300s) cuando `max_tokens` es alto.
+
+Refs: CHG-019, TODO-006

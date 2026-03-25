@@ -135,10 +135,12 @@ class Judge:
                 last_error = exc
                 wait = 2 ** attempt  # 1s, 2s, 4s
                 logger.warning(
-                    "Judge API call failed (attempt %d/%d): %s. Retrying in %ds...",
+                    "Judge API call failed (attempt %d/%d): %s [%s: %r]. Retrying in %ds...",
                     attempt + 1,
                     self._max_retries,
                     exc,
+                    type(exc).__name__,
+                    str(exc)[:200],
                     wait,
                 )
                 await asyncio.sleep(wait)

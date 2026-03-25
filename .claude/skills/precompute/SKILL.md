@@ -86,5 +86,6 @@ python -m grubrics_science.data.prepare preset \
 
 - **gpt-5-mini reasoning tokens (CHG-019)**: gpt-5-mini es un reasoning model — gasta tokens internos "pensando" antes de responder. `max_tokens` debe ser ≥16000 (ya configurado en `judge.py`). Con <16000, rúbricas largas agotan el budget en reasoning → respuesta vacía → scores `[0.0]*n`. Si aparecen entries all-zero, verificar `max_tokens` en `evaluate_answers_batched`.
 - **Parse failure retry**: `evaluate_answers_batched` reintenta hasta 3 veces si el JSON no parsea. Si los 3 intentos fallan, devuelve `[0.0]*n` y loguea warning.
+- **TimeoutError en precompute (CHG-020)**: gpt-5-mini con `max_tokens=16000` puede tardar >120s razonando en rúbricas complejas. El error aparece como `TimeoutError` con mensaje vacío en logs. Fix: timeout=300s en `precompute_healthbench.py` (ya aplicado). Si reaparece, subir a 600s.
 - **Rate limit Azure**: si hay errores 429, reducir `--max_concurrent` a 5
 - **Entries no-answers**: entran al cache pero se ignoran al generar parquet GRPO (filtradas por falta de respuestas en meta_eval)
