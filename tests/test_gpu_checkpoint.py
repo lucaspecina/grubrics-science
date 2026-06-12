@@ -20,6 +20,11 @@ from pathlib import Path
 import pytest
 import torch
 
+# Skip the whole module on machines without the training stack (e.g. local
+# Windows with a CUDA torch but no transformers/peft installed).
+pytest.importorskip("transformers", reason="Requires training stack (H100 env)")
+pytest.importorskip("peft", reason="Requires training stack (H100 env)")
+
 pytestmark = [
     pytest.mark.gpu,
     pytest.mark.skipif(not torch.cuda.is_available(), reason="Requires CUDA GPU"),
