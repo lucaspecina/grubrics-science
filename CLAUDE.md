@@ -7,7 +7,7 @@ Entrena Qwen3-8B con RL (GRPO) para generar rúbricas de evaluación médica y c
 - **Modelo**: Qwen3-8B + LoRA (rank 64)
 - **RL framework**: veRL (GRPO) | **SFT**: TRL + LoRA
 - **Rollout**: vLLM (H100)
-- **Judge**: GPT via Azure OpenAI (async, rate-limited, `max_concurrent=10`)
+- **Judge**: GPT-4.1 via Azure OpenAI, scoring binario a-la-HealthBench (1 call/criterion, pass/fail) — CHG-021
 - **Tracking**: wandb | **Env**: `conda activate RL`
 
 ## Workflow de desarrollo
@@ -45,6 +45,25 @@ Entrena Qwen3-8B con RL (GRPO) para generar rúbricas de evaluación médica y c
 - `scripts/` — download_datasets, run_baselines, validate_judge, analyze_precompute
 - `scripts/validate_e2e_pipeline.py` — validación E2E completa: SFT→GRPO→Resume (~35 min en H100)
 - `docs/h100-setup.md` — guía para reproducir el entorno de la H100 desde cero
+
+## Guardrails de evaluación y testing
+
+Reglas para evitar falsos negativos cuando se evalúan modelos, judges, o componentes del pipeline:
+
+1. **Timeout generoso siempre**: usar `--timeout 300` (mínimo) en cualquier script que llame a la API. Los modelos de reasoning (gpt-5-mini, o1, etc.) pueden tardar >120s. Los modelos estándar (gpt-4.1, gpt-4o) también pueden ser lentos en prompts largos. **Nunca usar el default sin verificar cuál es.**
+
+2. **Guardar output siempre**: usar `--output` para guardar resultados detallados. Sin output no se puede diagnosticar si un resultado malo fue por el modelo o por un error de infraestructura (timeout, parse failure, rate limit).
+
+3. **Verificar scores sospechosos**: accuracy=0.000 o kappa=0.000 son señales de rotura, no de modelo malo. Antes de concluir que un modelo "no sirve", revisar:
+   - ¿Cuántas entries fueron evaluadas vs skipped?
+   - ¿Cuántas tuvieron parse failure (score=0.0 por default)?
+   - ¿Los raw responses del modelo tienen sentido?
+
+4. **Parse failures silenciosos**: `judge.py:_parse_response` devuelve `[0.0]` cuando el JSON no parsea. Esto NO se reporta como error — la entry cuenta como evaluada con score 0. Revisar warnings del logger.
+
+5. **Reproducir antes de concluir**: si un resultado contradice lo esperado (ej: modelo que funciona para todos menos para nosotros), repetir con parámetros controlados antes de documentar como hallazgo.
+
+**Ref**: CHG-020 (timeout fix), EXP-JUDGE-001 (resultados GPT-4.x posiblemente artefacto).
 
 ## Comportamientos conocidos de veRL
 

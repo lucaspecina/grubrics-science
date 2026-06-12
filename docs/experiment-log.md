@@ -265,6 +265,73 @@ Refs: TODO-003, CHG-018
 
 Refs: TODO-002, TODO-005, CHG-018
 
+### [EXP-JUDGE-002] Re-evaluación GPT-4.1 con timeout corregido + análisis metodológico
+**Fecha**: 2026-03-26 | **Config**: `validate_judge.py --judge_model gpt-4.1 --limit 50 --timeout 300 --output data/results/judge_validation_gpt41.json`
+**Motivación**: EXP-JUDGE-001 reportó kappa=0, accuracy=0.000 para GPT-4.1, pero usaba timeout=60s (default). Simultáneamente, HealthBench (paper original) y Qworld (arxiv 2603.23522) reportan uso exitoso de GPT-4.1 como judge. Posible artefacto de timeout/parse failure.
+
+**Resultados corregidos**:
+
+| Modelo | Kappa | Accuracy | Skipped | Mean Score | Median Score |
+|--------|-------|----------|---------|------------|--------------|
+| gpt-4.1 (EXP-JUDGE-001, timeout=60s) | 0.000 | 0.000 | ? | ? | ? |
+| **gpt-4.1 (re-test, timeout=300s)** | **0.000** | **0.500** | **0** | **0.870** | **1.000** |
+| gpt-5-mini (referencia) | 0.440 | 0.720 | 0 | — | — |
+
+**Desglose**: TP=25, TN=0, FP=25, FN=0. Recall=1.000, Precision=0.500.
+GPT-4.1 predice TODO como "pass" (score ≥ 0.5). Min score = 0.500.
+
+**Scores por label de médicos**:
+- Physicians True: mean=0.970 (min=0.60, max=1.00)
+- Physicians False: mean=0.770 (min=0.50, max=1.00)
+- Hay señal (0.97 vs 0.77) pero el rango [0.5, 1.0] impide discriminación con threshold=0.5
+
+**Hallazgo clave — la diferencia es metodológica, no del modelo**:
+
+| Aspecto | HealthBench (funciona) | Nosotros (no discrimina) |
+|---------|----------------------|--------------------------|
+| Scoring | **Binario** (pass/fail per criterion) | Continuo (0.0-1.0 per item) |
+| Granularidad | **1 criterio por API call** | Todos los items en 1 call |
+| Crédito parcial | **No** | Sí ("0.5 = partially meets") |
+| Agregación | `sum(points_met) / sum(positive_points)` | Weighted average of continuous |
+| Output | `{"criteria_met": true/false}` | `{"total_score": 0.65}` |
+
+HealthBench usa F1=0.709 con GPT-4.1 como grader. Evalúa 1 criterion por call con decisión binaria. GPT-4.1 discrimina bien en ese setup. En scoring continuo (nuestro), da "benefit of the doubt" → scores inflados.
+
+**Conclusiones**:
+1. EXP-JUDGE-001 accuracy=0.000 **era artefacto de timeout** — confirmado (0 skipped con timeout=300s)
+2. kappa=0 para GPT-4.1 **es real** con scoring continuo — el modelo es demasiado generoso
+3. **No es que GPT-4.1 no sirva** — es que nuestro prompt/metodología no es la correcta para este modelo
+4. gpt-5-mini (reasoning model) discrimina bien con scoring continuo gracias a sus reasoning tokens
+
+**Decisión (CHG-021)**: dual-judge strategy — gpt-5-mini para training (scoring continuo), GPT-4.1 con scoring binario a-la-HealthBench para evaluación comparable.
+
+Refs: EXP-JUDGE-001, CHG-018, CHG-020, CHG-021, TODO-003
+
+### [EXP-JUDGE-003] GPT-4.1 con scoring binario a-la-HealthBench — CONFIRMADO
+**Fecha**: 2026-03-26 | **Config**: `validate_judge.py --scoring binary --judge_model gpt-4.1 --limit 50 --max_concurrent 10 --timeout 300 --output data/results/judge_binary_gpt41.json`
+**Motivación**: Verificar si GPT-4.1 con el protocolo exacto de HealthBench (scoring binario, 1 call per criterion, `criteria_met: true/false`) produce kappa comparable a gpt-5-mini.
+
+**Resultados — comparación de 3 métodos en las mismas 50 entries**:
+
+| Método | Modelo | Kappa | Accuracy | F1 | TP | TN | FP | FN | API calls |
+|--------|--------|-------|----------|-----|----|----|----|----|-----------|
+| Continuo (timeout=60s) | gpt-4.1 | 0.000 | 0.000 | — | ? | ? | ? | ? | 50 |
+| Continuo (timeout=300s) | gpt-4.1 | 0.000 | 0.500 | 0.667 | 25 | 0 | 25 | 0 | 50 |
+| **Binario (HealthBench)** | **gpt-4.1** | **0.400** | **0.700** | **0.754** | **23** | **12** | **13** | **2** | **100** |
+| Continuo (referencia) | gpt-5-mini | 0.440 | 0.720 | — | — | — | — | — | 50 |
+
+**Score distribution (binary)**: Mean=0.720, Median=1.000, Min=0.000, Max=1.000, Stdev=0.454
+
+**Hallazgo**: GPT-4.1 con scoring binario da **kappa=0.400** (vs 0.440 de gpt-5-mini). La clave es TN: pasó de 0 (continuo, todo True) a **12** (binario, discrimina). F1=0.754 supera el 0.709 reportado por HealthBench.
+
+**El scoring binario transforma a GPT-4.1 de inservible a comparable con gpt-5-mini.** La diferencia metodológica (no el modelo) era el problema todo el tiempo.
+
+**Velocidad**: 100 API calls en ~2 min (50 entries × ~2 criteria avg). GPT-4.1 ~3s/call, sin reasoning overhead.
+
+**Decisión**: scoring binario a-la-HealthBench es viable tanto para evaluación como potencialmente para training. Ver CHG-021 actualizado.
+
+Refs: EXP-JUDGE-001, EXP-JUDGE-002, CHG-021
+
 ---
 
 Runs pendientes y extensiones: ver `TODO.md` (TODO-006 a TODO-011).

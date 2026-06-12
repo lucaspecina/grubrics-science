@@ -67,11 +67,45 @@ Para verificar que el Judge es confiable como señal de reward:
 
 ```bash
 python scripts/validate_judge.py \
-    --limit 500 --max_concurrent 10 \
+    --judge_model gpt-5-mini \
+    --limit 50 --max_concurrent 5 \
+    --timeout 300 \
     --output data/results/judge_validation.json
 ```
 
-Referencia: Spearman=0.431 (p<0.0001) en 151 pares matched (43 preguntas validadas).
+**SIEMPRE** usar `--timeout 300` y `--output`. Sin output no se puede diagnosticar qué pasó.
+
+Para comparar modelos de Judge:
+```bash
+# Correr para cada modelo candidato con los mismos parámetros
+for model in gpt-5-mini gpt-4.1 gpt-4o; do
+    python scripts/validate_judge.py \
+        --judge_model $model \
+        --limit 50 --max_concurrent 5 \
+        --timeout 300 \
+        --output data/results/judge_validation_${model}.json
+done
+```
+
+Referencia actual: gpt-5-mini kappa=0.440, accuracy=0.720 en 50 entries.
+
+### Scoring binario (HealthBench protocol) — para comparabilidad
+
+```bash
+# GPT-4.1 con scoring binario (1 call per criterion, pass/fail)
+python scripts/validate_judge.py \
+    --scoring binary \
+    --judge_model gpt-4.1 \
+    --limit 50 --max_concurrent 10 \
+    --timeout 300 \
+    --output data/results/judge_binary_gpt41.json
+```
+
+**Resultado confirmado (EXP-JUDGE-003)**: kappa=0.400, F1=0.754 — comparable con HealthBench (F1=0.709).
+
+**Este es ahora el judge principal** para todo el pipeline (training + evaluation). Reemplaza gpt-5-mini (CHG-021).
+
+⚠️ **Lección (CHG-020/CHG-021)**: GPT-4.x NO funciona con scoring continuo (kappa=0), pero SÍ funciona con scoring binario (kappa=0.400). La diferencia es metodológica, no del modelo. Siempre usar timeout=300 y guardar output.
 
 ## Análisis interactivo
 
