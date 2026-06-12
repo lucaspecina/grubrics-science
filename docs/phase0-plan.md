@@ -91,21 +91,25 @@ python -m grubrics_science.phase0.run_experiment --split heldout --only_g1 \
     --output data/results/phase0_experiment.json
 ```
 
-**H100** (~2-4h total — avisar al usuario antes de encender; `conda activate RL`, `git pull`):
+> **Decisión 2026-06-12 (CHG-023)**: todo parte DE CERO desde `Qwen/Qwen3-8B` base —
+> no se reusa el checkpoint SFT pre-pivote (queda como ablation futura). Thinking
+> mode SIEMPRE off (trampa documentada en RubricRAG).
+
+**H100** (~2-4h total, autorizado tope 4h; `conda activate RL`, `git pull`):
 ```bash
-# 1. G2: rúbricas del SFT en heldout (ambos modos, ~15 min)
+# 1. G2: rúbricas del Qwen3-8B BASE en heldout (ambos modos, ~15 min)
 python -m grubrics_science.phase0.h100_generate \
-    --checkpoint checkpoints/grubrics-transfer/sft-healthbench/final \
+    --checkpoint Qwen/Qwen3-8B \
     --split heldout --prompt_mode conditioned --k 1 \
-    --output data/results/phase0_g2_sft.jsonl
+    --output data/results/phase0_g2_base.jsonl
 python -m grubrics_science.phase0.h100_generate \
-    --checkpoint checkpoints/grubrics-transfer/sft-healthbench/final \
+    --checkpoint Qwen/Qwen3-8B \
     --split heldout --prompt_mode blind --k 1 \
-    --output data/results/phase0_g2_sft_blind.jsonl
+    --output data/results/phase0_g2_base_blind.jsonl
 
 # 2. Candidatas K=8 en train para DPO (~30-45 min)
 python -m grubrics_science.phase0.h100_generate \
-    --checkpoint checkpoints/grubrics-transfer/sft-healthbench/final \
+    --checkpoint Qwen/Qwen3-8B \
     --split train --prompt_mode conditioned --k 8 --temperature 0.9 \
     --output data/results/phase0_train_candidates.jsonl
 ```
@@ -129,7 +133,7 @@ python -m grubrics_science.phase0.h100_generate \
 **Local (API)** — tabla final + kill criterion:
 ```bash
 python -m grubrics_science.phase0.run_experiment --split heldout \
-    --g2_rubrics data/results/phase0_g2_sft.jsonl \
+    --g2_rubrics data/results/phase0_g2_base.jsonl \
     --g3_rubrics data/results/phase0_g3_minidpo.jsonl
 ```
 

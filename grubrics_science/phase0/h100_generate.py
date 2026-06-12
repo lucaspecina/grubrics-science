@@ -13,12 +13,12 @@ Dos modos de prompt (decisión de diseño, documentada en phase0-plan.md):
 Reporta G2 en ambos modos; G3 en conditioned. Usa vLLM si está disponible
 (rápido), con fallback a transformers.
 
-Uso (en H100, conda activate RL):
+Uso (en H100, conda activate RL) — CHG-023: partir SIEMPRE del base, no del SFT:
     python -m grubrics_science.phase0.h100_generate \
-        --checkpoint checkpoints/grubrics-transfer/sft-healthbench/final \
+        --checkpoint Qwen/Qwen3-8B \
         --rollout_sets data/cache/phase0_rollout_sets.jsonl \
         --split heldout --prompt_mode conditioned --k 1 \
-        --output data/results/phase0_g2_sft.jsonl
+        --output data/results/phase0_g2_base.jsonl
 """
 
 import argparse
@@ -77,6 +77,28 @@ def load_rollout_sets(path: str, split: Optional[str]) -> List[Dict[str, Any]]:
     return items
 
 
+def _apply_template(tok, user_prompt: str) -> str:
+    """Chat template with Qwen3 thinking mode OFF.
+
+    Thinking tokens degrade rubric generation (documented in RubricRAG,
+    arXiv:2603.20882) — always disable. Falls back gracefully for tokenizers
+    without the enable_thinking kwarg.
+    """
+    messages = [
+        {"role": "system", "content": SFT_SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
+    try:
+        return tok.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True,
+            enable_thinking=False,
+        )
+    except TypeError:
+        return tok.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True,
+        )
+
+
 def _gen_vllm(checkpoint: str, prompts: List[str], k: int, temperature: float,
               max_tokens: int) -> List[List[str]]:
     """Generate with vLLM. Returns [n_prompts][k] completions."""
@@ -88,14 +110,7 @@ def _gen_vllm(checkpoint: str, prompts: List[str], k: int, temperature: float,
               gpu_memory_utilization=0.6, max_model_len=4096)
     sp = SamplingParams(n=k, temperature=temperature if k > 1 else 0.0,
                         max_tokens=max_tokens, top_p=0.95)
-    chat_prompts = [
-        tok.apply_chat_template(
-            [{"role": "system", "content": SFT_SYSTEM_PROMPT},
-             {"role": "user", "content": p}],
-            tokenize=False, add_generation_prompt=True,
-        )
-        for p in prompts
-    ]
+    chat_prompts = [_apply_template(tok, p) for p in prompts]
     outs = llm.generate(chat_prompts, sp)
     return [[o.text.strip() for o in out.outputs] for out in outs]
 
@@ -114,11 +129,7 @@ def _gen_transformers(checkpoint: str, prompts: List[str], k: int,
     model.eval()
     results = []
     for p in prompts:
-        text = tok.apply_chat_template(
-            [{"role": "system", "content": SFT_SYSTEM_PROMPT},
-             {"role": "user", "content": p}],
-            tokenize=False, add_generation_prompt=True,
-        )
+        text = _apply_template(tok, p)
         inputs = tok(text, return_tensors="pt").to("cuda")
         cands = []
         for _ in range(k):

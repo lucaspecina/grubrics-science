@@ -6,8 +6,10 @@
 #   python run_dpo.py --config configs/dpo_phase0.yaml
 
 model:
-  # Punto de partida: el checkpoint SFT merged (ya en la H100)
-  path: checkpoints/grubrics-transfer/sft-healthbench/final
+  # Decisión 2026-06-12 (CHG-023): empezar DE CERO desde el modelo base —
+  # no reusar el checkpoint SFT pre-pivote. El claim queda más limpio:
+  # "base + señal funcional", sin herencia del paradigma de imitación.
+  path: Qwen/Qwen3-8B
   trust_remote_code: true
 
 lora:

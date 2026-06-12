@@ -283,6 +283,29 @@ Refs: CHG-019, TODO-006
 
 ---
 
+## [CHG-023] 2026-06-12 — Fase 0 parte de cero: Qwen3-8B base, sin reusar el checkpoint SFT pre-pivote
+
+Decisión del usuario al autorizar la ejecución de Fase 0: **no usar ningún modelo ya entrenado**.
+G2 y el mini-DPO (T1) parten del `Qwen/Qwen3-8B` base, no del checkpoint `sft-healthbench/final`.
+
+**Por qué fortalece el diseño**:
+- Claim más limpio: "modelo base + señal funcional" — sin herencia del paradigma de imitación
+  (el SFT pre-pivote fue entrenado a imitar rúbricas gold a ciegas, el framing viejo).
+- El B4 mostró que las rúbricas gold son hackeables (gap ≈ 0 vs hacks) — un SFT que las imita
+  hereda potencialmente esa ceguera.
+- El checkpoint SFT queda en disco como **ablation futura** (¿SFT-init vs base-init para DPO?),
+  no como dependencia.
+
+**Implicación técnica**: Qwen3-8B base tiene thinking mode por defecto → deshabilitado
+explícitamente en `h100_generate.py` (`enable_thinking=False`; trampa documentada en RubricRAG).
+
+**Costo**: posible menor parse rate de G2 base (informativo en sí — es el análogo del zero-shot
+ρ=0.426 publicado) y pares DPO algo más ruidosos (el DPO enseña formato + función a la vez).
+
+Refs: CHG-022, TODO-012, `docs/phase0-plan.md` (runbook actualizado)
+
+---
+
 ## [CHG-022] 2026-06-12 — Pivote estratégico: del "rubricator imitador" al "rubricator como capa de calibración anti-hacking del RL"
 
 Investigación profunda del SOTA (marzo–junio 2026; 23 fuentes primarias, 21 claims verificados con votación adversarial) + revisión manual de los papers críticos. Cuatro hallazgos fuerzan el pivote:

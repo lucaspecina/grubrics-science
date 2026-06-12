@@ -80,7 +80,7 @@ async def run(
 
     # G2 / G3 — loaded from H100-produced files
     if not only_g1:
-        for name, path in [("G2_sft", g2_rubrics), ("G3_minidpo", g3_rubrics)]:
+        for name, path in [("G2_base", g2_rubrics), ("G3_minidpo", g3_rubrics)]:
             if path and Path(path).exists():
                 logger.info("%s: loading rubrics from %s", name, path)
                 by_id = _load_rubrics_file(path)
@@ -139,7 +139,7 @@ def main():
     p.add_argument("--split", default="heldout", choices=["train", "dev", "heldout"])
     p.add_argument("--g1_model", default="gpt-4.1")
     p.add_argument("--judge_model", default="gpt-4.1")
-    p.add_argument("--g2_rubrics", default="data/results/phase0_g2_sft.jsonl")
+    p.add_argument("--g2_rubrics", default="data/results/phase0_g2_base.jsonl")
     p.add_argument("--g3_rubrics", default="data/results/phase0_g3_minidpo.jsonl")
     p.add_argument("--only_g1", action="store_true", help="Run only G1 (G2/G3 not ready)")
     p.add_argument("--max_concurrent", type=int, default=8)
