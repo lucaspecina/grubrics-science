@@ -87,9 +87,18 @@ async def run(rollout_sets_path: str, judge_model: str, max_concurrent: int,
 
     async def _guarded(it):
         async with sem:
-            return await check_one(it, judge)
+            try:
+                return await check_one(it, judge)
+            except Exception as exc:
+                logger.error("B4 failed for %s: %s [%s] — skipping",
+                             it["prompt_id"], exc, type(exc).__name__)
+                return None
 
-    results = await asyncio.gather(*[_guarded(it) for it in items])
+    raw_results = await asyncio.gather(*[_guarded(it) for it in items])
+    results = [r for r in raw_results if r is not None]
+    if len(results) < len(items):
+        logger.warning("B4: %d/%d questions failed and were skipped",
+                       len(items) - len(results), len(items))
 
     # Aggregate
     def _mean(key):
