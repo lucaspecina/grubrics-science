@@ -96,6 +96,8 @@ Para reproducir el entorno desde cero: `docs/h100-setup.md`
 
 - `TODO.md` — source of truth de pendientes (IDs: `TODO-NNN`)
 - `CHANGELOG.md` — decisiones de diseño y cambios significativos (IDs: `CHG-NNN`)
+- `docs/theoretical-foundations.md` — **cadena argumental del paper: claims con evidencia, qué funciona/qué no, contraargumentos** (mantener al incorporar evidencia nueva)
+- `docs/phase0-plan.md` — plan operativo de la Fase 0 (etapas A-D)
 - `docs/performance-profile.md` — **referencia viva de profiling, bottlenecks y optimizaciones** (mantener actualizado)
 - `docs/data-guide.md` — **guía de datos, splits y flujos** (leer antes de tocar datos o training)
 - `PROYECTO_ACTUAL.md` — descripción del proyecto para personas externas (mantener actualizado)

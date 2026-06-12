@@ -5,6 +5,7 @@
 > negativo (RubricRAG, arXiv 2603.20882) y tenía un techo estructural de imitación. La señal
 > (functional alignment) y el pipeline se conservan; cambia el claim y la aplicación destino.
 > Historia completa de la decisión: CHG-022. Landscape actualizado: `related-work.md` (sección 2026-06).
+> **Cadena argumental completa con evidencia y contraargumentos (esqueleto del paper): `theoretical-foundations.md`.**
 
 ## El problema: la brecha de inducción
 
