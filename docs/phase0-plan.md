@@ -81,6 +81,61 @@ antes de necesitarlo.
 | Condicionamiento del generador | question + 4-6 rollouts (sin ranking en test) | leakage del ancla en eval |
 | K candidatos para mini-DPO | 8 | señal de preferencia muy ruidosa |
 
+## Runbook de ejecución (estado 2026-06-12: Etapas A-C implementadas)
+
+Lo ya corrido (local + API): build de rollout sets (90 q), sanity check B4.
+
+**Local (API, sin GPU)** — experimento G1:
+```bash
+python -m grubrics_science.phase0.run_experiment --split heldout --only_g1 \
+    --output data/results/phase0_experiment.json
+```
+
+**H100** (~2-4h total — avisar al usuario antes de encender; `conda activate RL`, `git pull`):
+```bash
+# 1. G2: rúbricas del SFT en heldout (ambos modos, ~15 min)
+python -m grubrics_science.phase0.h100_generate \
+    --checkpoint checkpoints/grubrics-transfer/sft-healthbench/final \
+    --split heldout --prompt_mode conditioned --k 1 \
+    --output data/results/phase0_g2_sft.jsonl
+python -m grubrics_science.phase0.h100_generate \
+    --checkpoint checkpoints/grubrics-transfer/sft-healthbench/final \
+    --split heldout --prompt_mode blind --k 1 \
+    --output data/results/phase0_g2_sft_blind.jsonl
+
+# 2. Candidatas K=8 en train para DPO (~30-45 min)
+python -m grubrics_science.phase0.h100_generate \
+    --checkpoint checkpoints/grubrics-transfer/sft-healthbench/final \
+    --split train --prompt_mode conditioned --k 8 --temperature 0.9 \
+    --output data/results/phase0_train_candidates.jsonl
+```
+
+**Local (API)** — pares DPO (el ítem grande de API: ~$25-50; limitar si hace falta):
+```bash
+python -m grubrics_science.phase0.build_dpo_pairs \
+    --candidates data/results/phase0_train_candidates.jsonl \
+    --output data/sft/phase0_dpo_pairs.jsonl --max_concurrent 6
+```
+
+**H100** — T1 mini-DPO + G3 (~1-2h):
+```bash
+python run_dpo.py --config configs/dpo_phase0.yaml
+python -m grubrics_science.phase0.h100_generate \
+    --checkpoint checkpoints/grubrics-transfer/dpo-phase0/final \
+    --split heldout --prompt_mode conditioned --k 1 \
+    --output data/results/phase0_g3_minidpo.jsonl
+```
+
+**Local (API)** — tabla final + kill criterion:
+```bash
+python -m grubrics_science.phase0.run_experiment --split heldout \
+    --g2_rubrics data/results/phase0_g2_sft.jsonl \
+    --g3_rubrics data/results/phase0_g3_minidpo.jsonl
+```
+
+Nota de transferencia de archivos: los `data/results/*.jsonl` van y vienen entre
+local y H100 vía `scp` (o commitear temporalmente — son chicos).
+
 ## Presupuesto Fase 0
 
 | Etapa | API | GPU |

@@ -13,7 +13,24 @@ Source of truth para pendientes del proyecto. Cada item tiene un ID único `TODO
 
 ## Plan vigente (post-pivote) — Fases de research.md
 
-### TODO-012 🟡 Fase 0 — Experimento discriminante: ¿la inducción se aprende o alcanza el frontier con ejemplos?
+### TODO-012 🟢 Fase 0 — Experimento discriminante: ¿la inducción se aprende o alcanza el frontier con ejemplos? (en curso 2026-06-12)
+
+**Progreso (2026-06-12)** — plan operativo en `docs/phase0-plan.md`:
+- ✅ Etapa A: judge binario canónico (`judge/binary.py` + `Judge.evaluate_answers_binary`),
+  parser de rúbricas generadas, 23 tests, smoke live OK (ρ=1.0 vs gold en entry de 11 criterios)
+- ✅ Etapa B1-B3: 4 familias de hack + panel sin rúbrica (Borda + acuerdo inter-juez) +
+  build de 90 preguntas → `data/cache/phase0_rollout_sets.jsonl` (796 respuestas,
+  agreement 0.785, splits 61/16/13, holdout de 500 excluido)
+- 🟢 Etapa B4 (corriendo): preliminar en 2 preguntas: **gold hack gap ≈ 0.003** (la rúbrica
+  de los médicos NO distingue hacks de honestas; 75% de hacks sobre la mediana honesta)
+  mientras el panel los detecta — la motivación del paper, medida
+- ✅ Etapa C (código): harness (alignment + hack_detection), G1 frontier, orquestador con
+  kill criterion, pipeline H100 completo (h100_generate, build_dpo_pairs, run_dpo + config)
+- ⬜ Falta ejecutar: experimento G1 (API), G2/G3+T1 (requiere H100, ~2-4h — **avisar antes
+  de encender**), tabla final y decisión del kill criterion
+- Fix operativo: backoff 429-aware en judge (los bursts de ~5K calls necesitan 15-90s)
+
+
 
 **El experimento que decide el proyecto.** Comparar tres generadores de rúbricas condicionados en
 los mismos `rollouts + ranking del ancla`: (1) frontier congelado, (2) Qwen3-8B sin entrenar,
@@ -98,14 +115,13 @@ Refs: CHG-011, CHG-017, EXP-PROF-1A, `docs/performance-profile.md`
 
 ### TODO-006 🟢 Judge binario GPT-4.1 + datos (re-scopeado por pivote)
 
-Las Fases 1-2 originales (adaptar judge y precompute a scoring binario) siguen vigentes tal cual —
-TODO-012 las necesita. Cambia el destino de las fases 3-5 originales:
-
-- ⬜ Fase 1: `evaluate_answers_binary()` en `judge.py` (sin cambios, ver detalle en historial git)
-- ⬜ Fase 2: adaptar precompute a binario (sin cambios)
-- 🔄 Fase 3 (re-scopeada): precompute para TODO-012 — answer sets con respuestas sintéticas
-  tramposas + rankings del panel sin rúbrica (reemplaza el precompute masivo de gold_scores)
-- 🔄 Fase 4 (re-scopeada): reward function binaria — sigue necesaria para señal funcional
+- ✅ Fase 1 (2026-06-12): `Judge.evaluate_answers_binary()` + módulo canónico
+  `judge/binary.py` (template HealthBench, parser, agregación) — validate_judge.py dedupeado
+- ✅ Fase 3 re-scopeada (2026-06-12): precompute Fase 0 hecho —
+  `phase0/build_rollout_sets.py` → 90 preguntas con hacks + ancla del panel
+- ⬜ Fase 2 (adaptar `precompute_healthbench.py` a binario): pendiente, recién necesaria
+  para re-precompute masivo de gold_scores (Fases 1-2 del plan nuevo)
+- 🔄 Fase 4 (re-scopeada): reward function binaria — pendiente, para GRPO ablation y Fase 2
 - ⛔ Fase 5 original (GRPO producción con curriculum): superseded por TODO-013
 
 Refs: CHG-021, CHG-022, EXP-JUDGE-003
