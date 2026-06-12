@@ -28,7 +28,7 @@ held-out (¿separa trampa de calidad en datos nuevos?).
   generador frontier, o a Fase 4 (TODO-016)
 - Costo: ~decenas de $, días
 
-**Bloquea**: TODO-013, TODO-015. Refs: CHG-022, `docs/research.md` Fase 0
+**Bloquea**: TODO-013, TODO-015. Refs: CHG-022, `docs/research.md` Fase 0, **plan operativo: `docs/phase0-plan.md`**
 
 ### TODO-013 🔴 Fase 1 — Rubricator entrenado con señal funcional (DPO primero)
 
