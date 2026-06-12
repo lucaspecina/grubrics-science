@@ -81,21 +81,42 @@ async def run(rollout_sets_path: str, judge_model: str, max_concurrent: int,
     items = _load_rollout_sets(rollout_sets_path)
     logger.info("Loaded %d rollout sets", len(items))
 
-    judge = Judge(model=judge_model, max_concurrent=max_concurrent, timeout=timeout)
+    # Incremental resume: per-question results land in a .partial.jsonl as
+    # they complete; restarts skip what's already paid for.
+    partial_path = Path(output).with_suffix(".partial.jsonl")
+    done: Dict[str, Dict[str, Any]] = {}
+    if partial_path.exists():
+        with open(partial_path, encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    r = json.loads(line)
+                    done[r["prompt_id"]] = r
+        logger.info("Resuming: %d questions already done", len(done))
+
+    todo = [it for it in items if it["prompt_id"] not in done]
+
+    judge = Judge(model=judge_model, max_concurrent=max_concurrent,
+                  timeout=timeout, max_retries=6)
 
     sem = asyncio.Semaphore(max_concurrent)
+    partial_path.parent.mkdir(parents=True, exist_ok=True)
+    write_lock = asyncio.Lock()
 
     async def _guarded(it):
         async with sem:
             try:
-                return await check_one(it, judge)
+                r = await check_one(it, judge)
             except Exception as exc:
                 logger.error("B4 failed for %s: %s [%s] — skipping",
                              it["prompt_id"], exc, type(exc).__name__)
                 return None
+        async with write_lock:
+            with open(partial_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        return r
 
-    raw_results = await asyncio.gather(*[_guarded(it) for it in items])
-    results = [r for r in raw_results if r is not None]
+    raw_results = await asyncio.gather(*[_guarded(it) for it in todo])
+    results = list(done.values()) + [r for r in raw_results if r is not None]
     if len(results) < len(items):
         logger.warning("B4: %d/%d questions failed and were skipped",
                        len(items) - len(results), len(items))

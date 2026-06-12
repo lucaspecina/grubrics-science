@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import random
 import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -146,9 +147,19 @@ class Judge:
                 return response
             except Exception as exc:
                 last_error = exc
-                wait = 2 ** attempt  # 1s, 2s, 4s
+                # 429s need long, jittered backoff (the burst must drain);
+                # the 1-2-4s schedule only suits transient network errors.
+                is_rate_limit = (
+                    type(exc).__name__ == "RateLimitError"
+                    or "429" in str(exc)
+                    or "Too Many Requests" in str(exc)
+                )
+                if is_rate_limit:
+                    wait = min(90.0, 15.0 * (attempt + 1)) + random.uniform(0, 5)
+                else:
+                    wait = 2 ** attempt  # 1s, 2s, 4s
                 logger.warning(
-                    "Judge API call failed (attempt %d/%d): %s [%s: %r]. Retrying in %ds...",
+                    "Judge API call failed (attempt %d/%d): %s [%s: %r]. Retrying in %.1fs...",
                     attempt + 1,
                     self._max_retries,
                     exc,
