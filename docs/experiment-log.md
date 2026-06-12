@@ -2,6 +2,9 @@
 
 Bitácora cronológica de runs, validaciones y aprendizajes. El más reciente al final.
 
+IDs: `VAL-NNN` (validaciones), `EXP-NNN` (experimentos), `DEBUG-x` (debugging).
+Cross-refs a `TODO.md` (TODO-NNN) y `CHANGELOG.md` (CHG-NNN).
+
 ---
 
 ## Fase 0 — Infraestructura y validaciones end-to-end
@@ -67,42 +70,268 @@ Bitácora cronológica de runs, validaciones y aprendizajes. El más reciente al
 
 El pipeline GRPO nunca completó un run exitoso. Se aplicaron múltiples fixes (JSON columns, OOM, async Judge, wandb crash, timing diagnostics, rubric saving) pero no se validaron en conjunto.
 
-Además, hay un **problema bloqueante con la carga de checkpoints**: tanto SFT como GRPO previo tardan demasiado al usarse como punto de partida para un run de GRPO. Causa probable: veRL guarda checkpoints FSDP como sharded state dicts (no formato HF), y `from_pretrained()` no puede cargarlos → fallback a descarga desde HuggingFace Hub.
+Además, hay un **problema bloqueante con la carga de checkpoints** (TODO-004): veRL guarda checkpoints FSDP como sharded state dicts (no formato HF), y `from_pretrained()` no puede cargarlos. Esto conecta con la investigación de framework (TODO-001).
 
 ### Plan de debugging (en orden)
 
-| Fase | Qué | Criterio de éxito |
-|------|-----|-------------------|
-| **A** | GRPO end-to-end from scratch (~3 steps, config prod, Qwen3-8B en H100) | Termina sin error, reward no NaN, STEP_TIMING aparece |
-| **B** | Checkpoint + resume de GRPO (5 steps, save_freq=2, reiniciar desde checkpoint) | El segundo run arranca sin descargar de HF y termina OK |
-| **C** | SFT checkpoint → GRPO (SFT corto → iniciar GRPO desde ese checkpoint) | GRPO carga el modelo SFT en tiempo razonable (<10 min) |
+| Fase | Qué | Estado | Ref |
+|------|-----|--------|-----|
+| **A** | GRPO end-to-end from scratch (2 steps, config prod, Qwen3-8B) | ✅ COMPLETADO 2026-03-02 | TODO-004 |
+| **B** | Checkpoint + resume de GRPO | ✅ COMPLETADO 2026-03-19 | TODO-004 |
+| **C** | SFT checkpoint → GRPO | ✅ COMPLETADO 2026-03-19 | TODO-004 |
+
+### [EXP-DEBUG-A] GRPO end-to-end from scratch — 2 steps ✅
+**Fecha**: 2026-03-02 | **Config**: `verl_grpo.yaml` + overrides (batch=4, mini=4, micro=2)
+**Resultado**: Pipeline completo funciona. 2/2 steps, 10.6 min total (~65s/step + 178s checkpoint save).
+**Métricas step 2**:
+- reward mean=-0.095, max=0.863, min=-0.3 — reward discrimina correctamente
+- pg_loss=0.008, entropy=0.569, grad_norm=0.169 — gradientes estables
+- memory=104.7 GB allocated — cabe en H100 NVL
+- validation reward mean=0.606
+**Checkpoint guardado**: `global_step_2/actor/` con model, optim, extra_state + `huggingface/` (config+tokenizer)
+**wandb crash al final**: esperado, no afecta el training.
+**Observaciones pendientes**:
+- `prompt_length/mean=3.0` — sospechosamente bajo, pero el modelo genera rúbricas y el reward funciona. Puede ser una métrica interna de veRL.
+- `response_length/clip_ratio=0.83-0.92` — mayoría de respuestas llegan al límite de 512 tokens.
+
+Refs: CHG-010, CHG-012, TODO-004
+
+### [EXP-DEBUG-B] GRPO checkpoint resume — step 2 → step 3 ✅
+**Fecha**: 2026-03-19 | **Config**: `verl_grpo.yaml` + overrides (batch=4, mini=4, micro=2)
+**Procedimiento**: Run 1 (2 steps from scratch) → verificar checkpoints → Run 2 (resume → step 3)
+**Resultado**: Resume funciona correctamente. veRL auto-detecta `latest_checkpointed_iteration.txt`, carga FSDP checkpoint de `global_step_2`, entrena solo step 3.
+
+**Run 1 (from scratch)**:
+- 2/2 steps, 12.1 min total
+- Step 1: 208s, Step 2: 197s
+- Checkpoints: `global_step_1`, `global_step_2` (FSDP + HF + LoRA + optimizer)
+- Reward mean: 0.567 (step 1), 0.688 (step 2)
+- GPU: 33 GB actor, checkpoint save ~165-168s/step (~80% del step time)
+
+**Run 2 (resume)**:
+- Log: `Found checkpoint: .../global_step_2` → `Setting global step to 2` → `Resuming from .../global_step_2`
+- Progress: `67%|██████▋ | 2/3` → `100%|██████████| 3/3` (solo entrenó step 3)
+- 13.4 min total (incluye startup + checkpoint load + 1 step + save)
+- Step 3: 218.7s, checkpoint save: 184.2s
+- `global_step_3` guardado correctamente, `latest_checkpointed_iteration.txt` = 3
+
+**Observaciones**:
+- Checkpoint save domina el step time (~80%). Para producción explorar optimizaciones (TODO-005).
+- Resume startup incluye full model load + vLLM init + FSDP checkpoint load (~8 min overhead).
+- wandb crash at exit: esperado (offline mode, sin login).
+
+Refs: CHG-016, TODO-004
+
+### [EXP-DEBUG-C] SFT checkpoint → GRPO loading ✅
+**Fecha**: 2026-03-19 | **Tests**: `test_gpu_checkpoint.py` (tests 1-3)
+**Resultado**: Los 3 tests pasan en H100.
+
+1. **Load base model** (Qwen3-8B): ~3-9s, params OK, GPU memory OK
+2. **Load SFT checkpoint → apply LoRA → forward pass**: carga desde `from_pretrained(sft_dir)`, aplica fresh LoRA (rank 64), forward pass produce logits correctos
+3. **SFT save/load roundtrip**: save merged model → reload → weights match (torch.allclose, atol=1e-5)
+
+**Fix aplicado**: `model.config.vocab_size` en vez de `tokenizer.vocab_size` (Qwen3 tiene 151936 embeddings vs 151643 vocab tokens).
+
+Refs: CHG-016, TODO-004
 
 ---
 
-## Pendiente
+## Fase 2 — Profiling y optimización
 
-| # | Run | Qué mide | Costo est. | Tiempo est. | Bloquea |
-|---|-----|----------|------------|-------------|---------|
-| 5 | **Precompute HealthBench full** (5K preguntas) | gold_scores para todo el training set | ~$45 | ~4h (paralelo) | Todo lo siguiente |
-| 6 | Precompute FrontierScience (60 preguntas) | gold_scores para eval cross-domain | ~$5 | ~1h | P3 |
-| 7 | Baselines HealthBench (B0, B1, B3) | Piso y techo de calidad de rúbricas | ~$25 | ~2h | P2a |
-| 8 | Zero-shot Qwen3-8B (B1) | Lower bound sin fine-tuning | $0 | ~1h GPU | P2a |
-| 9 | **SFT Qwen3-8B** (warm-up) | ¿SFT solo es suficiente? | ~$10 | ~2h H100 | P2a |
-| 10 | **RL Qwen3-8B con curriculum** | Nuestro método | ~$90 | ~10h H100 | P2a, P2b |
-| 11 | Eval checkpoint verifiable-only | Transfer verificable → abierto funciona? | $0 | ~30 min | P2b |
-| 12 | Eval en FrontierScience holdout | Generalización cross-domain | ~$5 | ~1h | P3 |
+### [EXP-PROF-1A] Profiling baseline — batch=8, concurrent=10
+**Fecha**: 2026-03-19 | **Config**: `verl_grpo.yaml` + overrides (batch=8, mini=8, micro=4, save_freq=5, test_freq=0, val_before_train=false)
+**Duración**: 578s total (275s startup + 303s training)
 
-**Costo total core (runs 5-12)**: ~$190
-**Costo total con extensiones**: ~$820 (ver `docs/research.md` sección P1 para policy training)
+**Resultado**: GPU domina sobre Judge. Reward API no es bottleneck.
+
+**Timing por step (segundos)**:
+
+| Componente | Step 1 (warmup) | Steps 2-4 (steady) | Step 5 (+save) |
+|-----------|-----------------|---------------------|----------------|
+| gen (vLLM) | 21.6 | 11.4 | 12.0 |
+| update_actor | 14.4 | 10.4 | 10.4 |
+| update_weights | 8.4 | 8.0 | 7.6 |
+| old_log_prob | 6.0 | 2.7 | 2.7 |
+| save_checkpoint | — | — | 121.9 |
+| **total** | **50.4** | **32.5** | **154.6** |
+
+**Reward (Judge API per worker)**:
+
+| Step | wall | api_avg | sem_wait | calls |
+|------|------|---------|----------|-------|
+| 1 | 9.8s | 6.2s | 0.37s | 11 |
+| 2 | 8.0s | 5.9s | 0.00s | 9 |
+| 3 | 10.2s | 5.9s | 0.00s | 8 |
+| 4 | 8.0s | 6.4s | 0.00s | 6 |
+
+**Recursos**: VRAM 33.2/95.8 GB (35%), CPU RAM 56.4/320 GB (18%)
+
+**Hallazgos clave**:
+1. GPU = 75% del step (gen 35% + update_actor 32% + update_weights 25%)
+2. Reward async (Ray workers), NO en critical path. sem_wait ≈ 0.
+3. Checkpoint save = 122s (3.7× step time). save_freq alto es crítico.
+4. Startup = 275s (modelo + FSDP + vLLM + CUDA graphs). Costo fijo, se amortiza.
+5. VRAM con 65% headroom → se puede subir gpu_memory_utilization y micro_batch.
+6. Step 1 warmup: gen tarda 2× por compilación de CUDA graphs.
+
+**Impacto en plan de optimización**: se descarta subir JUDGE_MAX_CONCURRENT (era la optimización principal estimada). El foco cambia a optimización GPU: micro_batch sizes, gpu_memory_utilization.
+
+**Fix descubierto**: `ppo_mini_batch_size: 64` era bug (debe ser ≤ train_batch_size). Corregido a 24.
+
+Refs: TODO-002, TODO-003, TODO-005, CHG-011, CHG-017
+
+**Documento de referencia**: `docs/performance-profile.md` (referencia viva, mantener actualizado)
+
+### [EXP-PROF-2] Profiling batch=24 + Tier 1 optimizations
+**Fecha**: 2026-03-19 | **Config**: verl_grpo.yaml + overrides (batch=24, mini=24, micro=8, log_prob_micro=8, gpu_mem=0.6)
+**Duración**: 986s total (16.4 min, 5 steps)
+
+**Run 2a (fail)**: `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` causa `AssertionError` en vLLM 0.17 CuMemAllocator. Incompatible.
+
+**Run 2b (éxito)**:
+
+| Componente | Step 1 (warmup) | Steps 2-4 (steady) | Step 5 (+save) |
+|-----------|-----------------|---------------------|----------------|
+| gen | 140.8s | 77-138s | 140.0s |
+| update_actor | 20.0s | 16.0s | 16.1s |
+| old_log_prob | 7.4s | 4.1s | 4.1s |
+| update_weights | 8.6s | 8.0s | 7.7s |
+| save_checkpoint | — | — | 130.0s |
+| step total | 176.8s | 105-167s | 297.9s |
+| VRAM | 31.8 GB | 33.2 GB | 33.2 GB |
+
+**Reward (429 rate limited)**:
+
+| Step | reward_wall | api_avg | sem_wait | 429s |
+|------|-------------|---------|----------|------|
+| 1 | 127s | 20.6s | 12.3s | sí |
+| 2 | 71s | 20.6s | 1.5s | sí |
+| 3 | 136s | 22.3s | 11.8s | sí |
+| 4 | 74s | 17.1s | 6.6s | sí |
+
+**Hallazgos clave**:
+1. **Azure S0 rate limit es el bottleneck**: 12 errores 429 en 5 steps. reward_wall 71-136s vs gpu_phase 30-49s.
+2. **VRAM no cambió** entre batch=8 y batch=24 (33.2 GB en ambos). El headroom es del modelo.
+3. **GPU escala sub-linealmente**: update_actor 1.5x, update_weights constante, old_log_prob 1.5x. micro_batch=8 ayudó.
+4. **gen absorbe la espera de reward**: veRL bloquea durante gen esperando rewards. Sin rate limit, gen sería ~30-40s.
+5. `expandable_segments:True` incompatible con vLLM 0.17 (pytorch/pytorch#147851).
+
+**Acción requerida**: upgrade de Azure tier (S0→S1+) o reducir n de 6 a 4.
+
+Refs: TODO-002, TODO-003, TODO-005, CHG-017
+
+### [EXP-JUDGE-001] Comparación de modelos Judge — 5 modelos
+**Fecha**: 2026-03-19 | **Config**: `validate_judge.py --limit 50 --max_concurrent 10`
+**Motivación**: el rate limit de gpt-5.2-chat (S0 tier) es bottleneck a batch=24. Buscar alternativa con mejores rate limits.
+
+| Modelo | Kappa | Accuracy | Recurso |
+|--------|-------|----------|---------|
+| gpt-5.2-chat (baseline) | ~0.43 | ~0.68 | development-cursor-models |
+| **gpt-5-mini** | **0.440** | **0.720** | development-cursor-models |
+| gpt-5 | 0.400 | 0.700 | amalia-resource |
+| gpt-4o | 0.000 | 0.500 | amalia-resource |
+| gpt-4.1 | 0.000 | 0.000 | development-cursor-models |
+
+**Hallazgos**:
+1. Modelos GPT-4.x NO sirven como Judge (kappa=0, no discriminan, scores todos altos)
+2. gpt-5-mini = mejor kappa Y accuracy que gpt-5.2-chat y gpt-5 full
+3. gpt-5-mini es más rápido, barato, y con rate limits más altos que gpt-5.2
+
+**Decisión**: cambiar Judge de gpt-5.2-chat a gpt-5-mini (CHG-018)
+
+Refs: TODO-003, CHG-018
+
+### [EXP-PROF-4] Profiling batch=24 + gpt-5-mini @ amalia-resource (4,875 RPM)
+**Fecha**: 2026-03-21 | **Config**: verl_grpo.yaml + overrides (batch=24, micro=8, gpu_mem=0.6, gpt-5-mini @ amalia)
+**Duración**: 830.6s (13.8 min, 5 steps)
+
+| Step | step_time | gen | update_actor | reward_wall | api_avg | 429s |
+|------|-----------|-----|-------------|-------------|---------|------|
+| 1 (warmup) | 93.2s | 56.9s | 20.2s | 35-53s | 12-13s | 1 |
+| 2 | ~69s | ~44s | 16s | 31s | 11s | 0 |
+| 3 | ~77s | ~56s | 16s | 30s | 16s | 0 |
+| 4 | ~79s | ~56s | 16s | 38s | 16s | 0 |
+| 5 (+save) | 230.4s | 56.1s | 16.1s | — | — | — |
+
+**VRAM**: 33.2 GB (igual que todos los runs anteriores)
+**Checkpoint save**: 146.4s
+
+**Hallazgos**:
+1. **Rate limit resuelto**: solo 1 x 429 (vs 12 con dev-cursor). amalia-resource funciona.
+2. **Step steady ~75s**: 2.3x más rápido que Run 2b (rate limited). GPU domina de nuevo.
+3. **sem_wait 3-9s**: concurrent=10 es algo ajustado para 144 calls. Subir a 20 podría ganar ~10s/step.
+4. **api_avg 11-16s**: gpt-5-mini es más lento por call que gpt-5.2 (~6s), pero sin rate limit el throughput neto es mucho mejor.
+5. **Proyección 200 steps**: ~4.2h, ~$173 (GPU $29 + API $144).
+
+Refs: TODO-002, TODO-005, CHG-018
+
+### [EXP-JUDGE-002] Re-evaluación GPT-4.1 con timeout corregido + análisis metodológico
+**Fecha**: 2026-03-26 | **Config**: `validate_judge.py --judge_model gpt-4.1 --limit 50 --timeout 300 --output data/results/judge_validation_gpt41.json`
+**Motivación**: EXP-JUDGE-001 reportó kappa=0, accuracy=0.000 para GPT-4.1, pero usaba timeout=60s (default). Simultáneamente, HealthBench (paper original) y Qworld (arxiv 2603.23522) reportan uso exitoso de GPT-4.1 como judge. Posible artefacto de timeout/parse failure.
+
+**Resultados corregidos**:
+
+| Modelo | Kappa | Accuracy | Skipped | Mean Score | Median Score |
+|--------|-------|----------|---------|------------|--------------|
+| gpt-4.1 (EXP-JUDGE-001, timeout=60s) | 0.000 | 0.000 | ? | ? | ? |
+| **gpt-4.1 (re-test, timeout=300s)** | **0.000** | **0.500** | **0** | **0.870** | **1.000** |
+| gpt-5-mini (referencia) | 0.440 | 0.720 | 0 | — | — |
+
+**Desglose**: TP=25, TN=0, FP=25, FN=0. Recall=1.000, Precision=0.500.
+GPT-4.1 predice TODO como "pass" (score ≥ 0.5). Min score = 0.500.
+
+**Scores por label de médicos**:
+- Physicians True: mean=0.970 (min=0.60, max=1.00)
+- Physicians False: mean=0.770 (min=0.50, max=1.00)
+- Hay señal (0.97 vs 0.77) pero el rango [0.5, 1.0] impide discriminación con threshold=0.5
+
+**Hallazgo clave — la diferencia es metodológica, no del modelo**:
+
+| Aspecto | HealthBench (funciona) | Nosotros (no discrimina) |
+|---------|----------------------|--------------------------|
+| Scoring | **Binario** (pass/fail per criterion) | Continuo (0.0-1.0 per item) |
+| Granularidad | **1 criterio por API call** | Todos los items en 1 call |
+| Crédito parcial | **No** | Sí ("0.5 = partially meets") |
+| Agregación | `sum(points_met) / sum(positive_points)` | Weighted average of continuous |
+| Output | `{"criteria_met": true/false}` | `{"total_score": 0.65}` |
+
+HealthBench usa F1=0.709 con GPT-4.1 como grader. Evalúa 1 criterion por call con decisión binaria. GPT-4.1 discrimina bien en ese setup. En scoring continuo (nuestro), da "benefit of the doubt" → scores inflados.
+
+**Conclusiones**:
+1. EXP-JUDGE-001 accuracy=0.000 **era artefacto de timeout** — confirmado (0 skipped con timeout=300s)
+2. kappa=0 para GPT-4.1 **es real** con scoring continuo — el modelo es demasiado generoso
+3. **No es que GPT-4.1 no sirva** — es que nuestro prompt/metodología no es la correcta para este modelo
+4. gpt-5-mini (reasoning model) discrimina bien con scoring continuo gracias a sus reasoning tokens
+
+**Decisión (CHG-021)**: dual-judge strategy — gpt-5-mini para training (scoring continuo), GPT-4.1 con scoring binario a-la-HealthBench para evaluación comparable.
+
+Refs: EXP-JUDGE-001, CHG-018, CHG-020, CHG-021, TODO-003
+
+### [EXP-JUDGE-003] GPT-4.1 con scoring binario a-la-HealthBench — CONFIRMADO
+**Fecha**: 2026-03-26 | **Config**: `validate_judge.py --scoring binary --judge_model gpt-4.1 --limit 50 --max_concurrent 10 --timeout 300 --output data/results/judge_binary_gpt41.json`
+**Motivación**: Verificar si GPT-4.1 con el protocolo exacto de HealthBench (scoring binario, 1 call per criterion, `criteria_met: true/false`) produce kappa comparable a gpt-5-mini.
+
+**Resultados — comparación de 3 métodos en las mismas 50 entries**:
+
+| Método | Modelo | Kappa | Accuracy | F1 | TP | TN | FP | FN | API calls |
+|--------|--------|-------|----------|-----|----|----|----|----|-----------|
+| Continuo (timeout=60s) | gpt-4.1 | 0.000 | 0.000 | — | ? | ? | ? | ? | 50 |
+| Continuo (timeout=300s) | gpt-4.1 | 0.000 | 0.500 | 0.667 | 25 | 0 | 25 | 0 | 50 |
+| **Binario (HealthBench)** | **gpt-4.1** | **0.400** | **0.700** | **0.754** | **23** | **12** | **13** | **2** | **100** |
+| Continuo (referencia) | gpt-5-mini | 0.440 | 0.720 | — | — | — | — | — | 50 |
+
+**Score distribution (binary)**: Mean=0.720, Median=1.000, Min=0.000, Max=1.000, Stdev=0.454
+
+**Hallazgo**: GPT-4.1 con scoring binario da **kappa=0.400** (vs 0.440 de gpt-5-mini). La clave es TN: pasó de 0 (continuo, todo True) a **12** (binario, discrimina). F1=0.754 supera el 0.709 reportado por HealthBench.
+
+**El scoring binario transforma a GPT-4.1 de inservible a comparable con gpt-5-mini.** La diferencia metodológica (no el modelo) era el problema todo el tiempo.
+
+**Velocidad**: 100 API calls en ~2 min (50 entries × ~2 criteria avg). GPT-4.1 ~3s/call, sin reasoning overhead.
+
+**Decisión**: scoring binario a-la-HealthBench es viable tanto para evaluación como potencialmente para training. Ver CHG-021 actualizado.
+
+Refs: EXP-JUDGE-001, EXP-JUDGE-002, CHG-021
 
 ---
 
-## Extensiones (post-core)
-
-| Extension | RQ | Costo | Requiere |
-|-----------|-----|-------|---------|
-| Open-only (sin curriculum) | Curriculum aporta vs directo? | ~$90 | - |
-| Policy training (2 runs D1-D2) | P1: rubric quality → policy quality | ~$180 | Implementar policy training |
-| Ablations A1-A4 (reward components) | Qué componentes importan? | ~$70 c/u | - |
-| Benchmark de Judges | Mejor Judge para el dominio? | ~$5-15 | - |
-| Inter-judge consistency | Rankings consistentes entre modelos? | ~$15 | - |
+Runs pendientes y extensiones: ver `TODO.md` (TODO-006 a TODO-011).

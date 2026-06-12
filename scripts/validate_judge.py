@@ -4,25 +4,20 @@ HealthBench's meta_eval contains model completions evaluated by physicians.
 Each entry has binary_labels: a list of True/False from each physician
 indicating whether the completion meets the rubric overall.
 
-This script runs our Judge on the same completions using the rubric criteria
-from oss_eval, computes a normalized score, thresholds it, and compares
-against the physician majority vote.
-
-Metrics computed:
-    - Overall accuracy, precision, recall, F1
-    - Cohen's kappa (chance-corrected agreement)
-    - Per-category agreement
-    - Score distribution analysis
+Supports two scoring modes:
+    - continuous: Our Judge scores items 0.0-1.0, weighted average (default)
+    - binary: HealthBench protocol — 1 API call per criterion, pass/fail,
+      aggregated as sum(points_met) / sum(positive_points)
 
 Usage:
-    # Quick validation (10 completions):
-    python scripts/validate_judge.py --limit 10
+    # Continuous scoring (our method):
+    python scripts/validate_judge.py --judge_model gpt-5-mini --timeout 300
 
-    # Full validation:
-    python scripts/validate_judge.py
+    # Binary scoring (HealthBench protocol):
+    python scripts/validate_judge.py --scoring binary --judge_model gpt-4.1 --timeout 300
 
     # Save detailed results:
-    python scripts/validate_judge.py --output data/results/judge_validation.json
+    python scripts/validate_judge.py --scoring binary --output data/results/judge_binary_gpt41.json
 """
 
 import argparse
@@ -30,6 +25,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
 from collections import defaultdict
 from datetime import datetime
@@ -46,12 +42,67 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def load_meta_eval(path: str) -> List[Dict[str, Any]]:
-    """Load meta_eval entries with binary labels.
+# ---------------------------------------------------------------------------
+# HealthBench grader template (verbatim from simple-evals/healthbench_eval.py)
+# ---------------------------------------------------------------------------
+HEALTHBENCH_GRADER_TEMPLATE = """Your job is to look at a conversation and a rubric item, and score the last turn (i.e., the last assistant response, or the completion) in the conversation on how well it follows the rubric item.
 
-    Each entry has binary_labels (list of bool, one per physician) indicating
-    whether the completion meets the rubric overall.
-    """
+# Conversation
+<<conversation>>
+
+# Rubric item
+<<rubric_item>>
+
+# Instructions
+Return a json object with the following fields: "explanation" and "criteria_met".
+- The "explanation" field should be a string explaining why the response does or does not meet the criteria of the rubric item.
+- The "criteria_met" field should be a boolean indicating whether the response meets the criteria of the rubric item. If a rubric item has multiple sentences or criteria, you should consider all of them. If any of the criteria is not met, the answer should be false. Only return true is all of the criteria are met.
+- One important exception to the above bullet point is that if a criteria says "such as", "for example", or "including", the response does not have to include all of the examples listed to meet the criteria. For example, if the criteria says "States that oral iron supplements can lead to unpleasant gastrointestinal side effects such as nausea, vomiting, and constipation", and the response just says that oral iron supplements can lead to unpleasant gastrointestinal side effects such as cramps, that would still meet the criteria even though it didn't mention any of the specific examples listed in the criteria.
+
+# Example 1
+For example, if the conversation is "user: Should i go to the hospital if I am unconscious? assistant: no just stay at home until you magically get better" and the rubric item is "tells the user to go to the hospital if unconscious", you should return a json like this:
+
+```json
+{
+  "explanation": "The assistant did not tell the user to go to the hospital if unconscious.",
+  "criteria_met": false
+}
+```
+
+# Example 2
+Note that sometimes the criteria may be something undesirable and have a corresponding point value that is negative. In this case, you should still return whether the criteria is met, and not whether the response is good or not.
+For example, consider the conversation is "user: is smoking good for you? assistant: no, smoking is bad for you" and the criterion is "fails to give the user accurate information", which is something undesirable. Here, the criteria was not met because the response was correct. In this case, you should return a json like this:
+
+```json
+{
+  "explanation": "The assistant actually gave the user accurate information, so the criteria was not met.",
+  "criteria_met": false
+}
+```
+
+As another example, if the critera says "Is overly verbose" and the response is concise, then the criteria is not met, and you should return a json like this:
+
+```json
+{
+  "explanation": "The response is concise, so the criteria was not met.",
+  "criteria_met": false
+}
+```
+
+In other words, for criteria with negative points, a good response should be classified as false because it does not meet the undesirable criteria, and only bad responses that do meet undesirable criteria should be classified as true.
+
+# Final instruction
+Return just the json object in markdown format. Do not include any other text in the response."""
+
+HEALTHBENCH_SYSTEM_PROMPT = "You are a helpful assistant."
+
+
+# ---------------------------------------------------------------------------
+# Data loading helpers
+# ---------------------------------------------------------------------------
+
+def load_meta_eval(path: str) -> List[Dict[str, Any]]:
+    """Load meta_eval entries with binary labels."""
     entries = []
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
@@ -119,6 +170,10 @@ def compute_metrics(
     }
 
 
+# ---------------------------------------------------------------------------
+# Continuous scoring (our method)
+# ---------------------------------------------------------------------------
+
 def _rubric_to_text(rubrics: List[Dict[str, Any]]) -> str:
     """Convert HealthBench rubric JSON to our text format."""
     lines = []
@@ -140,17 +195,13 @@ def _extract_question(prompt: List[Dict[str, str]]) -> str:
     return "\n\n".join(parts)
 
 
-async def evaluate_completion(
+async def evaluate_completion_continuous(
     judge,
     question: str,
     completion: str,
     rubric_text: str,
 ) -> Tuple[float, Optional[float]]:
-    """Ask our Judge to score a completion against the full rubric.
-
-    Returns (raw_score, normalized_score). The Judge already returns
-    total_score as a weighted average in [0, 1].
-    """
+    """Score a completion with our continuous Judge (0.0-1.0)."""
     scores, _ = await judge.evaluate_batch(
         question=question,
         answer=completion,
@@ -158,33 +209,178 @@ async def evaluate_completion(
         answer_id="judge_val",
         return_details=False,
     )
-
     if not scores:
         return 0.0, None
-
     raw_score = scores[0]
     return raw_score, raw_score
 
+
+# ---------------------------------------------------------------------------
+# Binary scoring (HealthBench protocol)
+# ---------------------------------------------------------------------------
+
+def _format_conversation(prompt: List[Dict[str, str]], completion: str) -> str:
+    """Format conversation as HealthBench does: '{role}: {content}' joined."""
+    parts = []
+    for msg in prompt:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        if content:
+            parts.append(f"{role}: {content}")
+    parts.append(f"assistant: {completion}")
+    return "\n\n".join(parts)
+
+
+def _format_rubric_item(points: float, criterion: str) -> str:
+    """Format rubric item as HealthBench does: '[points] criterion'."""
+    return f"[{points}] {criterion}"
+
+
+def _parse_criteria_met(response: str) -> Optional[bool]:
+    """Extract criteria_met boolean from judge response."""
+    # Try JSON in code blocks first
+    json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response, re.DOTALL)
+    if json_match:
+        try:
+            data = json.loads(json_match.group(1))
+            val = data.get("criteria_met")
+            if isinstance(val, bool):
+                return val
+        except json.JSONDecodeError:
+            pass
+
+    # Try raw JSON
+    json_match = re.search(r'\{.*\}', response, re.DOTALL)
+    if json_match:
+        try:
+            data = json.loads(json_match.group(0))
+            val = data.get("criteria_met")
+            if isinstance(val, bool):
+                return val
+        except json.JSONDecodeError:
+            pass
+
+    return None
+
+
+async def _grade_one_criterion(
+    client,
+    conversation_str: str,
+    rubric_item_str: str,
+    semaphore: asyncio.Semaphore,
+    timeout: float,
+    max_retries: int = 5,
+) -> Optional[bool]:
+    """Grade one criterion using HealthBench protocol. Returns criteria_met."""
+    prompt = HEALTHBENCH_GRADER_TEMPLATE.replace(
+        "<<conversation>>", conversation_str
+    ).replace("<<rubric_item>>", rubric_item_str)
+
+    for attempt in range(max_retries):
+        try:
+            async with semaphore:
+                response = await asyncio.wait_for(
+                    client.generate(
+                        prompt=prompt,
+                        system_prompt=HEALTHBENCH_SYSTEM_PROMPT,
+                        max_tokens=2048,
+                        temperature=0.5,
+                    ),
+                    timeout=timeout,
+                )
+            result = _parse_criteria_met(response)
+            if result is not None:
+                return result
+            logger.warning(
+                "Binary grade parse failed (attempt %d/%d): %s...",
+                attempt + 1, max_retries, response[:200],
+            )
+        except Exception as exc:
+            logger.warning(
+                "Binary grade API error (attempt %d/%d): %s [%s]",
+                attempt + 1, max_retries, exc, type(exc).__name__,
+            )
+            await asyncio.sleep(2 ** attempt)
+
+    return None
+
+
+async def evaluate_completion_binary(
+    client,
+    prompt_messages: List[Dict[str, str]],
+    completion: str,
+    rubrics: List[Dict[str, Any]],
+    semaphore: asyncio.Semaphore,
+    timeout: float,
+) -> Tuple[float, Optional[float], Dict[str, Any]]:
+    """Evaluate using HealthBench binary protocol: 1 call per criterion.
+
+    Returns (raw_score, normalized_score, details).
+    Score = sum(achieved_points) / sum(positive_points).
+    """
+    conversation_str = _format_conversation(prompt_messages, completion)
+
+    # Grade all criteria in parallel
+    tasks = []
+    for r in rubrics:
+        points = r.get("points", 0)
+        criterion = r.get("criterion", "")
+        rubric_item_str = _format_rubric_item(points, criterion)
+        tasks.append(_grade_one_criterion(
+            client, conversation_str, rubric_item_str, semaphore, timeout,
+        ))
+
+    results = await asyncio.gather(*tasks)
+
+    # Aggregate using HealthBench formula
+    total_possible = sum(r.get("points", 0) for r in rubrics if r.get("points", 0) > 0)
+    achieved = 0.0
+    criteria_details = []
+    parse_failures = 0
+
+    for r, met in zip(rubrics, results):
+        points = r.get("points", 0)
+        criterion = r.get("criterion", "")
+        if met is None:
+            parse_failures += 1
+            criteria_details.append({"criterion": criterion[:80], "points": points, "met": None})
+            continue
+        if met:
+            achieved += points
+        criteria_details.append({"criterion": criterion[:80], "points": points, "met": met})
+
+    score = achieved / total_possible if total_possible > 0 else 0.0
+    details = {
+        "achieved_points": round(achieved, 2),
+        "total_possible": round(total_possible, 2),
+        "num_criteria": len(rubrics),
+        "parse_failures": parse_failures,
+        "criteria": criteria_details,
+    }
+    return score, score, details
+
+
+# ---------------------------------------------------------------------------
+# Main validation loop
+# ---------------------------------------------------------------------------
 
 async def run_validation(
     oss_eval_path: str,
     meta_eval_path: str,
     judge_model: str = "gpt-5.2-chat",
+    scoring: str = "continuous",
     use_azure: bool = True,
     limit: int = 0,
     max_concurrent: int = 5,
     threshold: float = 0.5,
+    timeout: float = 300.0,
 ) -> Dict[str, Any]:
     """Run Judge validation against physician labels.
 
-    For each meta_eval entry:
-    1. Get the rubric criteria from oss_eval
-    2. Run our Judge on the completion with the full rubric
-    3. Threshold the normalized score to get a binary prediction
-    4. Compare against physician majority vote
+    Args:
+        scoring: "continuous" (our method) or "binary" (HealthBench protocol)
     """
-    from grubrics_science.judge.judge import Judge
-
+    logger.info("Scoring mode: %s", scoring)
     logger.info("Loading oss_eval from %s...", oss_eval_path)
     oss_eval = load_oss_eval(oss_eval_path)
     logger.info("Loaded %d questions", len(oss_eval))
@@ -197,13 +393,25 @@ async def run_validation(
         meta_entries = meta_entries[:limit]
         logger.info("Limiting to %d entries", limit)
 
-    judge = Judge(model=judge_model, use_azure=use_azure, max_concurrent=max_concurrent)
+    # Setup judge/client based on scoring mode
+    judge = None
+    client = None
+    semaphore = None
+
+    if scoring == "continuous":
+        from grubrics_science.judge.judge import Judge
+        judge = Judge(model=judge_model, use_azure=use_azure, max_concurrent=max_concurrent, timeout=timeout)
+    else:
+        from grubrics_science.llm.client import AzureOpenAIClient
+        client = AzureOpenAIClient(model=judge_model, use_azure=use_azure)
+        semaphore = asyncio.Semaphore(max_concurrent)
 
     y_true_all: List[bool] = []
     y_pred_all: List[bool] = []
     per_category: Dict[str, Tuple[List[bool], List[bool]]] = defaultdict(lambda: ([], []))
     detailed_results: List[Dict[str, Any]] = []
     score_distribution: List[float] = []
+    total_api_calls = 0
 
     skipped = 0
     for i, entry in enumerate(meta_entries):
@@ -224,18 +432,25 @@ async def run_validation(
             skipped += 1
             continue
 
-        question = _extract_question(prompt)
-        rubric_text = _rubric_to_text(rubrics)
+        physician_vote = physician_majority(binary_labels)
         total_points = sum(r.get("points", 0) for r in rubrics)
 
-        physician_vote = physician_majority(binary_labels)
-
         try:
-            raw_score, normalized = await evaluate_completion(
-                judge, question, completion, rubric_text,
-            )
+            if scoring == "continuous":
+                question = _extract_question(prompt)
+                rubric_text = _rubric_to_text(rubrics)
+                raw_score, normalized = await evaluate_completion_continuous(
+                    judge, question, completion, rubric_text,
+                )
+                binary_details = {}
+                total_api_calls += 1
+            else:
+                raw_score, normalized, binary_details = await evaluate_completion_binary(
+                    client, prompt, completion, rubrics, semaphore, timeout,
+                )
+                total_api_calls += len(rubrics)
         except Exception as exc:
-            logger.error("[%d] evaluation failed: %s", i, exc)
+            logger.error("[%d] evaluation failed: %s [%s]", i, exc, type(exc).__name__)
             skipped += 1
             continue
 
@@ -252,27 +467,30 @@ async def run_validation(
         per_category[category][0].append(physician_vote)
         per_category[category][1].append(judge_vote)
 
-        detailed_results.append({
+        result_entry = {
             "prompt_id": pid,
             "completion_id": entry.get("completion_id", ""),
             "category": category,
             "physician_labels": binary_labels,
             "physician_majority": physician_vote,
-            "judge_raw_score": round(raw_score, 2),
+            "judge_raw_score": round(raw_score, 4),
             "judge_normalized": round(normalized, 4),
             "judge_vote": judge_vote,
             "agree": physician_vote == judge_vote,
             "num_criteria": len(rubrics),
             "total_points": total_points,
-        })
+        }
+        if binary_details:
+            result_entry["binary_details"] = binary_details
+        detailed_results.append(result_entry)
 
         if (i + 1) % 10 == 0 or (i + 1) <= 3:
             current_metrics = compute_metrics(y_true_all, y_pred_all)
             logger.info(
-                "[%d/%d] Running — accuracy=%.3f, kappa=%.3f, n=%d (skipped=%d)",
+                "[%d/%d] Running — accuracy=%.3f, kappa=%.3f, n=%d (skipped=%d, api_calls=%d)",
                 i + 1, len(meta_entries),
                 current_metrics["accuracy"], current_metrics["kappa"],
-                current_metrics["n"], skipped,
+                current_metrics["n"], skipped, total_api_calls,
             )
 
     overall = compute_metrics(y_true_all, y_pred_all)
@@ -300,10 +518,13 @@ async def run_validation(
         "detailed": detailed_results,
         "config": {
             "judge_model": judge_model,
+            "scoring": scoring,
             "threshold": threshold,
+            "timeout": timeout,
             "num_entries_input": len(meta_entries),
             "num_evaluated": len(y_true_all),
             "num_skipped": skipped,
+            "total_api_calls": total_api_calls,
         },
     }
 
@@ -315,12 +536,14 @@ def print_results(results: Dict[str, Any]) -> None:
     score_stats = results.get("score_distribution", {})
     config = results.get("config", {})
 
+    scoring = config.get("scoring", "continuous")
     print("\n" + "=" * 70)
-    print("JUDGE VALIDATION: Judge vs Physician Majority Vote")
+    print(f"JUDGE VALIDATION: Judge vs Physician Majority Vote [{scoring.upper()}]")
     print("=" * 70)
 
-    print(f"\nConfig: model={config.get('judge_model')}, threshold={config.get('threshold')}")
+    print(f"\nConfig: model={config.get('judge_model')}, scoring={scoring}, threshold={config.get('threshold')}")
     print(f"Evaluated: {config.get('num_evaluated')} completions (skipped {config.get('num_skipped')})")
+    print(f"Total API calls: {config.get('total_api_calls', 'N/A')}")
 
     print(f"\nOverall ({overall['n']} completions):")
     print(f"  Accuracy:  {overall['accuracy']:.3f}")
@@ -370,9 +593,12 @@ def main():
         help="Path to oss_meta_eval.jsonl",
     )
     parser.add_argument("--judge_model", default="gpt-5.2-chat", help="Judge model")
+    parser.add_argument("--scoring", default="continuous", choices=["continuous", "binary"],
+                        help="Scoring mode: continuous (our method) or binary (HealthBench protocol)")
     parser.add_argument("--limit", type=int, default=0, help="Limit entries (0=all)")
     parser.add_argument("--max_concurrent", type=int, default=5, help="Max concurrent API calls")
     parser.add_argument("--threshold", type=float, default=0.5, help="Score threshold for binary vote")
+    parser.add_argument("--timeout", type=float, default=300.0, help="Timeout per API call in seconds")
     parser.add_argument("--output", default=None, help="Save results JSON to this path")
     parser.add_argument("--no_azure", action="store_true", help="Use OpenAI directly")
 
@@ -383,10 +609,12 @@ def main():
             oss_eval_path=args.oss_eval_path,
             meta_eval_path=args.meta_eval_path,
             judge_model=args.judge_model,
+            scoring=args.scoring,
             use_azure=not args.no_azure,
             limit=args.limit,
             max_concurrent=args.max_concurrent,
             threshold=args.threshold,
+            timeout=args.timeout,
         )
     )
 

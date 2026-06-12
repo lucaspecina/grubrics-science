@@ -14,6 +14,9 @@ data/processed/
 data/cache/
 outputs/
 tmp_*
+data/results/*
+wandb/*
+checkpoints/*
 
 
 # Distribution / packaging
