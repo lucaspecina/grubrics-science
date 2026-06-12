@@ -171,6 +171,40 @@ para math CoT). Requiere scoping propio (TODO-016).
 5. **Presupuesto**: total estimado $800-1,200 si se corren todas las fases; cada fase tiene salida
    publicable propia y kill criterion para no gastar la siguiente.
 
+## Matriz de entrenamientos del paper completo
+
+Dos tipos de run: **rubricator** (barato: LoRA+DPO sobre el SFT checkpoint, 1-4h H100; el costo
+dominante es API para puntuar candidatas) y **policy** (caro: GRPO ~200 steps, ~4-5h H100 + API).
+
+**Unidad 1 (Fases 0-1)** — el inductor:
+
+| Run | Qué | Gate |
+|---|---|---|
+| T1 | Mini-DPO (G3, Fase 0) — ~1-2h H100 + ~$20 API | — |
+| T2 | DPO completo, 1-2 iteraciones — ~2-4h + ~$50-80 | Solo si T1 pasa kill criterion |
+| T3a | Ablation señal: DPO con meta-judge (à la Arizona) | Con T2 |
+| T3b | Ablation método: GRPO con señal funcional, thinking OFF | Con T2 |
+| T3c | Ablation condicionamiento: DPO sin rollouts en input | Con T2 |
+
+**Unidad 2 (Fases 2-3)** — las policies (~$120-250 c/u):
+
+| Run | Reward | Rol |
+|---|---|---|
+| P1 | Gold humanas (estáticas) | Referencia + cosecha de exploits para Fase 3 |
+| P2 | Frontier (estáticas) | Arm calidad-media |
+| P3 | Nuestro rubricator (estáticas) | ¿Mejor inducción → mejor policy? |
+| P4 | Random/degeneradas (run corto) | Piso |
+| P5 | Adaptativas — frontier congelado | Ablation crítica de adaptividad |
+| P6 | Adaptativas — rubricator entrenado | Claim central |
+
+Principios: (1) P1-P3 se reciclan como baselines de Fase 3 y cantera de hacks — nada se corre
+dos veces; (2) P5-P6 solo si Fase 2 muestra el problema; (3) re-entrenamiento online del
+rubricator durante el run NO está en el plan base (adaptación in-context primero); (4) repetir
+P1 vs P6 con segunda seed si el presupuesto da.
+
+**Total si se corre todo**: ~10-11 runs ≈ 1 día H100 (rubricator) + ~2 días acumulados H100
+(policies) + ~$500-800 API.
+
 ## Dominios y datasets
 
 - **HealthBench**: cancha principal de Fases 0-3 (5K preguntas, rúbricas de 262 médicos, respuestas
