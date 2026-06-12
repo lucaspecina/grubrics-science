@@ -12,6 +12,119 @@ Al final: tabla comparativa completa, analisis del gap, y como se posiciona GRub
 
 ---
 
+## ⚠️ Actualización 2026-06-12 — Landscape marzo-junio 2026 y pivote (CHG-022)
+
+Investigación profunda del SOTA (23 fuentes, claims verificados con votación adversarial 3-0) +
+revisión manual de los papers críticos. Estos hallazgos motivan el pivote documentado en CHG-022 y
+el nuevo framing de `research.md`. Los papers nuevos, ordenados por impacto sobre nuestro proyecto:
+
+### RubricRAG — Retrieval-Augmented Rubric Generation (Emory, 2026-03) ⚠️ CRÍTICO
+
+**Paper**: [arXiv:2603.20882](https://arxiv.org/abs/2603.20882) — Dhole & Agichtein, Emory (misma institución que Rubric-ARM)
+
+Corrió casi exactamente nuestro experimento P2a en HealthBench, con nuestra métrica downstream
+(Spearman entre scores del judge con rúbrica generada vs rúbrica humana):
+
+| Método | Spearman ρ |
+|---|---|
+| RubricRAG (retrieval, nothink) | **0.545** |
+| RubricRAG (think) | 0.495 |
+| Few-shot | 0.466 |
+| SFT (Qwen3-14B, LoRA) | 0.457 |
+| Zero-shot | 0.426 |
+| GRPO (Qwen3-14B) | **0.331** |
+| Gold | 1.000 |
+
+**GRPO salió último, debajo de zero-shot.** Matiz clave (verificado leyendo el paper): su reward de
+GRPO era `format + similitud textual con rúbricas humanas + diversidad + length` (pesos 1/5/2/1) —
+**NO functional alignment**. Optimizaron por RL un objetivo SFT-like, con thinking mode ON, y los
+reasoning tokens ruidosos degradaron todo (su propia explicación). Nuestra señal sigue sin probarse.
+**Implicancia**: el framing "RL > SFT > zero-shot en rúbricas" queda scooped con prior hostil; el
+baseline a vencer en HealthBench es retrieval ρ=0.545; thinking mode OFF; preferir DPO sobre GRPO
+para el inductor (ver paper de Arizona abajo).
+
+### RubricBench — La brecha de inducción (2026-03) ⚠️ CRÍTICO
+
+**Paper**: [arXiv:2603.01562](https://arxiv.org/pdf/2603.01562)
+
+El hallazgo que justifica la existencia del proyecto: los modelos frontier **saben juzgar con
+criterios dados (82-85% accuracy) pero no saben inducir los criterios** (rúbricas auto-generadas:
+GPT-5.1 54.6%, Gemini-3-Pro 60.4%, DeepSeek-v3.2 57.8% — gap ~26 pts vs rúbricas humanas).
+El gap **no se cierra con escala ni con reasoning models**. Rúbricas generadas: 54-76% de criterios
+alucinados/irrelevantes, recall de constraints expertos 26-54%. **El cuello de botella es la
+inducción, no la ejecución del juicio** — exactamente la capacidad que un generador entrenado debe
+aportar. Refuta "el frontier con buen prompt lo resuelve".
+
+### Reward Hacking en Rubric-Based RL (equipo RaR/Scale, 2026-05) ⚠️ CRÍTICO
+
+**Paper**: [arXiv:2605.12474](https://arxiv.org/abs/2605.12474) — Mahmoud, Rezaei, Wang, Gunjal, Liu, He
+
+En dominios médicos y científicos: optimizar la policy contra un verifier débil produce ganancias de
+proxy reward que **no transfieren** a un panel cross-family de jueces frontier; la explotación crece
+durante el training. **Aun con verificación fuerte, si la rúbrica omite failure modes hay hacking**:
+los verifiers con rúbrica prefieren el checkpoint RL, los jueces sin rúbrica prefieren el modelo base.
+Exploits recurrentes: satisfacción parcial de criterios compuestos, implícito-como-explícito, matching
+temático impreciso. Mejoras concentradas en completitud/presencia; declives en factualidad, concisión,
+relevancia. **Solo diagnóstico — no proponen fix.** Introducen el "self-internalization gap" como
+diagnóstico verifier-free. **Implicancia**: define nuestro problema (Fase 3), nuestra metodología de
+evaluación (panel cross-family sin rúbrica), y a nuestro competidor más probable (Scale).
+
+### Dynamic Rubrics via DPO (U. Arizona, 2026-05)
+
+**Paper**: [arXiv:2605.30568](https://arxiv.org/html/2605.30568v1) — Wang & Blanco
+
+Prueba de concepto de que **entrenar el inductor funciona**: Qwen3-14B fine-tuned con DPO genera
+mejores rúbricas que Claude Sonnet 4 (83.69% vs 81.62% human agreement en MT-Bench, con Claude como
+judge). Método: K=8 candidatos por instancia, meta-judge (Claude) evalúa en
+especificidad/coverage/discriminabilidad/domain-appropriateness, Bradley-Terry → pares DPO, 2
+iteraciones. Supera Prometheus 2, DnA-Eval, CheckEval, RubricHub. **Límites que nos dejan el turf**:
+solo dominio general (declaran médico/legal como future work), solo judging (nunca como reward de RL),
+señal = preferencia de meta-judge (NO functional alignment), sin comparación contra RL. **Implicancia**:
+la receta DPO esquiva el failure mode del GRPO de RubricRAG → Fase 1 usa DPO con pares construidos por
+señal funcional.
+
+### ARES — Rubrics as Training Data at Scale (2026-05)
+
+**Paper**: [arXiv:2605.23454](https://arxiv.org/abs/2605.23454)
+
+100K instancias con rúbricas co-generadas desde documentos de pretraining (pipeline de
+prompting+filtros, sin modelo entrenado). El RL con sus rúbricas supera continual pretraining, SFT y
+binary-reward RL en 7 benchmarks. **Implicancia**: la escala de generación no requiere entrenamiento;
+la comparación que falta (y hacemos) es calidad del generador, no cantidad.
+
+### RLR³ — Robust Rubric Rewards (Huawei, 2026-05)
+
+**Paper**: [arXiv:2605.30244](https://arxiv.org/abs/2605.30244)
+
+Robustece la **ejecución** de rúbricas en RL online: routing criterion-level a (extractor LLM +
+verifier determinístico) o LLM-as-Judge según verificabilidad. +4.7 pts sobre RLVR en Qwen3-VL-30B,
+15 benchmarks. No toca la generación. **Implicancia**: confirma binario/criterion-level como estándar
+de ejecución (compatible con nuestro CHG-021).
+
+### DR-rubric — Deep Research as Rubric (2026-06)
+
+**Paper**: [arXiv:2606.01091](https://arxiv.org/abs/2606.01091)
+
+Construcción de rúbricas por **búsqueda agéntica** (Stage I: facts/constraints/failure modes vía
+multi-turn search; Stage II: destilación a constraints atómicos verificables para GRPO). Hallazgo:
+las rúbricas de frontier tienen trade-offs por modelo (GPT-5 → breadth en agentic; Gemini → balance).
+Nota: el claim "un 8B bootstrap se auto-genera rúbricas mejores que GPT-5" fue **refutado 0-3** en
+nuestra verificación — nadie demostró eso aún. **Implicancia**: retrieval/search cubre conocimiento
+estático; nuestro nicho es lo que no está en internet (exploits del run en curso).
+
+### Síntesis del nuevo gap (reemplaza parcialmente el "Análisis del gap" de abajo)
+
+| Claim | Estado post-junio 2026 |
+|---|---|
+| RL > SFT/zero-shot para generar rúbricas | ❌ Scooped negativo (RubricRAG) — con reward textual; functional alignment sigue sin probar |
+| El frontier induce buenas rúbricas por prompting | ❌ Refutado (RubricBench: gap 26 pts, no cierra con escala) |
+| Entrenar el inductor puede superar al frontier | ✅ Probado en dominio general (Arizona DPO); abierto en dominio experto + como reward |
+| Rubric quality → policy quality (controlado) | **Abierto** — RRD solo midió proxy reward; 2605.12474 muestra el failure mode pero no varía calidad |
+| Fix para el hacking de rúbricas estáticas | **Abierto** — diagnóstico publicado sin solución; anti-hacking manual (RURA) o examiner congelado (DR-Tulu) |
+| Functional alignment como señal de training del inductor | **Abierto** — nuestra señal, verificado que nadie la usó |
+
+---
+
 ## Nivel 1: Prompting (generador fijo, rubricas fijas)
 
 Todos estos metodos usan un LLM congelado (GPT-4, etc.) para generar rubricas. La calidad depende enteramente de lo bueno que sea ese LLM y del prompt que se use. Ninguno mejora el generador.

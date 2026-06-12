@@ -224,7 +224,7 @@ Refs: TODO-002, TODO-003, TODO-005, EXP-PROF-1A
 
 Comparación de 5 modelos como Judge (EXP-JUDGE-001). gpt-5-mini superó a todos en kappa (0.440) y accuracy (0.720).
 
-**Hallazgo clave**: los modelos GPT-4.x (gpt-4o, gpt-4.1) **no sirven como Judge** — dan scores altos a todo, kappa=0, no discriminan entre respuestas buenas y malas. Solo la familia GPT-5.x produce señal útil para RL.
+**Hallazgo clave** (⚠️ revisado en CHG-021): GPT-4.x daba kappa=0 con scoring continuo, pero el test de GPT-4.1 tenía artefacto de timeout (accuracy=0.000 era falso). Re-test mostró que GPT-4.1 responde pero no discrimina con scoring continuo. Con scoring **binario** (como HealthBench) sí funciona. Ver CHG-021 y EXP-JUDGE-002.
 
 **Por qué gpt-5-mini sobre gpt-5.2-chat**:
 - Mejor kappa (0.440 vs ~0.43) y accuracy (0.720 vs ~0.68)
@@ -234,7 +234,7 @@ Comparación de 5 modelos como Judge (EXP-JUDGE-001). gpt-5-mini superó a todos
 
 **Backup**: gpt-5 en amalia-resource (kappa=0.400, 4,875 RPM) si gpt-5-mini tiene problemas.
 
-**Descartados**: gpt-4o (kappa=0), gpt-4.1 (kappa=0).
+**Descartados para scoring continuo**: gpt-4o (kappa=0), gpt-4.1 (kappa=0). Nota: GPT-4.1 viable con scoring binario — ver CHG-021.
 
 Refs: TODO-003, EXP-JUDGE-001, EXP-PROF-2b
 
@@ -280,3 +280,67 @@ Refs: TODO-006, CHG-018
 **Lección**: reasoning models tienen latencia variable alta. Siempre usar timeouts generosos (≥300s) cuando `max_tokens` es alto.
 
 Refs: CHG-019, TODO-006
+
+---
+
+## [CHG-022] 2026-06-12 — Pivote estratégico: del "rubricator imitador" al "rubricator como capa de calibración anti-hacking del RL"
+
+Investigación profunda del SOTA (marzo–junio 2026; 23 fuentes primarias, 21 claims verificados con votación adversarial) + revisión manual de los papers críticos. Cuatro hallazgos fuerzan el pivote:
+
+1. **RubricRAG (arXiv 2603.20882, Emory, 2026-03)** corrió casi exactamente nuestro experimento P2a en HealthBench con nuestra métrica (Spearman vs gold): GRPO salió **último** (ρ=0.331), debajo de zero-shot (0.426), SFT (0.457) y retrieval (**0.545**). Matiz: su reward de GRPO era similitud textual + formato + diversidad + length — **no functional alignment**, que sigue sin probarse. Pero el framing "RL para que un 8B imite rúbricas humanas" queda scooped con prior hostil, baseline retrieval difícil, y un techo estructural: con Spearman-vs-gold como señal, ρ=1.0 = *empatar* al médico — nunca superarlo. Es destilación, no capacidad nueva.
+
+2. **RubricBench (arXiv 2603.01562)** — la **brecha de inducción**: los modelos frontier juzgan a 82-85% de accuracy *cuando se les dan los criterios*, pero auto-generan rúbricas que solo llegan a 55-60% (gap ~26 pts, estable, **no cierra con escala ni reasoning**; 54-76% de criterios alucinados; recall de constraints expertos 26-54%). Saben *reconocer* calidad; no saben *inducir* la receta. El problema es real y prompting no lo resuelve.
+
+3. **Reward hacking en rubric-based RL (arXiv 2605.12474, equipo RaR/Scale, 2026-05)**: las rúbricas estáticas — **incluso las humanas** — se explotan durante el RL (proxy reward sube, jueces sin rúbrica prefieren el modelo base; exploits: satisfacción parcial de criterios compuestos, implícito-como-explícito, matching temático impreciso). El paper es solo diagnóstico — **no hay fix publicado**.
+
+4. **DPO rubric generator (arXiv 2605.30568, U. Arizona, 2026-05)**: un Qwen3-14B entrenado con DPO (meta-judge preferences) **le gana a Claude Sonnet 4 escribiendo rúbricas** (83.69% vs 81.62% MT-Bench, juzgado por el propio Claude). Entrenar el inductor funciona; el turf "dominio experto + señal funcional + rúbricas como reward de RL" sigue libre (lo declaran future work).
+
+**Nueva tesis**: los judges reconocen calidad pero no saben escribir la receta (brecha de inducción). GRubrics entrena al que escribe recetas, usando el reconocimiento del judge como señal (functional alignment). La aplicación destino: el rubricator como **capa adaptativa que mantiene calibrado el reward durante el RL** — rúbricas que se regeneran condicionadas en los rollouts vivos de la policy y resisten el hacking que rompe a las estáticas. Los failure modes que la policy inventa durante el training no están en internet ni en la rúbrica del experto: emergen del run. Ahí retrieval pierde por construcción y el entrenamiento tiene headroom genuino sobre el baseline humano.
+
+**Plan por fases con kill criteria**: ver `docs/research.md` (Fase 0 discriminante → Fase 1 rubricator funcional → Fase 2 estudio controlado rubric→policy → Fase 3 adaptativo anti-hacking → Fase 4 trayectorias agénticas).
+
+**Cancha**: texto/HealthBench primero (activos construidos, barato); trayectorias agénticas (ancla = éxito verificable, donde está la demanda industrial) como Fase 4 / plan B / segundo paper.
+
+**Decisión de repo**: continuar en este. ~80% del stack es reutilizable (judge, reward Spearman, adapters, launchers veRL, tests, setup H100). El ruido del framing viejo se maneja con documentación, no con repo nuevo.
+
+**Descartado**:
+- Seguir con el framing P2a original (scooped + techo de imitación).
+- Pivote inmediato a trayectorias agénticas: infra agéntica pesada para 1×H100, no existe dataset gold de rúbricas de proceso, y el mecanismo se valida más barato en texto. Queda como Fase 4/plan B — con la nota de que ahí el ancla es verificable (sin circularidad de judge) y la demanda industrial es máxima.
+- Repo nuevo (re-validar el E2E para ganar limpieza que dan los docs).
+- Usar la rúbrica gold como ancla anti-hacking (es una rúbrica estática más — el hack que la engaña engaña al ancla; el ancla debe ser panel cross-family **sin rúbrica**, usado esparso).
+
+**Riesgo científico #1 (a testear en Fase 0)**: que un frontier congelado, condicionado en los mismos rollouts + ranking del ancla, induzca rúbricas igual de buenas que el 8B entrenado. Si pasa, el claim de entrenamiento colapsa a costo/privacidad y el paper pivota al estudio controlado (Fase 2) con generador frontier.
+
+Refs: TODO-012..016, `docs/research.md`, `docs/related-work.md` (Actualización 2026-06), CHG-021
+
+---
+
+## [CHG-021] 2026-03-26 — Judge cambia a GPT-4.1 con scoring binario a-la-HealthBench (para todo)
+
+**Hallazgo**: GPT-4.1 como judge daba kappa=0 en EXP-JUDGE-001, pero el test estaba contaminado (timeout=60s → accuracy=0.000, artefacto). Con scoring continuo y timeout correcto: kappa=0 (scores inflados). Con scoring **binario a-la-HealthBench**: **kappa=0.400, F1=0.754** (EXP-JUDGE-003).
+
+**Root cause**: scoring continuo (0.0-1.0) no es compatible con GPT-4.x — da "benefit of the doubt". El scoring binario (pass/fail per criterion, 1 call per criterion) fuerza decisiones nítidas. Es el estándar del campo (HealthBench, Qworld).
+
+**Decisión — GPT-4.1 binario para todo (training + evaluation)**:
+- Reemplaza gpt-5-mini como judge del pipeline completo
+- Mismo modelo y método que HealthBench y Qworld → comparable directamente
+- Más rápido (~3s/call vs ~15s) y más barato que gpt-5-mini
+- Más calls por evaluación (1 per criterion vs 1 per rúbrica) pero GPT-4.1 tiene rate limits altos
+
+**Protocolo (verbatim de HealthBench)**:
+- Prompt: `HEALTHBENCH_GRADER_TEMPLATE` (en `validate_judge.py`)
+- System: `"You are a helpful assistant."`
+- 1 API call per criterion, output: `{"explanation": "...", "criteria_met": true/false}`
+- Agregación: `sum(points where met) / sum(positive points)`
+- Temperature: 0.5, max_tokens: 2048
+
+**Implicaciones**:
+- Hay que re-precomputar gold_scores con el nuevo judge/método (el cache actual es con gpt-5-mini continuo)
+- La reward function necesita adaptarse para hacer scoring binario per criterion
+- El precompute también cambia: evaluar cada criterion de la gold rubric individualmente
+
+**Descartado**: dual-judge (gpt-5-mini para training, GPT-4.1 para eval). No tiene sentido mantener dos judges cuando GPT-4.1 binario da kappa comparable, es más barato, y alinea con el campo.
+
+**Lección meta**: nunca concluir que un modelo "no sirve" sin verificar (1) que el test corrió sin errores y (2) que la tarea es equivalente a la que funciona en otros papers.
+
+Refs: EXP-JUDGE-001, EXP-JUDGE-002, EXP-JUDGE-003, CHG-018, CHG-020
