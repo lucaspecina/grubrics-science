@@ -8,8 +8,23 @@
 # Idempotente: cada paso chequea si ya esta hecho (re-ejecutable tras reboot
 # del driver o eviction del spot).
 #
-# Uso:  bash scripts/spot_block1.sh
+# Uso:  bash scripts/spot_block1.sh [--deallocate] [--allow-reboot]
+#
+# ⚠️ VM COMPARTIDA (piar-rl y otros proyectos de Lucas conviven aca):
+#   - NO apaga la VM salvo --deallocate explicito
+#   - NO rebootea por driver salvo --allow-reboot explicito
+#   - Usa solo GPU 1 (CUDA_VISIBLE_DEVICES=1) para no pisar trabajo ajeno
+#   - Antes de acciones invasivas: chequear `w`, `nvidia-smi`, tmux ajenos
 set -uo pipefail
+
+DEALLOCATE=false
+ALLOW_REBOOT=false
+for arg in "$@"; do
+  case $arg in
+    --deallocate) DEALLOCATE=true ;;
+    --allow-reboot) ALLOW_REBOOT=true ;;
+  esac
+done
 
 RG="RG-IAF-YTEC-poc-int"
 VM="lp-gpu-h100-x2-spot"
@@ -36,19 +51,16 @@ log "SSH OK"
 
 # --- 1. NVIDIA driver --------------------------------------------------------
 DRIVER=$($SSH "nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1" || echo "")
-if [ -z "$DRIVER" ]; then
-  log "Sin driver NVIDIA — instalando (necesita reboot)..."
-  $SSH "sudo apt-get update -qq && sudo apt-get install -y -qq nvidia-driver-575-server" \
-    || { log "ERROR instalando driver"; exit 1; }
-  log "Rebooting VM... re-ejecutar este script en ~3 min"
-  $SSH "sudo reboot" || true
-  exit 2
-fi
 MAJOR=${DRIVER%%.*}
-if [ "$MAJOR" -lt 565 ]; then
-  log "Driver $DRIVER < 565 — actualizando (necesita reboot)..."
+if [ -z "$DRIVER" ] || [ "${MAJOR:-0}" -lt 565 ]; then
+  if [ "$ALLOW_REBOOT" != "true" ]; then
+    log "Driver ausente o <565 ($DRIVER). VM COMPARTIDA: reboot requiere --allow-reboot"
+    log "y coordinar con los otros proyectos antes. Abortando."
+    exit 1
+  fi
+  log "Driver $DRIVER — instalando/actualizando (reboot autorizado)..."
   $SSH "sudo apt-get update -qq && sudo apt-get remove --purge -y libnvidia-fbc1-535 2>/dev/null; sudo apt-get install -y -qq nvidia-driver-575-server" \
-    || { log "ERROR actualizando driver"; exit 1; }
+    || { log "ERROR con driver"; exit 1; }
   log "Rebooting VM... re-ejecutar este script en ~3 min"
   $SSH "sudo reboot" || true
   exit 2
@@ -86,7 +98,8 @@ scp -q -i "$SSH_KEY" data/cache/phase0_rollout_sets.jsonl \
 log "Datos sincronizados"
 
 # --- 4. Generacion (G2 x2 + candidatas K=8) -----------------------------------
-RUN="cd $REMOTE_DIR && source \$HOME/miniconda3/etc/profile.d/conda.sh && conda activate phase0 &&"
+# VM compartida: usar SOLO GPU 1, dejar GPU 0 para los otros proyectos.
+RUN="cd $REMOTE_DIR && source \$HOME/miniconda3/etc/profile.d/conda.sh && conda activate phase0 && export CUDA_VISIBLE_DEVICES=1 &&"
 log "G2 conditioned (heldout)..."
 $SSH "$RUN python -m grubrics_science.phase0.h100_generate --checkpoint Qwen/Qwen3-8B --split heldout --prompt_mode conditioned --k 1 --output data/results/phase0_g2_base.jsonl" \
   || { log "ERROR en G2 conditioned"; exit 1; }
@@ -103,6 +116,11 @@ scp -q -i "$SSH_KEY" "azureuser@$IP:$REMOTE_DIR/data/results/phase0_*.jsonl" dat
 log "Resultados locales:"
 ls -la data/results/phase0_g2_base.jsonl data/results/phase0_g2_base_blind.jsonl data/results/phase0_train_candidates.jsonl
 
-log "DEALLOCATING VM (fin bloque 1)..."
-az vm deallocate -g "$RG" -n "$VM" >/dev/null
-log "VM apagada. Bloque 1 completo."
+if [ "$DEALLOCATE" = "true" ]; then
+  log "DEALLOCATING VM (--deallocate explicito)..."
+  az vm deallocate -g "$RG" -n "$VM" >/dev/null
+  log "VM apagada. Bloque 1 completo."
+else
+  log "Bloque 1 completo. VM COMPARTIDA: queda encendida (usar --deallocate"
+  log "solo tras coordinar con los otros proyectos)."
+fi
