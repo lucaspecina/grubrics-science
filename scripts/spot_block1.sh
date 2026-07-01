@@ -64,9 +64,11 @@ $SSH 'source $HOME/miniconda3/etc/profile.d/conda.sh && conda env list | grep -q
   log "Creando env phase0 (python 3.12)..."
   $SSH 'source $HOME/miniconda3/etc/profile.d/conda.sh && conda create -n phase0 python=3.12 -y -q'
 }
-$SSH 'source $HOME/miniconda3/etc/profile.d/conda.sh && conda activate phase0 && python -c "import vllm" 2>/dev/null' || {
-  log "Instalando torch cu129 + vLLM 0.17 (esto tarda ~10-15 min)..."
-  $SSH 'source $HOME/miniconda3/etc/profile.d/conda.sh && conda activate phase0 && pip install -q torch --index-url https://download.pytorch.org/whl/cu129 && pip install -q vllm==0.17.0'
+$SSH 'source $HOME/miniconda3/etc/profile.d/conda.sh && conda activate phase0 && python -c "import vllm, torch; assert torch.cuda.is_available()" 2>/dev/null' || {
+  log "Instalando vLLM 0.17 (trae su torch pinneado — NO instalar torch aparte, rompe NCCL)..."
+  $SSH 'source $HOME/miniconda3/etc/profile.d/conda.sh && conda activate phase0 && pip uninstall -y -q torch torchvision torchaudio 2>/dev/null; pip install -q vllm==0.17.0'
+  $SSH 'source $HOME/miniconda3/etc/profile.d/conda.sh && conda activate phase0 && python -c "import vllm, torch; print(\"vllm+torch OK\", torch.__version__, torch.cuda.is_available())"' \
+    || { log "ERROR: vllm/torch siguen rotos tras reinstalar"; exit 1; }
 }
 log "Env phase0 OK"
 
