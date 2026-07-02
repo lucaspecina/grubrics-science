@@ -57,6 +57,8 @@ async def run(
     max_concurrent: int,
     timeout: float,
     output: str,
+    g1_rubrics: Optional[str] = None,
+    extra_generators: Optional[List[str]] = None,
 ):
     items = _load_rollout_sets(rollout_sets_path, split=split)
     logger.info("Eval split '%s': %d questions", split, len(items))
@@ -67,20 +69,29 @@ async def run(
     judge = Judge(model=judge_model, max_concurrent=max_concurrent, timeout=timeout)
     generator_results = []
 
-    # G1 — frontier, generate live
-    logger.info("G1: generating %d rubrics with %s...", len(items), g1_model)
-    g1 = FrontierGenerator(AzureOpenAIClient(model=g1_model), timeout=timeout)
-    g1_texts = await g1.generate_many(items, max_concurrent=max_concurrent)
-    g1_by_id = {it["prompt_id"]: t for it, t in zip(items, g1_texts)}
-    _save_rubrics(output, "G1_frontier", g1_by_id)
+    # G1 — frontier: reuse saved rubrics if provided (already paid for),
+    # otherwise generate live.
+    if g1_rubrics and Path(g1_rubrics).exists():
+        logger.info("G1: reusing saved rubrics from %s", g1_rubrics)
+        g1_by_id = _load_rubrics_file(g1_rubrics)
+    else:
+        logger.info("G1: generating %d rubrics with %s...", len(items), g1_model)
+        g1 = FrontierGenerator(AzureOpenAIClient(model=g1_model), timeout=timeout)
+        g1_texts = await g1.generate_many(items, max_concurrent=max_concurrent)
+        g1_by_id = {it["prompt_id"]: t for it, t in zip(items, g1_texts)}
+        _save_rubrics(output, "G1_frontier", g1_by_id)
     logger.info("G1: scoring rubrics with judge...")
     generator_results.append(
         await evaluate_generator("G1_frontier", g1_by_id, items, judge, max_concurrent)
     )
 
-    # G2 / G3 — loaded from H100-produced files
+    # G2 / G3 — loaded from H100-produced files (+ extra name=path generators)
     if not only_g1:
-        for name, path in [("G2_base", g2_rubrics), ("G3_minidpo", g3_rubrics)]:
+        slots = [("G2_base", g2_rubrics), ("G3_minidpo", g3_rubrics)]
+        for spec in (extra_generators or []):
+            name, _, path = spec.partition("=")
+            slots.append((name, path))
+        for name, path in slots:
             if path and Path(path).exists():
                 logger.info("%s: loading rubrics from %s", name, path)
                 by_id = _load_rubrics_file(path)
@@ -139,8 +150,12 @@ def main():
     p.add_argument("--split", default="heldout", choices=["train", "dev", "heldout"])
     p.add_argument("--g1_model", default="gpt-4.1")
     p.add_argument("--judge_model", default="gpt-4.1")
+    p.add_argument("--g1_rubrics", default=None,
+                   help="Reusar rúbricas G1 ya generadas (JSONL) en vez de regenerar")
     p.add_argument("--g2_rubrics", default="data/results/phase0_g2_base.jsonl")
     p.add_argument("--g3_rubrics", default="data/results/phase0_g3_minidpo.jsonl")
+    p.add_argument("--extra", action="append", default=[],
+                   help="Generador extra name=path (repetible)")
     p.add_argument("--only_g1", action="store_true", help="Run only G1 (G2/G3 not ready)")
     p.add_argument("--max_concurrent", type=int, default=8)
     p.add_argument("--timeout", type=float, default=120.0)
@@ -152,6 +167,7 @@ def main():
         g2_rubrics=args.g2_rubrics, g3_rubrics=args.g3_rubrics,
         only_g1=args.only_g1, max_concurrent=args.max_concurrent,
         timeout=args.timeout, output=args.output,
+        g1_rubrics=args.g1_rubrics, extra_generators=args.extra,
     ))
 
 

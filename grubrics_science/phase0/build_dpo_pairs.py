@@ -99,6 +99,17 @@ async def run(candidates_path: str, rollout_sets_path: str, output: str,
     pids = [p for p in candidates if p in items]
     if limit > 0:
         pids = pids[:limit]
+
+    # Resume incremental: preguntas ya procesadas (con o sin par emitido) se
+    # registran en un .done.jsonl — los restarts no re-pagan scoring.
+    out_path = Path(output)
+    done_path = out_path.with_suffix(".done.jsonl")
+    done_pids = set()
+    if done_path.exists():
+        with open(done_path, encoding="utf-8") as f:
+            done_pids = {json.loads(l)["prompt_id"] for l in f if l.strip()}
+        logger.info("Resume: %d preguntas ya procesadas", len(done_pids))
+    pids = [p for p in pids if p not in done_pids]
     logger.info("Scoring candidates for %d train questions "
                 "(K~%d, judge=%s)", len(pids),
                 statistics.mean([len(candidates[p]) for p in pids]) if pids else 0,
@@ -119,57 +130,63 @@ async def run(candidates_path: str, rollout_sets_path: str, output: str,
 
     pairs = []
     stats = {"no_valid": 0, "low_margin": 0, "pairs": 0}
+    out_path.parent.mkdir(parents=True, exist_ok=True)
 
     batch = 4  # questions in flight (each fans out K×answers×criteria calls)
     for start in range(0, len(pids), batch):
         chunk = pids[start:start + batch]
         scored = await asyncio.gather(*[_score_all(p) for p in chunk])
         for pid, results in scored:
+            pair = None
             valid = [(i, c, s) for i, c, s in results if s is not None]
             if len(valid) < 2:
                 stats["no_valid"] += 1
-                continue
-            valid.sort(key=lambda x: x[2]["functional"], reverse=True)
-            best, worst = valid[0], valid[-1]
-            margin = best[2]["functional"] - worst[2]["functional"]
-            if margin < MIN_MARGIN:
-                stats["low_margin"] += 1
-                continue
-            item = items[pid]
-            user_prompt = build_user_prompt(
-                item["question"],
-                item["rollout_texts"] if prompt_mode == "conditioned" else None,
-            )
-            pairs.append({
-                "prompt_id": pid,
-                "prompt": [
-                    {"role": "system", "content": SFT_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "chosen": [{"role": "assistant", "content": best[1]}],
-                "rejected": [{"role": "assistant", "content": worst[1]}],
-                "margin": round(margin, 4),
-                "chosen_metrics": best[2],
-                "rejected_metrics": worst[2],
-            })
-            stats["pairs"] += 1
+            else:
+                valid.sort(key=lambda x: x[2]["functional"], reverse=True)
+                best, worst = valid[0], valid[-1]
+                margin = best[2]["functional"] - worst[2]["functional"]
+                if margin < MIN_MARGIN:
+                    stats["low_margin"] += 1
+                else:
+                    item = items[pid]
+                    user_prompt = build_user_prompt(
+                        item["question"],
+                        item["rollout_texts"] if prompt_mode == "conditioned" else None,
+                    )
+                    pair = {
+                        "prompt_id": pid,
+                        "prompt": [
+                            {"role": "system", "content": SFT_SYSTEM_PROMPT},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        "chosen": [{"role": "assistant", "content": best[1]}],
+                        "rejected": [{"role": "assistant", "content": worst[1]}],
+                        "margin": round(margin, 4),
+                        "chosen_metrics": best[2],
+                        "rejected_metrics": worst[2],
+                    }
+                    pairs.append(pair)
+                    stats["pairs"] += 1
+
+            # Incremental: par al output (append) + marca de done, por pregunta
+            if pair:
+                with open(out_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(pair, ensure_ascii=False) + "\n")
+            with open(done_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps({"prompt_id": pid, "pair": pair is not None})
+                        + "\n")
         logger.info("Progress: %d/%d questions | pairs=%d no_valid=%d low_margin=%d",
                     min(start + batch, len(pids)), len(pids),
                     stats["pairs"], stats["no_valid"], stats["low_margin"])
 
-    out_path = Path(output)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_path, "w", encoding="utf-8") as f:
-        for p in pairs:
-            f.write(json.dumps(p, ensure_ascii=False) + "\n")
-
     if pairs:
         margins = [p["margin"] for p in pairs]
-        logger.info("Done: %d pairs (margin mean=%.3f, median=%.3f) → %s",
+        logger.info("Done: %d pares nuevos (margin mean=%.3f, median=%.3f) → %s "
+                    "(total en archivo: previos + nuevos)",
                     len(pairs), statistics.mean(margins),
                     statistics.median(margins), out_path)
     else:
-        logger.warning("No pairs produced — check candidate quality/margins.")
+        logger.warning("No new pairs produced — check candidate quality/margins.")
 
 
 def main():
