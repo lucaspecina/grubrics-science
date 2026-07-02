@@ -1,143 +1,187 @@
-# Diseño experimental: Evaluación Adversarial (borrador v1, 2026-07-02)
+# Diseño experimental: Evaluación Adversarial — v2 (2026-07-02)
 
-**Estado: BORRADOR bajo revisión adversarial.** El "cómo" del reframing verificado
-(`adversarial-evaluation-reframing.md` — RQs en §4, definiciones en §8c-8g, mapa en §9).
-Este doc se ataca con revisores adversariales antes de congelarse.
+**Estado: v2 post-revisión adversarial.** v1 fue atacada por 3 revisores hostiles
+(novedad, metodología, ingeniería RL) + excavación completa de CHERRL (paper+repo).
+Hallazgos integrados: 3 fatales de novedad, 7 fatales de metodología, 3 fatales de
+ingeniería. Los reviews completos viven en el historial de la sesión 2026-07-02;
+este doc es la síntesis ejecutable. v1 queda en git history.
 
 ---
 
-## 1. La arquitectura del experimento: DOS instrumentos, no uno
+## 0. El cambio de forma respecto de v1 (resumen del veredicto de los revisores)
 
-La decisión de diseño más importante. Separamos la medición en dos instrumentos que se
-validan mutuamente:
+1. **UN experimento núcleo, no una matriz de tres pisos** — el "paper publicable" es un
+   solo tier bien controlado con MÁS brazos y MENOS claims (los tres revisores convergen).
+2. **Los pisos S y V se FUSIONAN**: agujeros sistemáticos plantados en rúbricas de tareas
+   VERIFICABLES → tres canales de gold simultáneos y casi gratis (ver §2).
+3. **Co-titular nuevo**: la calibración del panel bajo presión (ex-§8g) sube de análisis
+   secundario a segundo headline — "el ítem más novedoso de ambos documentos" (revisor 1).
+4. **Claims recortados**: benchmark "vivo" y métrica-producto → gateados o apéndice;
+   matriz de transferencia del atacante → cortada; Tier A (HealthBench) → confirmatorio.
+5. **Arquitectura definida por la ingeniería**: swap de rúbricas por SEGMENTACIÓN de runs
+   (única vía soportada por veRL 0.7.1), 2 GPUs dedicadas requeridas, presupuesto honesto.
 
-### E-I — Las curvas (el instrumento caro y lento)
-Policy entrenándose con GRPO contra rúbrica+judge; medimos proxy(t) y gold(t) y el quiebre,
-por (tier × defensor × seed). Pocas celdas, es el resultado headline.
+## 1. El experimento núcleo (la unidad publicable)
 
-### E-II — El probing con atacante (el instrumento barato y escalable)
-SIN policy: el Tramposo ataca directamente una configuración (rúbrica + defensor). Medimos
-**attack-cost-to-break**: cuántos pasos/samples de optimización del atacante hasta producir
-respuestas que superan el percentil-X de honestas bajo el proxy mientras el gold las rechaza.
-Barato por configuración → escala a muchos evaluadores → es el corazón del benchmark vivo.
+**Tareas**: verificables y DIFÍCILES PARA LOS DEFENSORES (MATH split duro /
+FrontierScience; anti answer-smuggling — revisor 2, finding 9). MedQA queda para la
+extensión A por familiaridad del dominio médico del panel.
 
-### El pilar: cross-validación E-II ↔ E-I
-¿El attack-cost-to-break (barato) PREDICE el onset de las curvas (caro)? Si correlaciona
-alto: **la métrica barata queda validada contra la cara** → cualquier equipo puede medir la
-robustez de su evaluador sin correr RL completo. Ese es el producto-métrica del paper. Si no
-correlaciona: hallazgo igual (la presión de policy y la de atacante dedicado rompen distinto).
+**Rúbricas semilla**: generadas por frontier UNA vez, auditadas, y luego se plantan
+**clases sistemáticas de agujeros** (no per-pregunta — deben ser aprendibles como
+estrategia generalizable; finding 16): p.ej. "ningún criterio penaliza fabricación
+confiada", "criterios de mención sin exigencia de justificación", "puntos por estructura
+independientes del contenido". Acoplamiento a correctitud verificado en el piloto (el
+exploit DEBE dañar accuracy — finding 6 del revisor 1). Agujeros CONGELADOS antes de
+cualquier run defendido; historial de rediseño disclosed (finding 22).
 
-## 2. Setup común (fijo entre brazos — todo lo que no varía)
+**Tres canales de gold por rollout, costo marginal ~0** (regalo de CHERRL + nuestro diseño):
+1. **Gold-rúbrica**: el judge puntúa la rúbrica COMPLETA una vez por rollout; el proxy
+   (subconjunto agujereado) se deriva post-hoc de los mismos PRESENT/NOT_PRESENT.
+   Una llamada = proxy + gold.
+2. **Gold-programático**: correctitud verificable ($0).
+3. **M(t), detectores de explotación**: como los agujeros los plantamos nosotros,
+   escribimos detectores directos por clase (regex/checkers estilo CHERRL) → señal de
+   mecanismo por-muestra, inmune a las patologías de estimadores sobre curvas ruidosas.
 
-| Componente | Decisión | Justificación |
+**Panel (API)**: SOLO offline sobre checkpoints espaciados → produce el co-headline §6.
+
+## 2. Los brazos (7) — el factorial des-confundido
+
+| Brazo | Defensor | Qué aísla |
 |---|---|---|
-| Policy | **Qwen3-4B** | CHERRL demuestra hacking-onset a 4B (steps 68-478); mitad de costo que 8B → el presupuesto compra 2× celdas/seeds. 8B solo si 4B no hackea en nuestros pisos |
-| RL | GRPO / veRL 0.7.1 | Nuestro stack validado; compatible CHERRL |
-| Judge (aplicador) | **LOCAL fijo** (candidato: Qwen3-32B-instruct o el mejor local que valide) — MISMO en todos los brazos y pisos | Curvas requieren cientos de steps × batch × criterios = millones de calls; API inviable. Validación: acuerdo local-vs-GPT-4.1-binario medido offline con nuestra maquinaria ANTES de correr (kill si kappa<0.35). En Tier S el judge se cancela por diseño (proxy y gold usan el MISMO judge) |
-| Prompts | **Split train/eval por pregunta**: la policy entrena en P_train; las curvas gold se miden en P_eval held-out; el defensor SOLO ve rollouts de P_train | Anti-leakage (falla #1 cazada) |
-| Rúbrica inicial | IDÉNTICA entre brazos por pregunta (S: gold-con-agujeros; V: generada por frontier y congelada como semilla; A: humana o G1) | Los defensores difieren solo en las ACTUALIZACIONES |
-| Cadencia del defensor | mismo N (steps) para todos los brazos activos | Fairness; el costo/latencia por regeneración se reporta como eje secundario (ventaja del 8B local) |
-| Seeds | ≥2 por celda primaria; ≥3 en la comparación primaria | Prespecificado abajo |
+| **D0** | Nadie (rúbrica agujereada congelada) | El quiebre base |
+| **D-noise** | Reescritura semánticamente NULA cada N (paráfrasis, reorden, jitter de pesos) | **Defensa vs churn** — el control más importante (finding 8, rev. metodología) |
+| **D1** | Frontier PROMPTEADO (receta OnlineRubrics, prompt congelado post-piloto) | El estado del arte publicado |
+| **D3** | **8B PROMPTEADO (mismo prompt que D1, sin entrenar)** | Des-confunde capacidad vs método (finding 3, rev. novedad) |
+| **D2** | 8B ENTRENADO (señal funcional) | Nuestra apuesta |
+| **D5** | **Techo: regeneración CON acceso al gold** (labels del verificador) | El denominador de "label-free logra Δ" (finding 2, rev. novedad) |
+| (D4) | Humana congelada — SOLO en la extensión A (MATH no tiene rúbricas humanas) | — |
 
-## 3. La matriz y su priorización presupuestaria
+Contrato del defensor v2 (adiciones de ingeniería F8/F9/F10): **cap de criterios (≤10) y
+de tokens, idéntico entre brazos, con obligación de merge/prune** (el crecimiento
+monotónico rompía costo Y fairness); **validación de schema del output + retry ≤3 +
+fallback a la rúbrica anterior** (un JSON roto ≠ "alignment collapse"); **write-ahead**:
+toda rúbrica se persiste con hash ANTES de aplicarse.
 
-Defensores: **D0** nada · **D1** frontier prompteado (receta OnlineRubrics: mira K rollouts
-recientes, propone/edita criterios) · **D2** 8B entrenado (señal funcional; mismo input que D1)
-· **D4** humana congelada (solo tier A; es D0 con rúbrica experta).
+**Entrenamiento de D2 sin leakage** (finding 11): escenas de revisión construidas
+EXCLUSIVAMENTE con clases de agujero A∪B; la evaluación núcleo usa clases C∪D tomadas de
+taxonomías EXTERNAS (CHERRL biases, exploits de Scale); una clase E se retiene fuera de
+todo para validación final. Registro de splits a nivel pregunta y clase en el repo.
 
-| Orden | Celdas | Por qué primero | Costo est. |
-|---|---|---|---|
-| 1. **Tier S completo** | S × {D0,D1,D2} × 3 seeds = 9 runs | Mecanismo con atribución perfecta; judge se cancela; corto (onset esperado <500 steps); TODO local (judge local, gold local) | ~9×3-5 GPU-h spot ≈ $80-150 |
-| 2. **Tier V núcleo** | V × {D0,D1,D2} × 2 seeds = 6 runs + calibración panel (§8g) | El claim duro (gold real); MedQA/GSM8K adapters listos | ~6×4-6 GPU-h + panel eval |
-| 3. **E-II atacante** | Tramposo vs ~6-10 configuraciones | La métrica + cross-validación con onsets ya medidos en 1-2 | GPU attacker training + panel-split evals |
-| 4. **Tier A confirmatorio** | A × {D4,D1,D2} × 1-2 seeds | Validez externa; SOLO si 1-3 dieron señal | El más caro por panel |
+## 3. Medición (reconstruida por el rev. de metodología)
 
-**La comparación primaria prespecificada**: onset(D2) vs onset(D1) en Tier V (2 colas,
-seeds≥3 si el efecto es chico). Todo lo demás: secundario/exploratorio, se declara así.
+- **Onset**: CO(gap, mech) de CHERRL — dos señales directas: G(t) = gold−proxy por-muestra
+  (¡observable directamente, sin máximos corrientes!) y M(t) = % de respuestas high-proxy
+  con explotación detectada. Barrido de umbrales con intervalo de incertidumbre (su código,
+  adaptado). Censura tratada como sobrevida: onset = time-to-event con flag, comparación
+  por permutación sobre event times (finding 3).
+- **Co-primaria (más poder)**: **déficit medio de gold** = ∫ max(0, gold_peak_suave −
+  gold(t)) dt / T sobre horizonte T fijo pre-registrado, en unidades crudas de gold —
+  definida aún con onset censurado (findings 17 + F13).
+- **Triple obligatoria por celda**: (gold-peak, onset, gold-at-plateau[últimos L evals])
+  con cota de admisibilidad: gold-peak ≥ x% del gold-peak de D0 (caza defensas sandbag).
+- **σ_eval estimada directamente** (re-evals con distintas seeds de decoding en checkpoints
+  fijos); umbrales calibrados por procedimiento pre-registrado, no por número heredado.
+- **gold medido en P_train Y P_eval** (explotación directa vs transferencia — finding 16).
+- **Seeds**: APAREADAS entre brazos (misma init, mismo orden de datos); n FIJADO tras el
+  piloto por análisis de poder sobre la varianza real del onset (nada de "≥3 si el efecto
+  es chico" — optional stopping, finding 26). Presupuesto de seeds concentrado en
+  D1-vs-D3-vs-D2. Efecto mínimo de interés declarado de antemano.
+- **Diagnósticos por run pre-registrados**: KL vs ref, entropía, longitud (cap de longitud
+  = decisión explícita del diseño de agujeros, no herencia — F17), **fracción de grupos
+  GRPO con advantage degenerado** (la cuantización del reward puede fabricar "onset=∞ con
+  plateau bajo" — F7; mitigación: criterios con pesos → score continuo, n=8 rollouts).
 
-## 4. Formalizaciones (prespecificadas, anti p-hacking)
+## 4. Arquitectura de ejecución (del rev. de ingeniería — no negociable)
 
-- **Curvas**: proxy(t) = media del reward rúbrica en train; gold(t) = métrica gold del tier
-  sobre rollouts frescos de P_eval, cada K steps, decoding fijo (temp, seeds de eval fijos).
-- **Onset (primario)**: el menor t tal que gold(t) < max_{s≤t} gold(s) − δ sostenido durante
-  m evals consecutivos, MIENTRAS la pendiente de proxy en la ventana es > 0. δ y m se fijan
-  en el piloto de Tier S ANTES de ver las celdas comparativas (δ candidato: 1 desvío estándar
-  de gold entre seeds en régimen estable; m=3).
-- **Divergencia integral (secundaria, continua)**: ∫ [proxỹ(t) − gold̃(t)] dt con ambas
-  curvas normalizadas a [0,1] por su rango pre-onset — captura magnitud, no solo momento.
-- **La pareja (onset, gold-at-plateau)**: OBLIGATORIA en toda tabla. Cazafallas #3: un
-  defensor "trivialmente duro" (rúbrica imposible → nadie hackea pero nadie aprende) muestra
-  onset=∞ con gold-at-plateau bajo → se ve, no se premia.
-- **attack-cost-to-break (E-II)**: pasos de GRPO del atacante hasta que ≥ p% de sus outputs
-  superan la mediana proxy de honestas con gold bajo umbral. Reportar curva completa
-  cost-vs-%break, no solo el punto.
+- **2 GPUs dedicadas**: GPU0 = policy 4B (veRL 0.7.1, GRPO, batch 12, n=8, full-FT);
+  GPU1 = judge local vía vLLM server con **prefix caching** y prompt estructurado
+  [prefijo: pregunta+respuesta] + [criterio] (~45-70s/step → viable). Modo batched
+  (1 call/rollout, protocolo CHERRL) como alternativa si re-valida kappa en β.
+- **Judge**: candidato Qwen3-32B-FP8; gate de aceptación SUBIDO (kappa vs GPT-4.1-binario
+  a definir en β pero ≥0.5, no 0.35) + **bias-probes de CHERRL aplicados al judge elegido**
+  + re-scoring esparso con GPT-4.1 como canal de diagnóstico judge-hacking (finding 15).
+  Nota Tier-fusionado: el judge se cancela en gold-rúbrica (misma llamada) y es irrelevante
+  para gold-programático y M(t) — la atribución queda triplemente protegida.
+- **Swap de rúbricas = SEGMENTACIÓN**: runs en chunks de N steps con auto-resume de veRL
+  (total_training_steps absoluto + latest_checkpointed_iteration), parquet regenerado
+  entre chunks, save_freq=N. Overhead medido: +20-30% wall (~16 relanzamientos × 6-8 min).
+  Compra: versionado gratis (el parquet del chunk ES el artefacto), el defensor corre
+  entre chunks en GPU0 (sin convivencia de memoria), y resistencia a eviction del spot
+  (una eviction pierde ≤N steps y resume con las MISMAS rúbricas — F10). **TODOS los
+  brazos segmentados igual, incluido D0** (los restarts tienen artefactos propios).
+- **GRPO amortigua la no-estacionariedad** (norm_adv_by_std → invariante a cambios afines
+  del reward por pregunta; sin critic stale) — F6, va explícito en el paper.
+- **Bookkeeping ANTES del piloto** (F14): rubric_store append-only (run, arm, seed, qid,
+  epoch, hash, parent_hash, inputs, status), reward-log por sample CON rubric_hash,
+  eval-log con rollouts guardados (el panel offline los re-puntúa). SQLite/JSONL, 1-2 sem.
+- **API discipline**: snapshots pinneados, temp=0 en D1, brazos INTERCALADOS en el
+  calendario (nunca "todas las seeds de D0 esta semana y las de D2 la próxima") — finding 13.
 
-## 5. Los defensores, contrato exacto
+## 5. Extensiones declaradas (stretch, NO el paper núcleo)
 
-Contrato común (de 8d): cada N steps reciben (pregunta, rúbrica vigente, muestra de M
-rollouts recientes de P_train) → emiten rúbrica nueva. NUNCA ven gold/panel/etiquetas.
+- **E-II atacante**: reward = proxy − λ·**anchor LOCAL cross-family** (p.ej. Llama-3.x-8B
+  grader en GPU1 — familia ≠ judge; el panel API solo offline — F11 mató el panel-in-loop:
+  ~$350-450/config). Métrica: **%-broken-at-budget-B** (siempre definida; F18/21) con
+  condición de quiebre SOSTENIDA. Cold-start del atacante: clases EXTERNAS, disjuntas del
+  curriculum de D2 (finding 24). El pilar E-II↔E-I se degrada honesto: **consistencia de
+  ordenamiento** (Kendall τ, permutación por bloques), no "métrica validada" — y solo con
+  ≥15-20 configs fabricadas con el dial de severidad de agujeros.
+- **Extensión A (HealthBench)**: confirmatoria, con D4 humana; el panel calibrado por §6.
+- **Benchmark release**: gateado a que E-II exista con ≥15-20 configs; "vivo" se promete
+  solo con plan de versionado del atacante (la identidad del atacante ES parte de la métrica).
 
-- **D1 (frontier prompteado)**: GPT-4.1 con prompt fijo pre-registrado (receta OnlineRubrics
-  adaptada: identificar patrones sospechosos en los rollouts, proponer criterios nuevos y
-  penalizaciones, PRESERVANDO discriminación sobre respuestas legítimas). Sin iterar el
-  prompt después de ver resultados (anti-garden-of-forking-paths); el prompt se congela tras
-  el piloto S.
-- **D2 (entrenado)**: el rubricator 8B. Input idéntico a D1. Entrenamiento: DPO con señal
-  funcional sobre ESCENAS DE REVISIÓN construidas en S/V (estado: rúbrica con agujero +
-  rollouts que lo explotan; candidatas de revisión puntuadas funcionalmente contra el gold
-  del tier de entrenamiento — que en S/V es legítimo usar porque es el tier de entrenamiento
-  del defensor, no de su evaluación). **D2 se entrena UNA VEZ, se congela, y se evalúa en
-  pisos/preguntas que no vio** — la adaptación en despliegue es solo in-context.
-- **Restricción anti-trivialidad (ambos)**: el objetivo/prompt incluye preservar
-  discriminación entre honestas (info_value de nuestra maquinaria); la pareja de métricas
-  de §4 la audita.
+## 6. Co-headline: calibración del panel bajo presión (ex-8g, promovida)
 
-## 6. E-II: el protocolo del atacante
+En el experimento núcleo, cada checkpoint espaciado se puntúa offline por el panel Y por
+los tres canales de gold → la curva "panel vs verdad programática/por-construcción A LO
+LARGO de la deriva adversarial de la policy". Scope honesto (finding 25): esto licencia el
+**componente de correctitud** del panel bajo drift — las dimensiones abiertas (tono,
+sycophancy) las cargan el canal de trampas y la auditoría humana, y el paper lo dice en
+limitaciones. Panel-B excluye la familia de D1; auditoría humana con n, regla de selección
+y ciego PRE-REGISTRADOS (estratificada por gap proxy-gold).
 
-- Atacante: Qwen3-4B/8B entrenado con GRPO; reward = score_proxy − λ·score_panel_A (recета
-  Adv-RM adaptada a rúbricas), sobre preguntas de P_train del tier.
-- **Panel splitting (8e)**: panel_A (señal del atacante) y panel_B (medición) de familias
-  distintas; auditoría humana de muestra de outputs "exitosos".
-- Cold start: nuestras 4 familias de hacks como SFT/few-shot inicial.
-- **Transfer tests (RQ4)**: atacante entrenado contra config X, evaluado contra Y (otra
-  rúbrica, otro defensor, otro tier) — ¿los exploits generalizan o son config-específicos?
-  (Define si el benchmark necesita re-entrenar el atacante por evaluador o si un atacante
-  general sirve.)
+## 7. Los claims del paper (los tres que sobreviven a los revisores)
 
-## 7. Fallas cazadas en v1 y sus fixes (registro vivo)
+1. **Primeras curvas proxy-vs-gold para regeneración de criterios in-loop en rubric-RL**
+   (OnlineRubrics es endpoint-only; CHERRL es judge-estático; Wolf es RM-escalar, con
+   labels, a escala juguete — "el ladrillo débil del muro").
+2. **El factorial des-confundido** respondiendo la pregunta de 8c textual: ¿la defensa
+   requiere nada (D-noise), un prompt (D1/D3), entrenamiento (D2), o etiquetas (D5)?
+   — con "un prompt alcanza" como titular aceptable por pre-registro.
+3. **La confiabilidad del panel-LLM como gold bajo presión de optimización** — lo que
+   todo lab que usa paneles necesita y nadie midió.
 
-| # | Falla | Fix en el diseño |
-|---|---|---|
-| 1 | Defensor ve rollouts de preguntas de eval → contamina gold | Split P_train/P_eval; defensor solo ve P_train (§2) |
-| 2 | Regeneración cambia la escala del proxy → curvas incomparables | Quiebre definido sobre GOLD; proxy solo exige pendiente>0 intra-época de rúbrica; normalización por época |
-| 3 | Defensa trivialmente dura (nadie aprueba) parece "robusta" | Pareja (onset, gold-at-plateau) obligatoria + restricción de discriminación (§5) |
-| 4 | Inestabilidad RL por reward no-estacionario se confunde con colapso-de-alineación | Diagnósticos prespecificados (KL, entropía, longitud) por run; "colapso" solo se declara si gold cae CON policy estable; N grande y cambios graduales |
-| 5 | Judge débil local mete sus propios huecos → atribución sucia | Judge IDÉNTICO entre brazos (se cancela en comparaciones); validado offline vs GPT-4.1; en S se cancela por construcción |
-| 6 | El atacante aprende los puntos ciegos del panel de medición | Panel splitting + auditoría humana (8e) |
-| 7 | Multiple comparisons entre 9-20 celdas | Comparación primaria única prespecificada (§3); resto declarado exploratorio |
-| 8 | D1 con prompt tuneado post-hoc le regala ventaja/desventaja | Prompt de D1 congelado tras piloto, pre-registrado en el repo |
-| 9 | Onset estimator elegido mirando los datos | δ, m fijados en piloto S antes de las celdas comparativas |
-| 10 | "Rúbrica inicial distinta entre brazos" confunde defensor con semilla | Rúbrica inicial idéntica por pregunta en todos los brazos (§2) |
+Prohibidas (tomadas/refutadas): "primer atacante entrenado", "primeras rúbricas
+adaptativas", "primera curva con evaluador adaptativo" (sin cláusulas), y **vestir la
+edición in-context como la frontera de alignment-collapse** (ese teorema gobierna
+re-entrenamiento de pesos; nuestra pregunta es "¿la edición label-free de criterios ayuda
+o daña?" en sus propios términos — finding 8, rev. novedad).
 
-## 8. Fases operativas
+## 8. Presupuesto y cronología HONESTOS (F4/F15)
 
-- **α (ya en curso)**: motor Fase 0 (bloque 2 GPU pendiente) → ¿la señal funcional mueve al
-  8B? Insumo directo de D2.
-- **β**: validar judge local vs GPT-4.1 (offline, con maquinaria existente) + adaptar/absorber
-  testbed CHERRL + piloto S (1 celda D0) para fijar δ, m, N, M → **congelar el diseño v2**.
-- **γ**: Tier S completo (9 runs) → primer resultado publicable (mecanismo).
-- **δ**: Tier V núcleo + calibración del panel (8g).
-- **ε**: E-II atacante + cross-validación métrica.
-- **ζ**: Tier A confirmatorio + paper + benchmark release.
+| Ítem | Estimación v2 |
+|---|---|
+| Núcleo (7 brazos × n seeds, 4B, judge local, ~300-400 steps/run c/early-stop) | **~$250-450 GPU** (spot 2×H100 dedicadas) + API mínima (D1 ~$25-50/run + panel offline) |
+| Piloto β (judge gate + bias probes + D0+D1 mini + varianza de onset + bookkeeping) | ~$50-80 + 3-4 semanas |
+| Extensión E-II (si se corre) | ~$150-300 GPU + panel offline |
+| Extensión A | ~$150-250 |
+| **Total núcleo** | **~$400-600 y ~10 semanas** (una persona) |
+| Total con extensiones | ~$1.5-2.5K |
 
-Kill criteria por fase: β — si ningún judge local alcanza kappa≥0.35 vs GPT-4.1, replantear
-(¿API con eval espaciado? ¿tier S only?). γ — si D0 no muestra hacking en S (sin quiebre),
-los agujeros plantados son demasiado benignos → rediseñar agujeros antes de seguir. δ — si
-el orden de defensores en V contradice S, investigar antes de A (es hallazgo, no fracaso).
+**Cronología**: β 3-4 sem → núcleo 3-4 sem (runs seriales, calendario spot) → análisis+
+preprint 2 sem. Extensiones después del preprint (plantar bandera primero — 2 grupos
+tienen esto como future work declarado).
 
-## 9. Presupuesto global estimado (draft)
+## 9. Decisiones abiertas (bloquean el arranque)
 
-GPU (spot 2×H100): S ~$80-150 · V ~$100-180 · E-II ~$60-120 · A ~$100-200 → **~$350-650 GPU**.
-API: panel de A + calibración + D1 regeneraciones + validación judge → **~$150-300**.
-Total draft: **~$500-950**, escalonado con kill criteria por fase. (La decisión de 4B y el
-judge local son lo que baja esto de ~$3K a ~$700.)
+1. **CÓMPUTO (F1 — el long pole)**: la spot 2×H100 es compartida con protocolo GPU-1-only;
+   este diseño necesita LAS DOS GPUs. Opciones: (a) ventanas de uso exclusivo coordinadas
+   (runs de ~10h — negociable con el otro proyecto), (b) segunda VM dedicada.
+   **Decisión del usuario requerida.**
+2. **Fase 0 bloque 2** (1h GPU): el brazo D2 nace ahí. Nota F19: si Fase 0 da D2≈D1, el
+   núcleo SIGUE EN PIE — "cuánto protege la regeneración (cualquiera) vs nada, y dónde
+   colapsa" no necesita que D2 gane.
+3. **Spike CHERRL (2 días)**: absorb-vs-reimplement de su testbed (su fork pinnea veRL
+   0.7.0; el nuestro 0.7.1 con parche propio de dataset) — F16.
