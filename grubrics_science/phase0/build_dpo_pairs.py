@@ -116,15 +116,22 @@ async def run(candidates_path: str, rollout_sets_path: str, output: str,
                 judge_model)
 
     judge = Judge(model=judge_model, max_concurrent=max_concurrent,
-                  timeout=timeout, max_cache_size=0)
+                  timeout=timeout, max_cache_size=0, max_retries=6)
     sem = asyncio.Semaphore(max_concurrent)
 
     async def _score_all(pid):
         item = items[pid]
         results = []
         for idx, cand in enumerate(candidates[pid]):
-            async with sem:
-                s = await score_candidate(judge, cand, item)
+            try:
+                async with sem:
+                    s = await score_candidate(judge, cand, item)
+            except Exception as exc:
+                # Un candidato irrecuperable (p.ej. 429s agotados) se saltea;
+                # no puede tumbar el run entero.
+                logger.error("score_candidate fallo (%s cand %d): %s [%s]",
+                             pid, idx, exc, type(exc).__name__)
+                s = None
             results.append((idx, cand, s))
         return pid, results
 
