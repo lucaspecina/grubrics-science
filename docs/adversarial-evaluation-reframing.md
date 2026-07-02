@@ -161,6 +161,37 @@ agnóstico de dominio y la receta necesita solo (preguntas + mazos de respuestas
    estudiadas. RQ1 precisa: "cuánta presión aguanta un evaluador basado en rúbricas
    (rúbrica + judge fijo), siendo la rúbrica el componente que se regenera".
 
+## 8d. Definiciones operacionales (el "Setup" del paper)
+
+**Objetos**: POLICY (se entrena con RL, persigue el proxy) | RÚBRICA (texto: criterios+puntos)
+| JUDGE (fijo: GPT-4.1 binario, aplica criterios → proxy) | PANEL (gold: jueces frontier sin
+rúbrica; solo para el experimentador — la policy nunca lo ve, no es parte del reward).
+
+**Quiebre (breaking point)**: el step de entrenamiento donde las curvas proxy(t) y gold(t)
+—computadas sobre las mismas respuestas— se separan: proxy sigue subiendo, gold hace pico y
+cae. Es el "hacking onset" (CHERRL) / la divergencia de Gao et al. Lo que se rompe NO es el
+texto de la rúbrica sino **su validez como proxy sobre la distribución nueva** de respuestas:
+la optimización mueve a la policy exactamente hacia donde los criterios están más equivocados
+(Goodhart). El mapa no cambió; el uso del mapa cambió el territorio.
+
+**Defensor**: el proceso autorizado a reescribir la rúbrica durante el training. Contrato:
+cada N steps (cronograma idéntico entre brazos) recibe (pregunta, muestra de respuestas
+recientes de la policy, rúbrica vieja) y emite la rúbrica nueva que el judge usa en adelante.
+**No ve** al panel ni etiquetas de verdad; no toca policy ni judge. La restricción "defensa
+sin señal fresca de verdad" (label-free) nos separa de Wolf et al. (re-etiqueta con oráculo)
+y es donde vive el riesgo documentado de alignment collapse.
+
+**Brazos del defensor**: (1) nadie — rúbrica inicial congelada; (2) frontier PROMPTEADO
+(receta OnlineRubrics, sin entrenamiento); (3) 8B ENTRENADO offline con señal funcional;
+(4) referencia: rúbrica humana congelada.
+
+**Presión**: default = la propia policy optimizando; versión completa = + Tramposo entrenado
+(max proxy − λ·gold en training del atacante, receta Adv-RM adaptada). Defensor y quiebre se
+definen igual bajo ambas presiones.
+
+**La medición central**: para cada (defensor, presión), el step del quiebre. Comparación
+entre brazos = cuánto corre cada defensa el quiebre, y si alguna lo adelanta (colapso).
+
 ## 9. MAPA VERIFICADO (2026-07-02) — reemplaza al §3 preliminar
 
 Verificación adversarial completa (TODO-017). Cada asignación trazable a claims 3-0.
