@@ -220,6 +220,27 @@ distintas) = medición de curvas. El Tramposo nunca ve a los jueces que miden. +
 humana de muestra de outputs del atacante. (Análogo train/test split para jueces; Adv-RM
 mitigó lo mismo con ensemble-disagreement.)
 
+## 8f. La escalera de golds (propuesta del usuario, 2026-07-02) — diseño de medición final
+
+Principio (del usuario): *el gold es instrumento del experimentador y NUNCA toca el reward;
+el reward de la policy es siempre la rúbrica* — si no, no hay hacking que estudiar.
+
+Tres pisos de medición, mismo fenómeno, gold de calidad creciente→realismo creciente:
+
+| Piso | Gold | Responde | Virtud |
+|---|---|---|---|
+| **S — Simulado** | Rúbrica gold R\* completa vs proxy = R\* con **agujeros plantados** (criterios removidos/debilitados, mismo judge) | Mecanismo con control total: ¿la explotación aparece en los agujeros conocidos? ¿el defensor los cierra? ¿la regeneración label-free colapsa? | Atribución perfecta, ~$0, precedente Gao/CHERRL |
+| **V — Verificable** | **Correctitud programática** (GSM8K/MATH/MedQA — adapters YA en el repo, CHG-006 los apartó del training y vuelven como instrumento) | El quiebre contra verdad verdadera: proxy sube, accuracy real se estanca | **Cero circularidad** — el claim duro. Realismo defendible vía RLCER (rúbricas de proceso en math). Límite: gold unidimensional (hacks correctitud-neutros invisibles) |
+| **A — Abierto** | Panel partido (8e) + trampas por construcción + protocolo HealthBench en endpoints | La relevancia: el mundo donde las rúbricas existen porque NO hay verificador | Validez externa |
+
+**Jugada narrativa**: si el ORDEN de defensores se repite en los tres pisos, el resultado es
+inapelable — S/V dan validez interna, A da validez externa. Un reviewer puede dudar del
+panel; no de los tres pisos a la vez.
+
+**Nota de prior art**: curvas de hacking de rúbricas contra gold programático no aparecieron
+en ningún claim de la verificación (CHERRL = gemelo sin bias; Gao/Wolf = RM simulado) —
+el piso V es en sí una contribución de diseño.
+
 ## 9. MAPA VERIFICADO (2026-07-02) — reemplaza al §3 preliminar
 
 Verificación adversarial completa (TODO-017). Cada asignación trazable a claims 3-0.
