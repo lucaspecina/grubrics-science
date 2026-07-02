@@ -138,6 +138,29 @@ agnóstico de dominio y la receta necesita solo (preguntas + mazos de respuestas
 3. La pregunta desnuda está tomada (Gao et al.) — el paper vive o muere por el
    defensor adaptativo y el atacante entrenado, no por la curva en sí.
 
+## 8c. Precisiones de formulación (2026-07-02, a partir del escrutinio del usuario)
+
+1. **La defensa NO presupone aprendizaje.** Tagline corregida: *"¿La evaluación puede
+   defenderse al ritmo al que los modelos aprenden a engañarla — y qué requiere esa
+   defensa: nada, un prompt, o entrenamiento?"* La RQ2 compara defensores no-aprendidos
+   (estático; regeneración prompteada estilo OnlineRubrics) contra el entrenado. Si el
+   prompt alcanza, ese es el resultado — la pregunta no apuesta.
+2. **Qué existe vs. qué medimos**: el hacking de rúbricas está establecido (Scale, B4,
+   CHERRL) y los mecanismos de actualización YA existen (RURA manual, DR-Tulu congelado,
+   OnlineRubrics prompteado). Lo que NO existe: cuantificación de cuánto protegen, la
+   comparación entre ellos, el stress con atacante dedicado, y el mapa ayuda-vs-colapsa.
+   Analogía canónica: *las cerraduras existen; falta el laboratorio que las califica
+   según cuánto resisten a un cerrajero profesional.*
+3. **Rúbrica ≠ judge — la capa que se quiebra es la RÚBRICA.** Evaluador = rúbrica
+   (criterios) + judge (aplicador binario). Evidencia de que la rúbrica es la capa
+   vinculante: Scale ("stronger verification does not prevent hacking when the rubric
+   omits failure modes") + B4 (judge aplicaba bien; los criterios eran el hueco).
+   **Diseño: judge FIJO en todos los brazos (GPT-4.1 binario validado); varía la rúbrica
+   y su mecanismo de defensa** → los deltas son atribuibles a la capa-rúbrica. Las
+   vulnerabilidades propias del judge (sesgos: eje de CHERRL) quedan controladas, no
+   estudiadas. RQ1 precisa: "cuánta presión aguanta un evaluador basado en rúbricas
+   (rúbrica + judge fijo), siendo la rúbrica el componente que se regenera".
+
 ## 9. MAPA VERIFICADO (2026-07-02) — reemplaza al §3 preliminar
 
 Verificación adversarial completa (TODO-017). Cada asignación trazable a claims 3-0.
