@@ -1,10 +1,12 @@
 # Reframing candidato: Evaluación Adversarial (2026-07-02)
 
-**Estado: PROPUESTA — PENDIENTE DE VERIFICACIÓN.** Este documento captura con precisión
-la evolución estratégica discutida el 2026-07-02, ANTES de la verificación de literatura.
-**Ningún plan se reescribe hasta que la investigación profunda (TODO-017) confirme que los
-claims candidatos están libres.** La disciplina es la misma que salvó el pivote original:
-aquella vez el chequeo profundo reveló que RubricRAG ya había corrido "nuestro" experimento.
+**Estado: VERIFICADO 2026-07-02 — VEREDICTO: ADOPTAR CON CLAIMS AJUSTADOS (decisión final
+del usuario pendiente).** La verificación profunda (TODO-017: 103 agentes, 21 fuentes, 22
+claims confirmados 3-0, 3 refutados) confirmó que ambos edges están PARCIALMENTE tomados en
+su forma pura pero **sobreviven en una formulación acotada y defendible** — ver §9 (el mapa
+verificado, que REEMPLAZA al §3 preliminar). SibylSense (el mayor riesgo no-inspeccionado)
+fue leído post-reporte: inference-time, generador congelado + memoria, sin curvas ni
+defensores comparados — no ocupa el terreno, se cita y diferencia.
 
 Contexto que motivó esta conversación: la vara del proyecto subió — el usuario pide impacto
 alto, no un ladrillo de nicho. Evaluación honesta del proyecto actual: buena ciencia, techo
@@ -135,6 +137,64 @@ agnóstico de dominio y la receta necesita solo (preguntas + mazos de respuestas
    difícil del lado donde gana el diseño, no las GPUs.
 3. La pregunta desnuda está tomada (Gao et al.) — el paper vive o muere por el
    defensor adaptativo y el atacante entrenado, no por la curva en sí.
+
+## 9. MAPA VERIFICADO (2026-07-02) — reemplaza al §3 preliminar
+
+Verificación adversarial completa (TODO-017). Cada asignación trazable a claims 3-0.
+
+### Lo que YA existe (citar, no reclamar)
+
+| Prior art | Qué ocupa | Qué NO tiene |
+|---|---|---|
+| **Wolf et al.** (arXiv:2505.18126, NeurIPS'25 wksp) | LA curva adaptativo-vs-estático para preference RMs: RM estático colapsa a gold negativo tras KL~200; refrescado se mantiene. "Adaptividad dobla la curva" YA está en print | Solo RMs escalares, refresh entre-rondas con labels frescos del oráculo, escala juguete (Pythia-410M), sin rúbricas/judges, sin comparación de defensores, sin atacante |
+| **OnlineRubrics — Scale AI** (arXiv:2510.07284, ICML'26) | La bandera cualitativa "rúbricas adaptativas mitigan hacking": regenera criterios EN CADA STEP del RL vía comparaciones pairwise; nombra el hack "self-praising" | Defensor = frontier PROMPTEADO (o3-mini), sin entrenamiento ni ablation del extractor; evidencia endpoint-only (sin curva Goodhart: las palabras "overoptimization/Goodhart" no aparecen); sin comparación de defensores |
+| **Adv-RM — NVIDIA/GaTech** (arXiv:2504.06141) — **el prior art más cercano en general** | Atacante ENTRENADO con RL contra RMs (76-99% attack success), objetivo estructuralmente idéntico al nuestro (max proxy − λ·segundo evaluador), arms race de 2 rondas, y "2-3x más steps antes del hacking" tras hardening | Solo RMs escalares clásicos (cero rúbricas/judges); el minimizado es un proxy de incertidumbre por ensemble, NO un panel confiable; defensa = re-entrenar el RM offline entre rondas, no regenerar criterios; sin artefacto atacante transferible ni benchmark |
+| **TOMPA — UIUC** (arXiv:2604.02686) | Segundo atacante entrenado (GRPO, black-box) — "nadie entrenó atacantes" ya no es reclamable en ninguna forma | Outputs degenerados no-semánticos; sin panel; CERO defensa (declaran adversarial training como future work) |
+| **CHERRL — Tsinghua** (arXiv:2606.04923, jun-2026, **código público, veRL-based**) | Infraestructura de curvas Goodhart para rubric-RL: reproduce hacking estable, curvas proxy-vs-gold con onset (steps 68-478 por tipo de bias), ejes discoverability/exploitability | Judge ESTÁTICO todo el training; atacante = la policy común; su RHDA solo detecta — "usar detecciones para parchear el reward" declarado future work. **Activo aprovechable: baja nuestro costo de build** |
+| **Alignment collapse** (Gauthier-Bach-Jordan, arXiv:2605.04266) | Prueba teórica+empírica de que el re-entrenamiento naive del evaluador sobre outputs explotadores AMPLIFICA el hacking | Fix solo policy-side; sin rúbricas; sin curvas estático-vs-adaptativo. **Convierte nuestra comparación de defensores en pregunta científica viva** (Wolf: ayuda; collapse: puede empeorar — ¿dónde cae la regeneración label-free de criterios?) |
+| **SAVE** (arXiv:2605.30888) | Refresh del RM DENTRO del loop (cada step, self-supervised) como mecanismo | Sin curvas de overoptimization; sin rúbricas |
+| **SibylSense** (arXiv:2602.20751; leído post-reporte) | "Adversarial-probing adaptive rubrics" a nivel frase: probing adversarial + rúbricas adaptativas en inference-time | Generador CONGELADO + banco de memoria (no entrena al escritor); no es in-loop de RL; sin curvas; sin comparación de defensores |
+
+### La formulación de claim que ESQUIVA todo lo verificado
+
+> **"Primeras curvas de overoptimization/Goodhart para evaluadores rubric/LLM-judge que
+> regeneran criterios DURANTE la optimización de la policy bajo presión de atacante
+> entrenado, comparando tipos de defensor (ninguno vs frontier-prompteado vs
+> chico-entrenado) contra un panel gold confiable, cuantificando cuándo la regeneración
+> label-free de criterios corre el punto de quiebre y cuándo colapsa (alignment collapse),
+> empaquetado como métrica reusable de robustez-bajo-presión y benchmark vivo."**
+
+Cada cláusula diferenciadora mapea a un hueco verificado. **Frases PROHIBIDAS** (refutadas
+o tomadas): "primera curva con evaluador adaptativo" (Wolf), "primer atacante entrenado"
+(Adv-RM/TOMPA), "primeras rúbricas adaptativas" (OnlineRubrics), "no existe atacante
+semántico" (refutado 0-3 — Adv-RM es fluido).
+
+### Estados finales de los edges
+
+- **E1** parcialmente tomado → libre en: curva para rubric/judge, comparación de tipos de
+  defensor, regeneración label-free desde muestras de exploit, la frontera Wolf-vs-collapse.
+- **E2** parcialmente tomado → libre en: atacante entrenado contra rúbricas/judges con
+  objetivo de panel confiable, artefacto transferible, benchmark vivo, métrica estandarizada.
+- **E3** (señal funcional para entrenar el escritor) — **RE-CONFIRMADO LIBRE** por segunda
+  búsqueda independiente (OnlineRubrics promptea o3-mini; nadie entrena al escritor).
+
+### Urgencia y vida útil del mapa
+
+**5 grupos convergiendo** (Tsinghua/CHERRL, UIUC/TOMPA, Scale, NVIDIA, Gauthier-Bach-Jordan);
+**dos declararon exactamente nuestro próximo paso como su future work** (CHERRL: "patch reward
+designs from detected hacks"; TOMPA: "adversarial training de RMs"). El survey 2604.13602 ya
+nombra "Evaluator-Policy Co-Evolution" como paradigma abierto. **Vida útil del mapa: semanas —
+re-sweep de arXiv (esos 3 grupos) obligatorio justo antes del commit final.** AMARIS
+(arXiv:2605.18592) queda como lectura pendiente de menor prioridad.
+
+### Bonus estratégicos descubiertos
+
+1. **CHERRL es veRL-based con código Apache-2.0** — nuestro stack. Su testbed de curvas +
+   onset detection puede ahorrarnos semanas de build.
+2. **OnlineRubrics se convierte en nuestro arm "frontier-prompteado"** — la comparación de
+   defensores tiene un brazo ya publicado en ICML contra el cual medirse.
+3. **La tensión Wolf-vs-collapse le da al paper suspenso científico real**: no sabemos si
+   nuestra regeneración label-free ayuda o colapsa — y medir esa frontera ES la contribución.
 
 ## 8. Qué sigue (gates, en orden)
 

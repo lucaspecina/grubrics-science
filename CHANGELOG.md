@@ -283,6 +283,37 @@ Refs: CHG-019, TODO-006
 
 ---
 
+## [CHG-025] 2026-07-02 — Verificación del reframing adversarial: ADOPTAR CON CLAIMS AJUSTADOS
+
+Resultado de TODO-017 (deep research: 103 agentes, 21 fuentes primarias, 22 claims 3-0, 3
+refutados) + lectura directa de SibylSense. **Ambos edges parcialmente tomados en su forma
+pura; sobreviven en formulación acotada** (mapa completo con citas y frases prohibidas:
+`docs/adversarial-evaluation-reframing.md` §9).
+
+**Lo tomado**: curva adaptativo-vs-estático para preference RMs (Wolf et al. 2505.18126);
+rúbricas regeneradas durante RL, prompteadas, sin curvas (OnlineRubrics/Scale 2510.07284,
+ICML'26); atacante entrenado vs RMs escalares con arms race 2-rondas (Adv-RM 2504.06141 —
+el prior art más cercano; TOMPA 2604.02686 confirma).
+
+**Lo libre (nuestros claims)**: curvas Goodhart para evaluadores rubric/judge con
+regeneración de criterios in-loop; comparación de tipos de defensor (ninguno vs
+frontier-prompteado vs chico-entrenado); atacante entrenado contra rúbricas/judges con
+objetivo de panel confiable; artefacto transferible + métrica robustez-bajo-presión +
+benchmark vivo; E3 (señal funcional) re-confirmado libre.
+
+**Hallazgos estratégicos**: (1) tensión científica viva Wolf-vs-alignment-collapse
+(2605.04266: el refresh naive AMPLIFICA el hacking) → nuestra comparación de defensores
+tiene suspenso real; (2) CHERRL (Tsinghua, 2606.04923) es testbed veRL público de curvas
+de hacking → activo aprovechable; (3) 5 grupos convergiendo, 2 declararon nuestro paso
+como future work → ventana de meses, re-sweep obligatorio pre-commit.
+
+**Pendiente**: decisión final del usuario + Fase 0 bloque 2 (el motor). Los planes
+(research.md/fases) siguen sin reescribirse hasta ambas cosas.
+
+Refs: TODO-017, CHG-024, `docs/adversarial-evaluation-reframing.md`
+
+---
+
 ## [CHG-024] 2026-07-02 — Reframing candidato: Evaluación Adversarial (PROPUESTA, pendiente de verificación)
 
 La vara del proyecto subió: el usuario pide impacto alto, no un ladrillo de nicho. Evaluación

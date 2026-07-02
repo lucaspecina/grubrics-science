@@ -88,20 +88,22 @@ entrenada. Gráfico objetivo: proxy reward vs calidad real a lo largo del traini
 
 Refs: CHG-022, `docs/research.md` Fase 3, arXiv 2605.12474
 
-### TODO-017 🟡 Verificación del reframing adversarial (GATE de la decisión de rumbo)
+### TODO-017 ✅ Verificación del reframing adversarial (resuelto 2026-07-02)
 
-Investigación profunda del terreno antes de reescribir plan alguno (disciplina del pivote
-original). Preguntas: ¿alguien midió curvas de overoptimization con evaluador ADAPTATIVO?
-¿atacantes entrenados contra rewards/rúbricas (no solo safety red-teaming)? ¿qué dejaron
-libre Gao et al. 2023, iterated RLHF, RM ensembles, Perez et al.? ¿existe métrica de
-robustez-bajo-presión para evaluadores?
+**Veredicto: ADOPTAR CON CLAIMS AJUSTADOS** (decisión final del usuario pendiente).
+103 agentes, 22 claims confirmados 3-0, 3 refutados. Ambos edges parcialmente tomados en
+forma pura, sobreviven acotados. Prior art más cercano: Adv-RM (atacante entrenado vs RMs
+escalares); en defensa: Wolf et al. (curva adaptativo-vs-estático para RMs) y OnlineRubrics
+de Scale (rúbricas regeneradas en RL, prompteadas, sin curvas). E3 (señal funcional)
+re-confirmado libre. SibylSense leído: no ocupa. **Mapa completo, claim formulado y frases
+prohibidas: `docs/adversarial-evaluation-reframing.md` §9.**
 
-- Contexto completo y claims candidatos: **`docs/adversarial-evaluation-reframing.md`**
-- Output: mapa tomado/libre con citas → decisión (adoptar reframing / iterar / mantener plan)
-- **Bloquea**: cualquier reescritura de research.md/fases post-Fase 0
-- Costo: ~1 sesión de deep research, $0 GPU
+**Follow-ups que deja**:
+- Re-sweep de arXiv (CHERRL/TOMPA/Scale) justo antes del commit final — vida útil del mapa: semanas
+- Leer AMARIS (arXiv:2605.18592) — prioridad baja
+- Evaluar build sobre el testbed CHERRL (veRL, Apache-2.0)
 
-Refs: CHG-024
+Refs: CHG-024, CHG-025
 
 ### TODO-016 🟡 Scoping Fase 4 — Trayectorias agénticas (plan B / segundo paper)
 
