@@ -283,6 +283,31 @@ Refs: CHG-019, TODO-006
 
 ---
 
+## [CHG-024] 2026-07-02 — Reframing candidato: Evaluación Adversarial (PROPUESTA, pendiente de verificación)
+
+La vara del proyecto subió: el usuario pide impacto alto, no un ladrillo de nicho. Evaluación
+crítica honesta del proyecto actual + vuelta de tuerca propuesta, documentadas con precisión en
+**`docs/adversarial-evaluation-reframing.md`** (el documento central de esta inflexión).
+
+**Esencia**: la idea original (entrenar el inductor con señal funcional) queda INTACTA como
+instrumento; el objeto de estudio pasa del artefacto al fenómeno — **la carrera armamentista
+entre presión de optimización y evaluación adaptativa**, con un Tramposo entrenado (ataca
+evaluadores) co-evolucionando con el Profesor (los defiende). Edge candidato principal: nadie
+midió la curva de Goodhart con el evaluador defendiéndose (Gao et al. 2023 la midió con
+evaluador estático — esa pregunta está tomada). Métrica nueva candidata: robustez-bajo-presión.
+Artefacto candidato: benchmark vivo con el atacante adentro.
+
+**Gates antes de reescribir cualquier plan**:
+1. Fase 0 bloque 2 (la hora de GPU del veredicto) — necesaria bajo ambos framings.
+2. TODO-017: verificación profunda del terreno (misma disciplina que salvó el pivote original).
+
+**Estado de los planes existentes**: research.md/fases NO se modifican todavía. Este CHG
+registra la propuesta y su racional, no una decisión de ejecución.
+
+Refs: `docs/adversarial-evaluation-reframing.md`, TODO-017, CHG-022, EXP-PHASE0-B4
+
+---
+
 ## [CHG-023] 2026-06-12 — Fase 0 parte de cero: Qwen3-8B base, sin reusar el checkpoint SFT pre-pivote
 
 Decisión del usuario al autorizar la ejecución de Fase 0: **no usar ningún modelo ya entrenado**.

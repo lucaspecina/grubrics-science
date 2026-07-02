@@ -218,6 +218,22 @@ esparso, relativo, y destilado en un artefacto denso.
 4. Comparabilidad por diseño: protocolo HealthBench oficial, judge GPT-4.1 binario (el del
    campo), baselines publicados citables con número.
 
+## 8b. Reframing candidato 2026-07-02 (pendiente de verificación)
+
+Propuesta de subir el techo: del artefacto (rubricator) al fenómeno (carrera armamentista
+optimización-vs-evaluación-adaptativa), con atacante entrenado co-evolucionando. Claims
+nuevos y su estado:
+
+| Claim | Estado |
+|---|---|
+| "¿Cuánta optimización aguanta un reward ESTÁTICO?" | [PROBADO] — Gao et al. 2023 (RMs); Scale 2605.12474 (rúbricas, cualitativo). **NO es nuestro edge** |
+| Curva de robustez con evaluador ADAPTATIVO (defensor: nada vs frontier vs entrenado) | [ABIERTO-A-VERIFICAR] — edge candidato 1 |
+| Atacante entrenado transferible contra evaluadores + benchmark vivo | [ABIERTO-A-VERIFICAR] — edge candidato 2 |
+| Señal funcional para entrenar el inductor | [ABIERTO] verificado 2026-06 — sigue siendo la base |
+
+Documento completo (relación exacta con la idea original, mapa del terreno, preguntas
+falsificables, riesgos): **`adversarial-evaluation-reframing.md`**. Gate: TODO-017.
+
 ## 9. Bibliografía mínima del argumento
 
 (detalle por paper en `related-work.md`)

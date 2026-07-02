@@ -88,6 +88,21 @@ entrenada. Gráfico objetivo: proxy reward vs calidad real a lo largo del traini
 
 Refs: CHG-022, `docs/research.md` Fase 3, arXiv 2605.12474
 
+### TODO-017 🟡 Verificación del reframing adversarial (GATE de la decisión de rumbo)
+
+Investigación profunda del terreno antes de reescribir plan alguno (disciplina del pivote
+original). Preguntas: ¿alguien midió curvas de overoptimization con evaluador ADAPTATIVO?
+¿atacantes entrenados contra rewards/rúbricas (no solo safety red-teaming)? ¿qué dejaron
+libre Gao et al. 2023, iterated RLHF, RM ensembles, Perez et al.? ¿existe métrica de
+robustez-bajo-presión para evaluadores?
+
+- Contexto completo y claims candidatos: **`docs/adversarial-evaluation-reframing.md`**
+- Output: mapa tomado/libre con citas → decisión (adoptar reframing / iterar / mantener plan)
+- **Bloquea**: cualquier reescritura de research.md/fases post-Fase 0
+- Costo: ~1 sesión de deep research, $0 GPU
+
+Refs: CHG-024
+
 ### TODO-016 🟡 Scoping Fase 4 — Trayectorias agénticas (plan B / segundo paper)
 
 Mapear la cancha agéntica antes de necesitarla: qué benchmarks con outcome verificable existen
