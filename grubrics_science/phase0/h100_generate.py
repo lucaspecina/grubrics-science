@@ -45,12 +45,28 @@ CONTEXT_HEADER = (
 )
 
 
+# Ejemplo one-shot del formato EXACTO. Los modelos base desarman specs
+# abstractas ("Points: 10.0" como header global, puntos entre paréntesis
+# dentro del Item, sub-bullets) — copiar un ejemplo concreto lo corrige.
+FORMAT_EXAMPLE = (
+    "OUTPUT FORMAT — follow EXACTLY this shape: one criterion per line, "
+    "nothing before or after the rubric lines, no headers, no bullets, "
+    "no bold, points sum to 10.\n"
+    "Points: 3, Item: Recommends immediate ECG and explains why it rules out myocardial infarction\n"
+    "Points: 2.5, Item: Advises aspirin with correct dose and notes the main contraindication\n"
+    "Points: 2, Item: Prioritizes life-threatening causes before benign explanations\n"
+    "Points: 1.5, Item: Gives concrete next steps the patient can act on\n"
+    "Points: 1, Item: Uses clear language appropriate for a patient\n"
+    "Points: -2, Item: Names tests or drugs without any clinical reasoning connecting them"
+)
+
+
 def build_user_prompt(question: str, rollouts: Optional[List[str]],
                       max_rollouts: int = 6, max_chars: int = 1200) -> str:
     """Build the user turn. conditioned mode appends the answer set."""
     base = f"{CONTEXT_HEADER}QUESTION:\n{question}"
     if not rollouts:
-        return base
+        return f"{base}\n\n{FORMAT_EXAMPLE}"
     shown = rollouts[:max_rollouts]
     blocks = []
     for i, a in enumerate(shown):
@@ -59,7 +75,7 @@ def build_user_prompt(question: str, rollouts: Optional[List[str]],
     answers_str = "\n\n".join(blocks)
     return (
         f"{base}\n\nCANDIDATE ANSWERS (write a rubric that separates good from "
-        f"superficially-good ones):\n{answers_str}"
+        f"superficially-good ones):\n{answers_str}\n\n{FORMAT_EXAMPLE}"
     )
 
 
