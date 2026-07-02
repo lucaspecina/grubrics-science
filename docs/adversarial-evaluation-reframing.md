@@ -192,6 +192,34 @@ definen igual bajo ambas presiones.
 **La medición central**: para cada (defensor, presión), el step del quiebre. Comparación
 entre brazos = cuánto corre cada defensa el quiebre, y si alguna lo adelanta (colapso).
 
+## 8e. El problema del gold (objeción del usuario, 2026-07-02) y el diseño de medición
+
+**Objeción**: el "gold" de nuestras curvas es un panel de LLMs — no es verdad de verdad.
+
+**Cómo lo resuelve el campo** (nadie tiene gold real a escala): Gao et al. y Wolf usan un
+RM grande como verdad POR CONSTRUCCIÓN (simulación: el gold genera las etiquetas del proxy);
+CHERRL usa el gemelo-sin-bias del judge (por construcción de nuevo); Adv-RM y Scale usan
+paneles de LLMs cross-family (nuestra receta viene de Scale). El estándar es simulación o panel.
+
+**Por qué las conclusiones sobreviven**:
+1. **Claims relativos**: comparamos defensores bajo LA MISMA vara; los sesgos del gold
+   aplican por igual a todos los brazos → el ORDEN de defensores es robusto; los onsets
+   absolutos se reportan como relativos a la vara.
+2. **Segundo canal judge-free — trampas plantadas**: las trampas fabricadas son malas POR
+   CONSTRUCCIÓN (las diseñamos así). "Rúbrica puntúa trampa plantada ≥ honestas" es fallo
+   definicional sin depender de ningún LLM. Dos canales independientes (panel continuo +
+   trampas absolutas); concordancia entre ambos = solidez.
+3. **Tercera vara en endpoints**: protocolo HealthBench oficial (rúbricas de médicos,
+   held-out) + muestra chica con auditoría humana.
+
+**La arruga honesta**: el Tramposo entrena CONTRA el panel → el panel de su reward queda
+bajo presión de optimización y el atacante podría explotar sus puntos ciegos (hacks
+invisibles a la medición). **Fix de diseño (incorporado)**: PARTIR EL PANEL — sub-panel A
+(familias X) = señal de entrenamiento del atacante; sub-panel B held-out (familias
+distintas) = medición de curvas. El Tramposo nunca ve a los jueces que miden. + auditoría
+humana de muestra de outputs del atacante. (Análogo train/test split para jueces; Adv-RM
+mitigó lo mismo con ensemble-disagreement.)
+
 ## 9. MAPA VERIFICADO (2026-07-02) — reemplaza al §3 preliminar
 
 Verificación adversarial completa (TODO-017). Cada asignación trazable a claims 3-0.
