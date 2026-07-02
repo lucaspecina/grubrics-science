@@ -241,6 +241,27 @@ panel; no de los tres pisos a la vez.
 en ningún claim de la verificación (CHERRL = gemelo sin bias; Gao/Wolf = RM simulado) —
 el piso V es en sí una contribución de diseño.
 
+## 8g. Análisis secundario: calibración del panel contra verdad verificable (propuesta del usuario)
+
+En el piso V, verificador (verdad) y panel (instrumento) miden los mismos rollouts →
+calibramos el instrumento donde existe la verdad antes de usarlo donde no existe (piso A):
+
+1. **Acuerdo estático**: correlación panel-vs-correctitud por checkpoint → barra de error del panel.
+2. **Acuerdo BAJO PRESIÓN (la medición valiosa)**: ¿el panel sigue a la verdad cuando la
+   distribución de la policy deriva hacia exploits, o el panel también se quiebra? = la curva
+   de Goodhart DEL INSTRUMENTO, medida contra verdad real. Si acompaña → licencia empírica
+   para el piso A; si se despega a presión X → modelo de error explícito de las conclusiones
+   del piso A ("confiables hasta presión X").
+
+**Truco in-domain**: MedQA/MedMCQA son médicos Y verificables (adapters ya en el repo) →
+la calibración ocurre en el dominio del piso A con formato verificable; el gap de
+transferencia queda acotado a "MCQ médico vs conversación médica".
+
+**Valor standalone**: acuerdo estático judge-humano está saturado en la literatura;
+confiabilidad de paneles LLM contra verdad verificable BAJO presión de optimización no
+apareció en ningún claim de la verificación — subproducto publicable del piso V, y pregunta
+que el campo entero (que usa paneles como gold) necesita respondida.
+
 ## 9. MAPA VERIFICADO (2026-07-02) — reemplaza al §3 preliminar
 
 Verificación adversarial completa (TODO-017). Cada asignación trazable a claims 3-0.
