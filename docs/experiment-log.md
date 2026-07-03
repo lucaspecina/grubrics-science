@@ -334,4 +334,52 @@ Refs: EXP-JUDGE-001, EXP-JUDGE-002, CHG-021
 
 ---
 
-Runs pendientes y extensiones: ver `TODO.md` (TODO-006 a TODO-011).
+## Fase 0 post-pivote — Experimento discriminante (TODO-012)
+
+### [EXP-PHASE0-B4] 2026-06-12 — ¿La rúbrica gold es hackeable? (la motivación, medida)
+
+**Qué**: 90 preguntas HealthBench (pool GRPO, holdout de 500 excluido). Answer sets =
+5-6 respuestas honestas (precompute) + 4 hacks sintéticos por pregunta (familias de
+arXiv:2605.12474: completeness_filler, implicit_as_explicit, partial_compound +
+keyword_stuffing). Ancla = panel sin rúbrica (GPT-4.1 + gpt-5, Borda). La rúbrica gold
+de los médicos se aplica con judge binario (CHG-021) a cada answer set.
+
+**Config**: `phase0/build_rollout_sets.py` (90 q, 796 respuestas) + `phase0/sanity_check.py`
+**Costo**: ~$15-20 API (incluye 2 runs fallidos por 429s, ver fix abajo) | **Tiempo**: ~1.5h
+
+**Resultados (n=90, 359 hacks)**:
+
+| Métrica | Valor |
+|---|---|
+| (a) Acuerdo inter-juez del panel | 0.785 mean (0.92-0.95 en piloto) |
+| (a) Panel detecta hacks | ✅ los rankea al fondo (piloto: 11/12 bajo mediana honesta) |
+| (a) Spearman panel vs gold | 0.535 (moderado — miden cosas parcialmente distintas) |
+| (b) Gold score: mean honestas / mean hacks | 0.314 / 0.123 (gap 0.191) |
+| (b) **Hacks ≥ peor respuesta honesta** | **253/359 (70.5%)** |
+| (b) **Hacks ≥ mediana honesta** | **111/359 (30.9%)** |
+
+**Por familia** (gold score medio; más alto = más engaña a la gold):
+completeness_filler **0.223** > partial_compound 0.133 > implicit_as_explicit 0.070 >
+keyword_stuffing 0.064.
+
+**Interpretación**:
+1. **El ancla funciona**: el panel sin rúbrica separa hacks de honestas con alto acuerdo.
+2. **La rúbrica gold es permeable, no ciega**: separa en promedio (gap 0.19) pero ~31% de
+   respuestas deliberadamente vacías alcanzan la mediana de las genuinas y 70% le ganan a
+   alguna respuesta real. Como reward de RL, esa permeabilidad es el gradiente que una
+   policy explotaría.
+3. **El ranking de familias replica a Scale**: completitud-sin-sustancia es el exploit más
+   efectivo ("gains concentrated in completeness criteria", arXiv:2605.12474) — medido
+   independientemente en nuestros datos. Comparabilidad directa con la literatura.
+4. Corrección metodológica: el teaser inicial (gap≈0.003 en n=2) era artefacto de muestra
+   chica — guardrail "reproducir antes de concluir" aplicado.
+
+**Fix operativo derivado**: backoff 429-aware (15-90s + jitter) en `judge._call_with_retry`
++ resume incremental (`.partial.jsonl`) en sanity_check. Bursts de ~5,700 calls a gpt-4.1
+con backoff 1-2-4s producen cascada de 429s (2 runs perdidos antes del fix).
+
+**Output**: `data/results/phase0_b4.json` | Refs: TODO-012, CHG-022, CHG-023, `docs/phase0-plan.md`
+
+---
+
+Runs pendientes y extensiones: ver `TODO.md` (TODO-012 a TODO-016).

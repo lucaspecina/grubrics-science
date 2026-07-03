@@ -224,7 +224,7 @@ Refs: TODO-002, TODO-003, TODO-005, EXP-PROF-1A
 
 Comparación de 5 modelos como Judge (EXP-JUDGE-001). gpt-5-mini superó a todos en kappa (0.440) y accuracy (0.720).
 
-**Hallazgo clave**: los modelos GPT-4.x (gpt-4o, gpt-4.1) **no sirven como Judge** — dan scores altos a todo, kappa=0, no discriminan entre respuestas buenas y malas. Solo la familia GPT-5.x produce señal útil para RL.
+**Hallazgo clave** (⚠️ revisado en CHG-021): GPT-4.x daba kappa=0 con scoring continuo, pero el test de GPT-4.1 tenía artefacto de timeout (accuracy=0.000 era falso). Re-test mostró que GPT-4.1 responde pero no discrimina con scoring continuo. Con scoring **binario** (como HealthBench) sí funciona. Ver CHG-021 y EXP-JUDGE-002.
 
 **Por qué gpt-5-mini sobre gpt-5.2-chat**:
 - Mejor kappa (0.440 vs ~0.43) y accuracy (0.720 vs ~0.68)
@@ -234,7 +234,7 @@ Comparación de 5 modelos como Judge (EXP-JUDGE-001). gpt-5-mini superó a todos
 
 **Backup**: gpt-5 en amalia-resource (kappa=0.400, 4,875 RPM) si gpt-5-mini tiene problemas.
 
-**Descartados**: gpt-4o (kappa=0), gpt-4.1 (kappa=0).
+**Descartados para scoring continuo**: gpt-4o (kappa=0), gpt-4.1 (kappa=0). Nota: GPT-4.1 viable con scoring binario — ver CHG-021.
 
 Refs: TODO-003, EXP-JUDGE-001, EXP-PROF-2b
 
@@ -280,3 +280,189 @@ Refs: TODO-006, CHG-018
 **Lección**: reasoning models tienen latencia variable alta. Siempre usar timeouts generosos (≥300s) cuando `max_tokens` es alto.
 
 Refs: CHG-019, TODO-006
+
+---
+
+## [CHG-027] 2026-07-02 — Cierre de grubrics-science y migración a goodhart-rubrics
+
+El proyecto se archiva (read-only) y continúa en el repo sucesor **goodhart-rubrics**. Dos
+pivotes (CHG-022, CHG-024/025) dejaron el nombre "grubrics-science" y su estructura sin
+relación con lo que el proyecto es hoy: un estudio del fenómeno Goodhart en evaluadores
+basados en rúbricas (nombre elegido tras descartar "gym"/"benchmark" por no describir el
+v1, que es un estudio). Buena práctica git aplicada: tombstone (README banner + este CHG +
+tag `final-grubrics-science`), puntero inverso en el nuevo repo, y merge de
+`pivot/adaptive-rubrics` → `main` para que el estado archivado refleje el final real.
+
+**Migra a goodhart-rubrics**: código vigente (judge binario, panel, paquete phase0 completo,
+pares DPO, rollout-sets), datos, y los docs de referencia (WIKI.md, diseño v2.1, reframing,
+theoretical-foundations, related-work). **Queda archivado acá**: la historia de decisiones
+completa (CHG-001..027), los framings históricos, el código pre-pivote.
+
+Refs: WIKI.md, CHG-022, CHG-024, CHG-025, CHG-026
+
+---
+
+## [CHG-026] 2026-07-02 — Survey de estrategias de defensa (TODO-018): acota la novedad del torneo
+
+Tercer barrido de literatura (104 agentes, 22 claims 3-0). Objetivo: verificar si comparar
+estrategias de defensa contra reward hacking ya se hizo, y cosechar los baselines que un
+reviewer va a esperar. Detalle completo y su impacto en el diseño: `docs/adversarial-evaluation-design.md` §10.
+
+**Hallazgo clave**: las comparaciones head-to-head de defensas YA EXISTEN en reward-model
+land (≥6 papers: PAR, Coste, InfoRM, WARM, gradient-reg, ARA) — "primera comparación de
+defensas" sin acotar está **muerto**. Pero **ninguno toca evaluadores basados en rúbricas**,
+y el survey 2604.13602 §6.1 nombra las defensas rúbrica-side como categoría con **cero
+instancias benchmarkeadas**. → Claim acotado y vivo: *"primera comparación controlada de
+estrategias de REFRESH DE RÚBRICAS para evaluadores rúbrica-based"*.
+
+**Impacto en el diseño**: (1) D-stop NO es novedoso (InfoRM CSI/MOP, EvalStop) → baseline con
+ancestros citados, no contribución; (2) baselines reviewer-expected a agregar: KL penalty
+(universal), D-stop, ensemble de rúbricas (con la advertencia de Eisenstein 2312.09244: los
+ensembles mitigan pero no eliminan por puntos ciegos compartidos), gradient-regularization
+(policy-side, ortogonal); (3) los 3 pilares del survey (reducir compresión / controlar
+amplificación / co-evolución) como esquema del related-work.
+
+Refs: TODO-018, `docs/adversarial-evaluation-design.md` §10, CHG-024, CHG-025
+
+---
+
+## [CHG-025] 2026-07-02 — Verificación del reframing adversarial: ADOPTAR CON CLAIMS AJUSTADOS
+
+Resultado de TODO-017 (deep research: 103 agentes, 21 fuentes primarias, 22 claims 3-0, 3
+refutados) + lectura directa de SibylSense. **Ambos edges parcialmente tomados en su forma
+pura; sobreviven en formulación acotada** (mapa completo con citas y frases prohibidas:
+`docs/adversarial-evaluation-reframing.md` §9).
+
+**Lo tomado**: curva adaptativo-vs-estático para preference RMs (Wolf et al. 2505.18126);
+rúbricas regeneradas durante RL, prompteadas, sin curvas (OnlineRubrics/Scale 2510.07284,
+ICML'26); atacante entrenado vs RMs escalares con arms race 2-rondas (Adv-RM 2504.06141 —
+el prior art más cercano; TOMPA 2604.02686 confirma).
+
+**Lo libre (nuestros claims)**: curvas Goodhart para evaluadores rubric/judge con
+regeneración de criterios in-loop; comparación de tipos de defensor (ninguno vs
+frontier-prompteado vs chico-entrenado); atacante entrenado contra rúbricas/judges con
+objetivo de panel confiable; artefacto transferible + métrica robustez-bajo-presión +
+benchmark vivo; E3 (señal funcional) re-confirmado libre.
+
+**Hallazgos estratégicos**: (1) tensión científica viva Wolf-vs-alignment-collapse
+(2605.04266: el refresh naive AMPLIFICA el hacking) → nuestra comparación de defensores
+tiene suspenso real; (2) CHERRL (Tsinghua, 2606.04923) es testbed veRL público de curvas
+de hacking → activo aprovechable; (3) 5 grupos convergiendo, 2 declararon nuestro paso
+como future work → ventana de meses, re-sweep obligatorio pre-commit.
+
+**Pendiente**: decisión final del usuario + Fase 0 bloque 2 (el motor). Los planes
+(research.md/fases) siguen sin reescribirse hasta ambas cosas.
+
+Refs: TODO-017, CHG-024, `docs/adversarial-evaluation-reframing.md`
+
+---
+
+## [CHG-024] 2026-07-02 — Reframing candidato: Evaluación Adversarial (PROPUESTA, pendiente de verificación)
+
+La vara del proyecto subió: el usuario pide impacto alto, no un ladrillo de nicho. Evaluación
+crítica honesta del proyecto actual + vuelta de tuerca propuesta, documentadas con precisión en
+**`docs/adversarial-evaluation-reframing.md`** (el documento central de esta inflexión).
+
+**Esencia**: la idea original (entrenar el inductor con señal funcional) queda INTACTA como
+instrumento; el objeto de estudio pasa del artefacto al fenómeno — **la carrera armamentista
+entre presión de optimización y evaluación adaptativa**, con un Tramposo entrenado (ataca
+evaluadores) co-evolucionando con el Profesor (los defiende). Edge candidato principal: nadie
+midió la curva de Goodhart con el evaluador defendiéndose (Gao et al. 2023 la midió con
+evaluador estático — esa pregunta está tomada). Métrica nueva candidata: robustez-bajo-presión.
+Artefacto candidato: benchmark vivo con el atacante adentro.
+
+**Gates antes de reescribir cualquier plan**:
+1. Fase 0 bloque 2 (la hora de GPU del veredicto) — necesaria bajo ambos framings.
+2. TODO-017: verificación profunda del terreno (misma disciplina que salvó el pivote original).
+
+**Estado de los planes existentes**: research.md/fases NO se modifican todavía. Este CHG
+registra la propuesta y su racional, no una decisión de ejecución.
+
+Refs: `docs/adversarial-evaluation-reframing.md`, TODO-017, CHG-022, EXP-PHASE0-B4
+
+---
+
+## [CHG-023] 2026-06-12 — Fase 0 parte de cero: Qwen3-8B base, sin reusar el checkpoint SFT pre-pivote
+
+Decisión del usuario al autorizar la ejecución de Fase 0: **no usar ningún modelo ya entrenado**.
+G2 y el mini-DPO (T1) parten del `Qwen/Qwen3-8B` base, no del checkpoint `sft-healthbench/final`.
+
+**Por qué fortalece el diseño**:
+- Claim más limpio: "modelo base + señal funcional" — sin herencia del paradigma de imitación
+  (el SFT pre-pivote fue entrenado a imitar rúbricas gold a ciegas, el framing viejo).
+- El B4 mostró que las rúbricas gold son hackeables (gap ≈ 0 vs hacks) — un SFT que las imita
+  hereda potencialmente esa ceguera.
+- El checkpoint SFT queda en disco como **ablation futura** (¿SFT-init vs base-init para DPO?),
+  no como dependencia.
+
+**Implicación técnica**: Qwen3-8B base tiene thinking mode por defecto → deshabilitado
+explícitamente en `h100_generate.py` (`enable_thinking=False`; trampa documentada en RubricRAG).
+
+**Costo**: posible menor parse rate de G2 base (informativo en sí — es el análogo del zero-shot
+ρ=0.426 publicado) y pares DPO algo más ruidosos (el DPO enseña formato + función a la vez).
+
+Refs: CHG-022, TODO-012, `docs/phase0-plan.md` (runbook actualizado)
+
+---
+
+## [CHG-022] 2026-06-12 — Pivote estratégico: del "rubricator imitador" al "rubricator como capa de calibración anti-hacking del RL"
+
+Investigación profunda del SOTA (marzo–junio 2026; 23 fuentes primarias, 21 claims verificados con votación adversarial) + revisión manual de los papers críticos. Cuatro hallazgos fuerzan el pivote:
+
+1. **RubricRAG (arXiv 2603.20882, Emory, 2026-03)** corrió casi exactamente nuestro experimento P2a en HealthBench con nuestra métrica (Spearman vs gold): GRPO salió **último** (ρ=0.331), debajo de zero-shot (0.426), SFT (0.457) y retrieval (**0.545**). Matiz: su reward de GRPO era similitud textual + formato + diversidad + length — **no functional alignment**, que sigue sin probarse. Pero el framing "RL para que un 8B imite rúbricas humanas" queda scooped con prior hostil, baseline retrieval difícil, y un techo estructural: con Spearman-vs-gold como señal, ρ=1.0 = *empatar* al médico — nunca superarlo. Es destilación, no capacidad nueva.
+
+2. **RubricBench (arXiv 2603.01562)** — la **brecha de inducción**: los modelos frontier juzgan a 82-85% de accuracy *cuando se les dan los criterios*, pero auto-generan rúbricas que solo llegan a 55-60% (gap ~26 pts, estable, **no cierra con escala ni reasoning**; 54-76% de criterios alucinados; recall de constraints expertos 26-54%). Saben *reconocer* calidad; no saben *inducir* la receta. El problema es real y prompting no lo resuelve.
+
+3. **Reward hacking en rubric-based RL (arXiv 2605.12474, equipo RaR/Scale, 2026-05)**: las rúbricas estáticas — **incluso las humanas** — se explotan durante el RL (proxy reward sube, jueces sin rúbrica prefieren el modelo base; exploits: satisfacción parcial de criterios compuestos, implícito-como-explícito, matching temático impreciso). El paper es solo diagnóstico — **no hay fix publicado**.
+
+4. **DPO rubric generator (arXiv 2605.30568, U. Arizona, 2026-05)**: un Qwen3-14B entrenado con DPO (meta-judge preferences) **le gana a Claude Sonnet 4 escribiendo rúbricas** (83.69% vs 81.62% MT-Bench, juzgado por el propio Claude). Entrenar el inductor funciona; el turf "dominio experto + señal funcional + rúbricas como reward de RL" sigue libre (lo declaran future work).
+
+**Nueva tesis**: los judges reconocen calidad pero no saben escribir la receta (brecha de inducción). GRubrics entrena al que escribe recetas, usando el reconocimiento del judge como señal (functional alignment). La aplicación destino: el rubricator como **capa adaptativa que mantiene calibrado el reward durante el RL** — rúbricas que se regeneran condicionadas en los rollouts vivos de la policy y resisten el hacking que rompe a las estáticas. Los failure modes que la policy inventa durante el training no están en internet ni en la rúbrica del experto: emergen del run. Ahí retrieval pierde por construcción y el entrenamiento tiene headroom genuino sobre el baseline humano.
+
+**Plan por fases con kill criteria**: ver `docs/research.md` (Fase 0 discriminante → Fase 1 rubricator funcional → Fase 2 estudio controlado rubric→policy → Fase 3 adaptativo anti-hacking → Fase 4 trayectorias agénticas).
+
+**Cancha**: texto/HealthBench primero (activos construidos, barato); trayectorias agénticas (ancla = éxito verificable, donde está la demanda industrial) como Fase 4 / plan B / segundo paper.
+
+**Decisión de repo**: continuar en este. ~80% del stack es reutilizable (judge, reward Spearman, adapters, launchers veRL, tests, setup H100). El ruido del framing viejo se maneja con documentación, no con repo nuevo.
+
+**Descartado**:
+- Seguir con el framing P2a original (scooped + techo de imitación).
+- Pivote inmediato a trayectorias agénticas: infra agéntica pesada para 1×H100, no existe dataset gold de rúbricas de proceso, y el mecanismo se valida más barato en texto. Queda como Fase 4/plan B — con la nota de que ahí el ancla es verificable (sin circularidad de judge) y la demanda industrial es máxima.
+- Repo nuevo (re-validar el E2E para ganar limpieza que dan los docs).
+- Usar la rúbrica gold como ancla anti-hacking (es una rúbrica estática más — el hack que la engaña engaña al ancla; el ancla debe ser panel cross-family **sin rúbrica**, usado esparso).
+
+**Riesgo científico #1 (a testear en Fase 0)**: que un frontier congelado, condicionado en los mismos rollouts + ranking del ancla, induzca rúbricas igual de buenas que el 8B entrenado. Si pasa, el claim de entrenamiento colapsa a costo/privacidad y el paper pivota al estudio controlado (Fase 2) con generador frontier.
+
+Refs: TODO-012..016, `docs/research.md`, `docs/related-work.md` (Actualización 2026-06), CHG-021
+
+---
+
+## [CHG-021] 2026-03-26 — Judge cambia a GPT-4.1 con scoring binario a-la-HealthBench (para todo)
+
+**Hallazgo**: GPT-4.1 como judge daba kappa=0 en EXP-JUDGE-001, pero el test estaba contaminado (timeout=60s → accuracy=0.000, artefacto). Con scoring continuo y timeout correcto: kappa=0 (scores inflados). Con scoring **binario a-la-HealthBench**: **kappa=0.400, F1=0.754** (EXP-JUDGE-003).
+
+**Root cause**: scoring continuo (0.0-1.0) no es compatible con GPT-4.x — da "benefit of the doubt". El scoring binario (pass/fail per criterion, 1 call per criterion) fuerza decisiones nítidas. Es el estándar del campo (HealthBench, Qworld).
+
+**Decisión — GPT-4.1 binario para todo (training + evaluation)**:
+- Reemplaza gpt-5-mini como judge del pipeline completo
+- Mismo modelo y método que HealthBench y Qworld → comparable directamente
+- Más rápido (~3s/call vs ~15s) y más barato que gpt-5-mini
+- Más calls por evaluación (1 per criterion vs 1 per rúbrica) pero GPT-4.1 tiene rate limits altos
+
+**Protocolo (verbatim de HealthBench)**:
+- Prompt: `HEALTHBENCH_GRADER_TEMPLATE` (en `validate_judge.py`)
+- System: `"You are a helpful assistant."`
+- 1 API call per criterion, output: `{"explanation": "...", "criteria_met": true/false}`
+- Agregación: `sum(points where met) / sum(positive points)`
+- Temperature: 0.5, max_tokens: 2048
+
+**Implicaciones**:
+- Hay que re-precomputar gold_scores con el nuevo judge/método (el cache actual es con gpt-5-mini continuo)
+- La reward function necesita adaptarse para hacer scoring binario per criterion
+- El precompute también cambia: evaluar cada criterion de la gold rubric individualmente
+
+**Descartado**: dual-judge (gpt-5-mini para training, GPT-4.1 para eval). No tiene sentido mantener dos judges cuando GPT-4.1 binario da kappa comparable, es más barato, y alinea con el campo.
+
+**Lección meta**: nunca concluir que un modelo "no sirve" sin verificar (1) que el test corrió sin errores y (2) que la tarea es equivalente a la que funciona en otros papers.
+
+Refs: EXP-JUDGE-001, EXP-JUDGE-002, EXP-JUDGE-003, CHG-018, CHG-020

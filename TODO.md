@@ -2,178 +2,178 @@
 
 Source of truth para pendientes del proyecto. Cada item tiene un ID único `TODO-NNN`.
 
-**Estados**: 🔴 bloqueado | 🟡 pendiente | 🟢 en curso | ✅ hecho
+**Estados**: 🔴 bloqueado | 🟡 pendiente | 🟢 en curso | ✅ hecho | ⛔ superseded
+
+> **Pivote 2026-06-12 (CHG-022)**: el proyecto cambió de framing — del "rubricator imitador"
+> al "rubricator como capa de calibración anti-hacking del RL". El plan vigente son las fases
+> de `docs/research.md` (TODO-012..016). Los TODOs 006-011 del plan anterior quedan marcados
+> según corresponda; la infraestructura (TODO-001..005) sigue vigente.
 
 ---
 
-## Investigaciones estratégicas
+## Plan vigente (post-pivote) — Fases de research.md
 
-Responder estas preguntas antes de ejecutar runs de producción. Informan todas las decisiones concretas.
+### TODO-012 🟢 Fase 0 — Experimento discriminante: ¿la inducción se aprende o alcanza el frontier con ejemplos? (en curso 2026-06-12)
 
-### TODO-001 ✅ Framework y arquitectura de training (resuelto 2026-03-18)
+**Progreso (2026-06-12)** — plan operativo en `docs/phase0-plan.md`:
+- ✅ Etapa A: judge binario canónico (`judge/binary.py` + `Judge.evaluate_answers_binary`),
+  parser de rúbricas generadas, 23 tests, smoke live OK (ρ=1.0 vs gold en entry de 11 criterios)
+- ✅ Etapa B1-B3: 4 familias de hack + panel sin rúbrica (Borda + acuerdo inter-juez) +
+  build de 90 preguntas → `data/cache/phase0_rollout_sets.jsonl` (796 respuestas,
+  agreement 0.785, splits 61/16/13, holdout de 500 excluido)
+- 🟢 Etapa B4 (corriendo): preliminar en 2 preguntas: **gold hack gap ≈ 0.003** (la rúbrica
+  de los médicos NO distingue hacks de honestas; 75% de hacks sobre la mediana honesta)
+  mientras el panel los detecta — la motivación del paper, medida
+- ✅ Etapa C (código): harness (alignment + hack_detection), G1 frontier, orquestador con
+  kill criterion, pipeline H100 completo (h100_generate, build_dpo_pairs, run_dpo + config)
+- ⬜ Falta ejecutar: experimento G1 (API), G2/G3+T1 (requiere H100, ~2-4h — **avisar antes
+  de encender**), tabla final y decisión del kill criterion
+- Fix operativo: backoff 429-aware en judge (los bursts de ~5K calls necesitan 15-90s)
 
-**Conclusión: seguir con veRL.** Los problemas son puntuales, no síntomas de un framework inadecuado.
 
-**Análisis realizado:**
-- **veRL vs TRL**: TRL ~3x más lento, vLLM+LoRA buggy. Descartado.
-- **veRL vs OpenRLHF**: OpenRLHF viable como backup (`--save_hf_ckpt`), pero no justifica migración ahora.
-- **veRL vs prime-rl**: prime-rl tiene LoRA saving roto (issue #1707), v0.4 inestable, no usa PEFT, training hangs (issue #1713). Descartado.
-- **Checkpoints**: veRL guarda AMBOS formatos (FSDP shards + HuggingFace en `huggingface/` subdir + LoRA en `lora_adapter/`). La hipótesis "FSDP incompatible con HF" era incorrecta — nunca se probó.
-- **Multi-GPU**: veRL escala nativamente con FSDP, no requiere cambio de framework.
-- **SFT→GRPO**: cambiar `model.path` al dir del SFT, `from_pretrained()` lo carga, veRL crea LoRA fresco.
-- **Hybrid engine** (FSDP + vLLM en 1 GPU): feature clave de veRL para single H100.
 
-**Workarounds en veRL son menores**: ~100 líneas de patches one-time (JSON columns, wandb cleanup), ya aplicados.
+**El experimento que decide el proyecto.** Comparar tres generadores de rúbricas condicionados en
+los mismos `rollouts + ranking del ancla`: (1) frontier congelado, (2) Qwen3-8B sin entrenar,
+(3) Qwen3-8B entrenado con señal funcional. Métrica: Spearman de la rúbrica vs ancla en rollouts
+held-out (¿separa trampa de calidad en datos nuevos?).
 
-Refs: CHG-015
+- Datos: precompute HealthBench existente + respuestas "tramposas" sintéticas (keyword stuffing,
+  relleno, implícito-como-explícito — generar con GPT)
+- Ancla: panel de jueces sin rúbrica (cross-family) sobre muestras chicas
+- Requiere: judge binario GPT-4.1 (TODO-006 Fases 1-2), generación de respuestas sintéticas
+- **Kill criterion**: si (1) ≥ (3), el claim de entrenamiento colapsa → pivotar a Fase 2 con
+  generador frontier, o a Fase 4 (TODO-016)
+- Costo: ~decenas de $, días
 
-### TODO-002 🟢 Profiling y observabilidad (en curso — primer run completado 2026-03-19)
+**Bloquea**: TODO-013, TODO-015. Refs: CHG-022, `docs/research.md` Fase 0, **plan operativo: `docs/phase0-plan.md`**
 
-¿Dónde están los bottlenecks? ¿Cómo mapeamos qué es paralelo y qué es secuencial?
+### TODO-013 🔴 Fase 1 — Rubricator entrenado con señal funcional (DPO primero)
 
-**Resultados de EXP-PROF-1A (batch=8, 5 steps)**:
-- ✅ Breakdown completo de un step: gen 35%, update_actor 32%, update_weights 25%, old_log_prob 8%
-- ✅ Reward (Judge API) NO es bottleneck — async vía Ray, sem_wait ≈ 0
-- ✅ VRAM: 33.2/95.8 GB (35%) — headroom enorme para optimización
-- ✅ Checkpoint save: 122s (3.7× step time) — save_freq alto es crítico
-- ✅ Startup: 275s costo fijo (se amortiza)
-- ✅ STEP_TIMING logs son suficientes para profiling
+Entrenar el inductor en HealthBench. DPO con pares construidos por señal funcional (rúbrica A > B
+si rankea las respuestas más parecido al gold). GRPO como ablation (thinking OFF — trampa
+documentada en RubricRAG).
 
-**Pendiente**:
-- Profiling a batch=24 (necesita más datos precomputados, bloqueado por TODO-006)
-- Validar optimizaciones de micro_batch y gpu_memory_utilization (Fase 2 del plan)
+- **Baselines publicados a vencer** (mismos datos/métrica): retrieval ρ=0.545, SFT ρ=0.457,
+  zero-shot ρ=0.426, GRPO-textual ρ=0.331 (arXiv 2603.20882)
+- Punto de partida: checkpoint SFT existente (`sft-healthbench/final`)
+- Resultado publicable por sí solo (Arizona declaró dominio experto como future work)
+- Costo: <$100, semanas
 
-**Referencia**: `docs/performance-profile.md` (documento vivo)
-Refs: EXP-PROF-1A, CHG-017
+**Bloqueado por**: TODO-012. **Bloquea**: TODO-014 (arm "nuestro rubricator"). Refs: CHG-022, arXiv 2605.30568
 
-### TODO-003 ✅ Judge pipeline — paralelismo y throughput (resuelto 2026-03-19)
+### TODO-014 🟡 Fase 2 — Estudio controlado: rubric quality → policy quality
 
-**Problema**: gpt-5.2-chat en Azure S0 tier causaba 429 rate limit errors a batch=24 (reward_wall=127s).
+El experimento que todo el campo asume y nadie hizo. Fijar todo y variar solo la fuente de rúbricas
+como reward para entrenar policies de *respuesta*: random / zero-shot frontier / retrieval / humanas /
+nuestro rubricator. + baseline "panel directo como reward, sampleado".
 
-**Solución**: cambiar Judge de gpt-5.2-chat a **gpt-5-mini** (CHG-018).
-- gpt-5-mini: kappa=0.440, accuracy=0.720 (mejor que gpt-5.2-chat)
-- Rate limits más altos (mini model), más rápido, más barato
-- Validado en EXP-JUDGE-001 (5 modelos comparados, 50 entries HealthBench)
+- Evaluación: panel cross-family sin rúbrica (metodología arXiv 2605.12474) + protocolo HealthBench
+  oficial en held-out
+- Los rollouts de los runs estáticos se cosechan como cantera de exploits reales para TODO-015
+- Puede empezar sin TODO-013 (con los arms que no requieren nuestro rubricator)
+- Costo: ~$400-600
 
-**Hallazgo importante**: modelos GPT-4.x (gpt-4o, gpt-4.1) NO sirven como Judge — kappa=0, no discriminan. Solo GPT-5.x produce señal útil.
+Refs: CHG-022, `docs/research.md` Fase 2
 
-**Backup**: gpt-5 en amalia-resource (kappa=0.400, 4,875 RPM).
+### TODO-015 🔴 Fase 3 — Rubricator adaptativo anti-hacking (el método)
 
-**Pendiente**: validar que gpt-5-mini no tenga rate limit a batch=24 (próximo profiling run).
+Regeneración de rúbricas cada N steps condicionada en rollouts vivos. Arms: (a) estática humana,
+(b) estática frontier, (c) **adaptativa frontier congelado** (ablation crítica), (d) adaptativa
+entrenada. Gráfico objetivo: proxy reward vs calidad real a lo largo del training.
 
-Refs: EXP-PROF-1A, EXP-PROF-2b, EXP-JUDGE-001, CHG-017, CHG-018
+- Riesgos técnicos: reward no-estacionario en GRPO (cambios graduales, KL alto), carrera
+  armamentista (N chico, hacks sintéticos diversos)
+- **Bloqueado por**: TODO-012 (kill criterion), TODO-014 (baselines + exploits cosechados)
+- Costo: ~$300-500 adicionales
+
+Refs: CHG-022, `docs/research.md` Fase 3, arXiv 2605.12474
+
+### TODO-017 ✅ Verificación del reframing adversarial (resuelto 2026-07-02)
+
+**Veredicto: ADOPTAR CON CLAIMS AJUSTADOS** (decisión final del usuario pendiente).
+103 agentes, 22 claims confirmados 3-0, 3 refutados. Ambos edges parcialmente tomados en
+forma pura, sobreviven acotados. Prior art más cercano: Adv-RM (atacante entrenado vs RMs
+escalares); en defensa: Wolf et al. (curva adaptativo-vs-estático para RMs) y OnlineRubrics
+de Scale (rúbricas regeneradas en RL, prompteadas, sin curvas). E3 (señal funcional)
+re-confirmado libre. SibylSense leído: no ocupa. **Mapa completo, claim formulado y frases
+prohibidas: `docs/adversarial-evaluation-reframing.md` §9.**
+
+**Follow-ups que deja**:
+- Re-sweep de arXiv (CHERRL/TOMPA/Scale) justo antes del commit final — vida útil del mapa: semanas
+- Leer AMARIS (arXiv:2605.18592) — prioridad baja
+- Evaluar build sobre el testbed CHERRL (veRL, Apache-2.0)
+
+Refs: CHG-024, CHG-025
+
+### TODO-016 🟡 Scoping Fase 4 — Trayectorias agénticas (plan B / segundo paper)
+
+Mapear la cancha agéntica antes de necesitarla: qué benchmarks con outcome verificable existen
+(tau-bench, AppWorld, SWE-bench variantes), cuáles tienen trayectorias públicas reutilizables,
+costo de un piloto de hacking agéntico, qué dejó libre RLCER exactamente, quién publica en
+process-rubrics para agentes.
+
+- Ancla = éxito verificable de tarea (sin circularidad de judge)
+- Es el plan B si TODO-012 mata el claim en texto, y el destino natural del mecanismo si funciona
+- Costo: ~2 días de investigación, $0
+
+Refs: CHG-022, `docs/research.md` Fase 4
 
 ---
 
-## Pipeline milestones
-
-### TODO-004 ✅ Checkpoint load/resume funcional (resuelto 2026-03-19)
-
-Cargar checkpoints (SFT→GRPO y GRPO resume) sin que falle.
-
-**Resultado:**
-- ✅ Fase A: GRPO from scratch funciona (EXP-DEBUG-A, 2026-03-02)
-- ✅ Fase B: GRPO resume funciona (EXP-DEBUG-B, 2026-03-19). veRL auto-detecta `latest_checkpointed_iteration.txt`, carga FSDP checkpoint, continúa desde el step correcto. Run 1 (2 steps) → Run 2 (resume → step 3) completado.
-- ✅ Fase C: SFT→GRPO funciona (EXP-DEBUG-C, 2026-03-19). `from_pretrained(sft_dir)` + fresh LoRA + forward pass OK. Save/load roundtrip con weights match confirmado.
-
-**Timings observados** (batch=4, 1×H100 NVL):
-- Step: ~200-220s (gen ~13s, actor update ~11-14s, checkpoint save ~165-184s)
-- Checkpoint save domina (~80% del step time) — explorar en TODO-005
-- Resume startup: ~8 min (model load + checkpoint load + vLLM init)
-
-Refs: CHG-010, CHG-012, CHG-015, CHG-016, EXP-DEBUG-A, EXP-DEBUG-B, EXP-DEBUG-C
+## Infraestructura y datos (vigente, re-scopeada)
 
 ### TODO-005 🟡 Configuración de producción optimizada
 
-Aplicar optimizaciones basadas en profiling real, no estimaciones.
+Sin cambios por el pivote — cualquier run de GRPO (Fases 1-3) la necesita.
 
-Optimizaciones a validar (basadas en profiling real de EXP-PROF-1A):
-
-**Tier 1 — Impacto alto, riesgo bajo** (pendiente):
-- `gpu_memory_utilization: 0.5 → 0.6+` (VRAM tiene 65% headroom)
-- `ppo_micro_batch_size_per_gpu: 4 → 8` (menos micro-batches)
-- `log_prob_micro_batch_size_per_gpu: 4 → 8`
-- `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`
-
-**Descartadas por profiling**:
-- `JUDGE_MAX_CONCURRENT=24` — sem_wait ya es 0, reward no es bottleneck
-- `free_cache_engine`, `use_dynamic_bsz` — complejidad innecesaria
-
-**Blocker**: batch=24 requiere más datos precomputados (TODO-006)
-
-**Depende de**: TODO-002 (profiling ✅ parcial), TODO-003 (judge ✅), TODO-004 (checkpoints ✅).
+Tier 1 pendiente: `gpu_memory_utilization: 0.5 → 0.6+`, micro_batch 4→8.
+Descartadas por profiling: `JUDGE_MAX_CONCURRENT=24`, `free_cache_engine`, `use_dynamic_bsz`.
 Refs: CHG-011, CHG-017, EXP-PROF-1A, `docs/performance-profile.md`
 
----
+### TODO-006 🟢 Judge binario GPT-4.1 + datos (re-scopeado por pivote)
 
-## Runs core
+- ✅ Fase 1 (2026-06-12): `Judge.evaluate_answers_binary()` + módulo canónico
+  `judge/binary.py` (template HealthBench, parser, agregación) — validate_judge.py dedupeado
+- ✅ Fase 3 re-scopeada (2026-06-12): precompute Fase 0 hecho —
+  `phase0/build_rollout_sets.py` → 90 preguntas con hacks + ancla del panel
+- ⬜ Fase 2 (adaptar `precompute_healthbench.py` a binario): pendiente, recién necesaria
+  para re-precompute masivo de gold_scores (Fases 1-2 del plan nuevo)
+- 🔄 Fase 4 (re-scopeada): reward function binaria — pendiente, para GRPO ablation y Fase 2
+- ⛔ Fase 5 original (GRPO producción con curriculum): superseded por TODO-013
 
-### TODO-006 🟢 Preparar datos para training (en curso 2026-03-25)
-
-**Referencia**: `docs/data-guide.md` — leer para entender splits y flujo completo.
-
-**Splits (sin contaminación)**:
-- **SFT**: 1,329 preguntas SIN respuestas (`--subset no_answers`). Modelo ve rúbrica gold, OK porque nunca en GRPO.
-- **GRPO**: 3,171 preguntas CON respuestas, precomputadas, excluyendo holdout. Modelo NO ve rúbrica gold.
-- **Eval**: 500 holdout (fijo, seed=42). No en SFT ni GRPO.
-
-**Estado del cache** (actualizado 2026-03-25):
-- 560 entries precomputadas con gpt-5-mini @ amalia-resource (todas buenas, 0 all-zero)
-- 406 usables para GRPO (with_answers, no holdout)
-- 92 en holdout (de 500 necesarios para eval)
-- **NO hay que borrar el cache** — es incremental, entries existentes son válidas
-
-**Fix aplicado (CHG-019)**: gpt-5-mini es reasoning model — usaba todo el token budget en "pensamiento interno". Se subió `max_tokens` de 4000→16000 y se agregó retry on parse failure. Testeado y validado.
-
-**Pasos concretos**:
-1. ✅ Regenerar SFT: `--subset no_answers` → 1,329 examples + 500 holdout IDs (2026-03-23)
-2. ⬜ Precompute holdout (408 entries faltantes, ~$6, imprescindible para eval)
-   - `python -m grubrics_science.data.precompute_healthbench --model gpt-5-mini --num_evals 3 --max_concurrent 5`
-3. ⬜ Generar parquet GRPO: `python -m grubrics_science.data.prepare preset --only-cached` (filtra holdout del train).
-4. ⬜ Sincronizar datos a H100: `git push` o `scp` de `data/sft/` + `data/processed/` + `data/cache/`
-
-**Estrategia**: empezar con 406 entries GRPO cacheadas. Si GRPO aprende → precomputar más (2,765 restantes, ~$40). Si no aprende → el problema es otro y no gastamos de más.
-
-**Costo mínimo**: ~$6 (holdout). **Costo completo**: ~$46 (holdout + GRPO pool completo).
-
-Refs: `docs/data-guide.md`, CHG-018, CHG-019
-
-### TODO-007 🟡 Baselines
-
-- HealthBench (B0, B1, B3): piso y techo de calidad (~$25, ~2h)
-- Zero-shot Qwen3-8B: lower bound sin fine-tuning ($0, ~1h GPU)
-
-### TODO-008 🟡 SFT warm-up
-
-SFT con `--subset no_answers` (1,329 examples). ~$5, ~30 min H100.
-**Datos listos**: `data/sft/train.jsonl` (1,329 entries) + `data/sft/holdout_ids.json` (500 IDs).
-**Comando**: `python run_sft.py --config configs/sft_healthbench.yaml` (en H100, `conda activate RL`).
-**No depende de precompute** — SFT solo necesita pares (pregunta, rúbrica gold).
-
-### TODO-009 🟡 RL GRPO con curriculum — método principal
-
-~$90, ~10h H100.
-**Bloqueado por**: TODO-006 (precompute holdout + parquet), TODO-008 (SFT checkpoint).
-
-### TODO-010 🟡 Evaluación
-
-- Eval checkpoint verifiable-only: ¿transfer a dominio abierto? ($0, ~30 min)
-- Eval en FrontierScience holdout: generalización cross-domain (~$5, ~1h)
-
-**Costo total core (TODO-006 a TODO-010)**: ~$190
+Refs: CHG-021, CHG-022, EXP-JUDGE-003
 
 ---
 
-## Extensiones (post-core)
+## Histórico — plan pre-pivote
 
-### TODO-011 🟡 Ablations y comparaciones
+### TODO-001 ✅ Framework: seguir con veRL (2026-03-18) — Refs: CHG-015
+### TODO-002 🟢 Profiling (parcial: EXP-PROF-1A/4) — Refs: CHG-017, `docs/performance-profile.md`
+### TODO-003 ✅ Judge pipeline (2026-03-19/26) — gpt-5-mini → GPT-4.1 binario. Refs: CHG-018, CHG-021
+### TODO-004 ✅ Checkpoint load/resume (2026-03-19) — E2E validado. Refs: CHG-016, EXP-DEBUG-A/B/C
 
-| Extensión | RQ | Costo est. |
-|-----------|-----|-----------|
-| Open-only sin curriculum | ¿Curriculum aporta? | ~$90 |
-| Policy training (D1-D2) | Rubric quality → policy quality | ~$180 |
-| Ablations reward (A1-A4) | ¿Qué componentes importan? | ~$70 c/u |
-| Benchmark de Judges | ¿Mejor Judge? | ~$5-15 |
-| Inter-judge consistency | ¿Rankings consistentes? | ~$15 |
+### TODO-007 ⛔ Baselines (superseded)
 
-**Costo total con extensiones**: ~$820
+Absorbido por TODO-012/013: los baselines del nuevo plan son otros (frontier-con-ejemplos,
+retrieval ρ=0.545 publicado, panel directo).
+
+### TODO-008 ✅ SFT warm-up (2026-03-25)
+
+Completado en H100: 1,329 entries, 3 epochs, loss 1.51→1.30, ~17 min.
+Checkpoint: `checkpoints/grubrics-transfer/sft-healthbench/final`. Sigue útil como punto de
+partida de TODO-013.
+
+### TODO-009 ⛔ GRPO con curriculum (superseded)
+
+El framing curriculum verificable→abierto se descarta con el pivote (CHG-022). El run principal
+ahora es TODO-013 (inductor) + TODO-014/015 (policies).
+
+### TODO-010 ⛔ Evaluación (superseded)
+
+Absorbido: la evaluación del nuevo plan está definida dentro de cada fase (TODO-012..015).
+Las métricas estructurales (coverage/uniqueness/insight) siguen siendo deseables como complemento.
+
+### TODO-011 ⛔ Extensiones (superseded)
+
+El item principal (policy training, "rubric quality → policy quality") **se promovió a core**
+como TODO-014. El resto (ablations de reward, benchmark de judges) queda dentro de las fases.

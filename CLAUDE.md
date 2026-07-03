@@ -94,11 +94,14 @@ Para reproducir el entorno desde cero: `docs/h100-setup.md`
 
 ## Docs de referencia
 
+- `WIKI.md` — **LA referencia del proyecto**: qué es, para quién, cómo funciona el experimento, datos, stack, resultados, riesgos y hoja de ruta. Conceptual→técnica, accesible a cualquiera. **Mantener SIEMPRE actualizada**: cualquier cambio de diseño, resultado nuevo o decisión de rumbo se refleja acá en la misma sesión (es el documento que el usuario guarda en sus notas y comparte)
 - `TODO.md` — source of truth de pendientes (IDs: `TODO-NNN`)
 - `CHANGELOG.md` — decisiones de diseño y cambios significativos (IDs: `CHG-NNN`)
+- `docs/theoretical-foundations.md` — **cadena argumental del paper: claims con evidencia, qué funciona/qué no, contraargumentos** (mantener al incorporar evidencia nueva)
+- `docs/adversarial-evaluation-reframing.md` — **reframing candidato 2026-07: evaluación adversarial (atacante/defensor co-evolucionados)** — PROPUESTA pendiente de verificación (TODO-017); leer antes de cualquier decisión de rumbo
+- `docs/phase0-plan.md` — plan operativo de la Fase 0 (etapas A-D)
 - `docs/performance-profile.md` — **referencia viva de profiling, bottlenecks y optimizaciones** (mantener actualizado)
 - `docs/data-guide.md` — **guía de datos, splits y flujos** (leer antes de tocar datos o training)
-- `PROYECTO_ACTUAL.md` — descripción del proyecto para personas externas (mantener actualizado)
 - `docs/experiment-log.md` — bitácora cronológica de runs y resultados (IDs: `EXP-xxx`)
 - `docs/research.md` — framing del paper, preguntas de investigación, landscape de la literatura
 - `docs/related-work.md` — revisión de literatura detallada
@@ -119,7 +122,7 @@ del workflow. No hacerlo degrada la calidad del proyecto entre sesiones.
 | `CHANGELOG.md` | Decisiones y cambios con IDs `CHG-NNN` | Decisión de diseño, cambio de approach, por qué se descartó algo |
 | `docs/experiment-log.md` | Resultados de runs con IDs `EXP-xxx` | Resultado o aprendizaje de un experimento |
 | `CLAUDE.md` | Convenciones del repo y workflow | Nueva convención, cambio de stack o workflow |
-| `PROYECTO_ACTUAL.md` | Descripción externa del proyecto | Cambio significativo que afecte la descripción pública |
+| `WIKI.md` | **LA referencia viva del proyecto** (conceptual→técnica) | **SIEMPRE**: cambio de diseño, resultado nuevo, decisión de rumbo, cambio de datos/stack/costos — en la misma sesión en que ocurre |
 | `docs/research.md` | Framing del paper y preguntas de investigación | Avance o respuesta a una pregunta de investigación |
 | `.claude/skills/*/SKILL.md` | Guías operativas | Cambio en workflow operativo (debug, precompute, run, eval, dataset, h100) |
 

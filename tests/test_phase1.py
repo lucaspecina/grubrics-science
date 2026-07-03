@@ -266,8 +266,10 @@ class TestJudgeParsing:
         from grubrics_science.judge.judge import Judge
 
         judge = Judge.__new__(Judge)
+        # CHG-019: parse failure returns None so the caller can retry
+        # (instead of a silent [0.0]*n).
         scores = judge._parse_batched_response("not json at all", 4)
-        assert scores == [0.0, 0.0, 0.0, 0.0]
+        assert scores is None
 
 
 # =========================================================================

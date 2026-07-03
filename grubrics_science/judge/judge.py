@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import random
 import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -18,6 +19,17 @@ from ..llm.prompts import (
     JUDGE_BATCHED_SYSTEM_PROMPT,
     get_judge_prompt,
     get_judge_batched_prompt,
+)
+from .binary import (
+    BINARY_GRADER_MAX_TOKENS,
+    BINARY_GRADER_TEMPERATURE,
+    HEALTHBENCH_SYSTEM_PROMPT,
+    aggregate_binary,
+    build_grader_prompt,
+    format_conversation,
+    format_rubric_item,
+    parse_criteria_met,
+    parse_rubric_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -107,6 +119,7 @@ class Judge:
 
     async def _call_with_retry(
         self, prompt: str, system_prompt: Optional[str] = None, max_tokens: int = 5000,
+        temperature: float = 1.0,
     ) -> str:
         """Call the LLM with rate limiting, timeout, and retry."""
         system_prompt = system_prompt or JUDGE_SYSTEM_PROMPT
@@ -122,6 +135,7 @@ class Judge:
                             prompt=prompt,
                             system_prompt=system_prompt,
                             max_tokens=max_tokens,
+                            temperature=temperature,
                         ),
                         timeout=self._timeout,
                     )
@@ -133,9 +147,19 @@ class Judge:
                 return response
             except Exception as exc:
                 last_error = exc
-                wait = 2 ** attempt  # 1s, 2s, 4s
+                # 429s need long, jittered backoff (the burst must drain);
+                # the 1-2-4s schedule only suits transient network errors.
+                is_rate_limit = (
+                    type(exc).__name__ == "RateLimitError"
+                    or "429" in str(exc)
+                    or "Too Many Requests" in str(exc)
+                )
+                if is_rate_limit:
+                    wait = min(90.0, 15.0 * (attempt + 1)) + random.uniform(0, 5)
+                else:
+                    wait = 2 ** attempt  # 1s, 2s, 4s
                 logger.warning(
-                    "Judge API call failed (attempt %d/%d): %s [%s: %r]. Retrying in %ds...",
+                    "Judge API call failed (attempt %d/%d): %s [%s: %r]. Retrying in %.1fs...",
                     attempt + 1,
                     self._max_retries,
                     exc,
@@ -373,3 +397,144 @@ class Judge:
             scores.append(score)
 
         return scores
+
+    # ------------------------------------------------------------------
+    # Binary (HealthBench-protocol) scoring — CHG-021
+    # ------------------------------------------------------------------
+
+    async def _grade_criterion_binary(
+        self,
+        conversation_str: str,
+        rubric_item_str: str,
+        max_parse_retries: int = 3,
+    ) -> Optional[bool]:
+        """Grade one criterion (pass/fail). Returns None if unparseable after retries.
+
+        API-level retries live in ``_call_with_retry``; this loop retries on
+        *parse* failures (valid API response without a criteria_met boolean).
+        """
+        prompt = build_grader_prompt(conversation_str, rubric_item_str)
+
+        for attempt in range(max_parse_retries):
+            response = await self._call_with_retry(
+                prompt,
+                system_prompt=HEALTHBENCH_SYSTEM_PROMPT,
+                max_tokens=BINARY_GRADER_MAX_TOKENS,
+                temperature=BINARY_GRADER_TEMPERATURE,
+            )
+            result = parse_criteria_met(response)
+            if result is not None:
+                return result
+            logger.warning(
+                "Binary grade parse failed (attempt %d/%d): %s...",
+                attempt + 1, max_parse_retries, (response or "")[:200],
+            )
+        return None
+
+    async def evaluate_answer_binary(
+        self,
+        question: str,
+        answer: str,
+        rubric_items: List[Dict[str, Any]],
+        prompt_messages: Optional[List[Dict[str, str]]] = None,
+    ) -> Dict[str, Any]:
+        """Evaluate one answer against a structured rubric, binary per criterion.
+
+        Args:
+            question: Question text (used if prompt_messages is None).
+            answer: The answer/completion to grade.
+            rubric_items: List of {"points": float, "criterion": str}.
+            prompt_messages: Optional full conversation (HealthBench prompts);
+                falls back to a single user message with ``question``.
+
+        Returns:
+            Aggregation dict from ``aggregate_binary`` (score, achieved_points,
+            total_possible, num_criteria, parse_failures, criteria).
+        """
+        messages = prompt_messages or [{"role": "user", "content": question}]
+        conversation_str = format_conversation(messages, answer)
+
+        tasks = [
+            self._grade_criterion_binary(
+                conversation_str,
+                format_rubric_item(it.get("points", 0), it.get("criterion", "")),
+            )
+            for it in rubric_items
+        ]
+        met_flags = await asyncio.gather(*tasks)
+
+        result = aggregate_binary(rubric_items, list(met_flags))
+        if result["parse_failures"]:
+            logger.warning(
+                "Binary eval had %d/%d criteria unparseable (score may be deflated)",
+                result["parse_failures"], result["num_criteria"],
+            )
+        return result
+
+    async def evaluate_answers_binary(
+        self,
+        question: str,
+        answers: List[str],
+        rubric: Any,
+        prompt_messages: Optional[List[Dict[str, str]]] = None,
+        return_details: bool = False,
+    ) -> Any:
+        """Evaluate multiple answers against one rubric, binary per criterion.
+
+        Drop-in binary replacement for ``evaluate_answers_batched`` (CHG-021):
+        same (question, answers, rubric) -> List[float] contract, but the
+        rubric may be either the model-generated text format
+        ("Points: N, Item: ...") or an already-structured list of
+        {"points", "criterion"} dicts (HealthBench format).
+
+        An unparseable rubric (no valid items) yields 0.0 for all answers —
+        logged loudly, never silent.
+
+        Args:
+            question: The original question.
+            answers: Answers to evaluate.
+            rubric: Rubric text or structured item list.
+            prompt_messages: Optional full conversation for HealthBench prompts.
+            return_details: If True, returns (scores, details_per_answer).
+
+        Returns:
+            List of scores (one per answer), or (scores, details) tuple.
+        """
+        if isinstance(rubric, str):
+            rubric_items = parse_rubric_text(rubric)
+            rubric_key = rubric
+        else:
+            rubric_items = list(rubric)
+            rubric_key = json.dumps(rubric_items, sort_keys=True, ensure_ascii=False)
+
+        if not rubric_items:
+            logger.warning(
+                "evaluate_answers_binary: no parseable rubric items "
+                "(rubric starts: %s...) — returning 0.0 for all %d answers",
+                str(rubric)[:120], len(answers),
+            )
+            zeros = [0.0] * len(answers)
+            return (zeros, [{} for _ in answers]) if return_details else zeros
+
+        if self._max_cache_size > 0:
+            key = _cache_key(question, json.dumps(answers), ["binary", rubric_key])
+            if key in self._cache:
+                cached_scores, cached_details = self._cache[key]
+                return (cached_scores, cached_details) if return_details else cached_scores
+
+        results = await asyncio.gather(*[
+            self.evaluate_answer_binary(
+                question, answer, rubric_items, prompt_messages=prompt_messages,
+            )
+            for answer in answers
+        ])
+
+        scores = [r["score"] for r in results]
+        details = list(results)
+
+        if self._max_cache_size > 0:
+            key = _cache_key(question, json.dumps(answers), ["binary", rubric_key])
+            if len(self._cache) < self._max_cache_size:
+                self._cache[key] = (scores, details)
+
+        return (scores, details) if return_details else scores

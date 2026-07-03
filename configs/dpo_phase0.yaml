@@ -1,0 +1,42 @@
+# T1 — mini-DPO del rubricator con señal funcional (Fase 0, TODO-012)
+# Receta base: arXiv:2605.30568 (LoRA r=64, lr=5e-6, beta=0.1) con pares
+# construidos por functional alignment (build_dpo_pairs.py), no meta-judge.
+#
+# Correr en H100 (conda activate RL):
+#   python run_dpo.py --config configs/dpo_phase0.yaml
+
+model:
+  # Decisión 2026-06-12 (CHG-023): empezar DE CERO desde el modelo base —
+  # no reusar el checkpoint SFT pre-pivote. El claim queda más limpio:
+  # "base + señal funcional", sin herencia del paradigma de imitación.
+  path: Qwen/Qwen3-8B
+  trust_remote_code: true
+
+lora:
+  r: 64
+  lora_alpha: 128
+  target_modules: all-linear
+  lora_dropout: 0.05
+
+data:
+  train_file: data/sft/phase0_dpo_pairs.jsonl
+  max_length: 4096          # prompt (con rollouts) + rúbrica
+  max_prompt_length: 3072
+
+training:
+  output_dir: checkpoints/grubrics-transfer/dpo-phase0
+  num_train_epochs: 3       # dataset chico (~40-55 pares); DPO satura rápido
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 8   # batch efectivo 16 (como Arizona)
+  learning_rate: 5.0e-6
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.1
+  beta: 0.1
+  gradient_checkpointing: true
+  logging_steps: 2
+  save_strategy: epoch
+  seed: 42
+
+logging:
+  report_to: none           # wandb no configurado en H100 (ver memoria SFT)
+  run_name: dpo-phase0-functional

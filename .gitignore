@@ -6,6 +6,11 @@ __pycache__/
 # C extensions
 *.so
 
+# local artifacts
+build_output/
+job_output/
+.claude/projects/
+
 # data/
 data/healthbench/
 data/medqa/

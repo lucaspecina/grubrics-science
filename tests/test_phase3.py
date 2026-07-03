@@ -114,13 +114,14 @@ class TestRewardWeightsIntegration:
 
     def test_missing_precompute_raises_verifiable(self):
         """Without precomputed data, verifiable reward must raise."""
+        import asyncio
         from grubrics_science.rewards.grubrics_reward import _reward_verifiable
         import grubrics_science.rewards.grubrics_reward as mod
 
         mod._reward_config = None
 
         with pytest.raises(ValueError, match="Missing precomputed"):
-            _reward_verifiable(
+            asyncio.run(_reward_verifiable(
                 solution_str="Points: 5.0, Item: A\nPoints: 5.0, Item: B",
                 ground_truth="42",
                 extra_info={
@@ -128,7 +129,7 @@ class TestRewardWeightsIntegration:
                     "question": "What is 6*7?",
                     "question_id": "test_q",
                 },
-            )
+            ))
 
         mod._reward_config = None
 
