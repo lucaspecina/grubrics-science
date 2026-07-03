@@ -1,4 +1,23 @@
-# Diseño experimental: Evaluación Adversarial — v2 (2026-07-02)
+# Diseño experimental: Evaluación Adversarial — v2.1 (2026-07-02)
+
+> **Delta v2 → v2.1** (objeción del usuario: el defensor-techo con acceso al resultado
+> puede filtrarlo a la rúbrica; + re-centrado en utilidad):
+> 1. **El núcleo se re-sitúa al dominio ABIERTO (HealthBench)** — la realización clave: el
+>    gold por construcción (rúbrica completa vs agujereada + detectores M(t)) NO requiere
+>    verificabilidad. En abierto no hay respuesta que filtrar, la infra/datos de Fase 0
+>    aplican enteros, y es la cancha donde las rúbricas existen de verdad. Los agujeros se
+>    acoplan a CALIDAD (verificado en piloto: explotarlos degrada calidad real).
+> 2. **D5 redefinido**: oráculo-sobre-la-falla (conoce la spec de agujeros plantados), NO
+>    sobre la tarea — techo significativo, sin fuga posible. D4 (humana congelada) entra al
+>    núcleo (HealthBench SÍ tiene rúbricas humanas).
+> 3. **Lo verificable queda como SIDECAR** exclusivamente para la calibración del panel
+>    bajo presión (co-headline intacto). Muere el riesgo de answer-smuggling del núcleo
+>    (finding 9 del revisor de metodología se resuelve de raíz).
+> 4. **Framing de utilidad**: "certificado de vida útil del evaluador" + torneo de
+>    estrategias de refresh + refrescador on-prem. Clientes nombrados y wiki completa:
+>    `PROYECTO_ACTUAL.md`.
+> Todo lo demás de v2 (brazos, contratos, métricas, arquitectura, presupuesto) se
+> transfiere sin cambios, con MATH→HealthBench.
 
 **Estado: v2 post-revisión adversarial.** v1 fue atacada por 3 revisores hostiles
 (novedad, metodología, ingeniería RL) + excavación completa de CHERRL (paper+repo).
