@@ -15,7 +15,7 @@
 >    (finding 9 del revisor de metodología se resuelve de raíz).
 > 4. **Framing de utilidad**: "certificado de vida útil del evaluador" + torneo de
 >    estrategias de refresh + refrescador on-prem. Clientes nombrados y wiki completa:
->    `PROYECTO_ACTUAL.md`.
+>    `WIKI.md`.
 > Todo lo demás de v2 (brazos, contratos, métricas, arquitectura, presupuesto) se
 > transfiere sin cambios, con MATH→HealthBench.
 

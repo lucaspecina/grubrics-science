@@ -1,4 +1,6 @@
 {
   "python.defaultInterpreterPath": "/anaconda/envs/rl/bin/python",
-  "python.terminal.activateEnvironment": true
+  "python.terminal.activateEnvironment": true,
+  "chat.editor.fontSize": 14,
+  "chat.fontSize": 14
 }
