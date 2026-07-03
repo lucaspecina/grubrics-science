@@ -193,6 +193,50 @@ o daña?" en sus propios términos — finding 8, rev. novedad).
 preprint 2 sem. Extensiones después del preprint (plantar bandera primero — 2 grupos
 tienen esto como future work declarado).
 
+## 10. Survey de defensas (TODO-018, verificado 2026-07-02) — acota novedad y fija baselines
+
+Barrido dedicado (104 agentes, 22 claims 3-0) para completar el diseño del torneo. Veredicto:
+
+**La novedad "primera comparación de defensas" está TOMADA sin acotar.** Existen ≥6 bake-offs
+controlados de defensas anti-hacking en RM-land, la mayoría con curvas de overoptimization:
+PAR (2502.18770, 9 brazos: WARM/ODIN/L2/norm/clip/LSC/PAR), Coste (2310.02743, single/mean/
+WCO/UWO), InfoRM (2402.09345), gradient-regularization (2602.18037), WARM (2401.12187), ARA
+(2602.01750, 6 mitigaciones). **Ninguno toca evaluadores basados en rúbricas.**
+
+**El gap real y defendible**: el survey de reward-hacking (2604.13602, §6.1) nombra
+"verifiable rubricized reward interfaces" como categoría de defensa **con CERO instancias
+benchmarkeadas ni comparaciones empíricas**. → Claim acotado y vivo: *"primera comparación
+controlada de estrategias de REFRESH DE RÚBRICAS para evaluadores basados en rúbricas"*.
+Prohibido: "primera comparación de defensas" sin acotar.
+
+**D-stop NO es novedoso en mecanismo** (lo tienen InfoRM CSI/MOP 2402.09345/2510.13694 y
+EvalStop 2606.04145; ARA hace gating continuo; GRIFT 2604.16242 hace filter+SFT). Queda como
+**baseline reviewer-expected**, citando ancestros; sólo reclamamos aplicación-a-rúbricas +
+medición comparativa.
+
+**Baselines/arms que un reviewer va a esperar** (mapeados con effect sizes):
+- **KL penalty** — el baseline universal, obligatorio.
+- **D-stop** (early-stop al onset detectado) — baseline, cita InfoRM/EvalStop.
+- **Ensemble de rúbricas/judges** — INSPIRACIÓN con advertencia: Eisenstein (2312.09244,
+  DeepMind) probó que los ensembles *mitigan pero no eliminan* el hacking porque comparten
+  puntos ciegos correlacionados — warning directo para nuestro panel y para cualquier comité
+  de rúbricas estático. La diversidad de fuente importa (pretrain-seed > finetune-seed).
+- **Gradient regularization** (2602.18037) — defensa POLICY-SIDE, ortogonal y combinable con
+  las nuestras (evaluator-side); probada contra judge-hacking REAL (42.8% GR vs 26.4% KL vs
+  2.0% sin defensa en un LLM-judge de GSM8K). Candidata a brazo de inspiración/ablation.
+- Reward shaping/normalización/clipping (PAR), WARM/weight-averaging, ODIN-disentanglement —
+  citar como el suite RM-land del que nuestras defensas rúbrica-side son el análogo faltante.
+
+**Esquema organizador del related-work**: los 3 pilares del survey (6.1 reducir compresión
+del objetivo · 6.2 controlar amplificación de la optimización · 6.3 co-evolución
+evaluador-policy). Nuestro torneo puebla 6.1+6.3 del lado rúbrica, que están vacíos de
+instancias. RHB (2605.02964, benchmark agéntico) = cite-only.
+
+**Impacto en los brazos v2.1**: se mantienen los 7; se AGREGA D-stop como baseline (ya
+estaba en el pipeline mental, ahora con ancestros citados) y opcionalmente D-ensemble
+(rotación/comité de rúbricas — moving-target) como brazo extra si el presupuesto da, con la
+advertencia de Eisenstein pre-registrada. GR queda como ablation ortogonal declarada.
+
 ## 9. Decisiones abiertas (bloquean el arranque)
 
 1. **CÓMPUTO (F1 — el long pole)**: la spot 2×H100 es compartida con protocolo GPU-1-only;

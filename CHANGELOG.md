@@ -283,6 +283,49 @@ Refs: CHG-019, TODO-006
 
 ---
 
+## [CHG-027] 2026-07-02 — Cierre de grubrics-science y migración a goodhart-rubrics
+
+El proyecto se archiva (read-only) y continúa en el repo sucesor **goodhart-rubrics**. Dos
+pivotes (CHG-022, CHG-024/025) dejaron el nombre "grubrics-science" y su estructura sin
+relación con lo que el proyecto es hoy: un estudio del fenómeno Goodhart en evaluadores
+basados en rúbricas (nombre elegido tras descartar "gym"/"benchmark" por no describir el
+v1, que es un estudio). Buena práctica git aplicada: tombstone (README banner + este CHG +
+tag `final-grubrics-science`), puntero inverso en el nuevo repo, y merge de
+`pivot/adaptive-rubrics` → `main` para que el estado archivado refleje el final real.
+
+**Migra a goodhart-rubrics**: código vigente (judge binario, panel, paquete phase0 completo,
+pares DPO, rollout-sets), datos, y los docs de referencia (WIKI.md, diseño v2.1, reframing,
+theoretical-foundations, related-work). **Queda archivado acá**: la historia de decisiones
+completa (CHG-001..027), los framings históricos, el código pre-pivote.
+
+Refs: WIKI.md, CHG-022, CHG-024, CHG-025, CHG-026
+
+---
+
+## [CHG-026] 2026-07-02 — Survey de estrategias de defensa (TODO-018): acota la novedad del torneo
+
+Tercer barrido de literatura (104 agentes, 22 claims 3-0). Objetivo: verificar si comparar
+estrategias de defensa contra reward hacking ya se hizo, y cosechar los baselines que un
+reviewer va a esperar. Detalle completo y su impacto en el diseño: `docs/adversarial-evaluation-design.md` §10.
+
+**Hallazgo clave**: las comparaciones head-to-head de defensas YA EXISTEN en reward-model
+land (≥6 papers: PAR, Coste, InfoRM, WARM, gradient-reg, ARA) — "primera comparación de
+defensas" sin acotar está **muerto**. Pero **ninguno toca evaluadores basados en rúbricas**,
+y el survey 2604.13602 §6.1 nombra las defensas rúbrica-side como categoría con **cero
+instancias benchmarkeadas**. → Claim acotado y vivo: *"primera comparación controlada de
+estrategias de REFRESH DE RÚBRICAS para evaluadores rúbrica-based"*.
+
+**Impacto en el diseño**: (1) D-stop NO es novedoso (InfoRM CSI/MOP, EvalStop) → baseline con
+ancestros citados, no contribución; (2) baselines reviewer-expected a agregar: KL penalty
+(universal), D-stop, ensemble de rúbricas (con la advertencia de Eisenstein 2312.09244: los
+ensembles mitigan pero no eliminan por puntos ciegos compartidos), gradient-regularization
+(policy-side, ortogonal); (3) los 3 pilares del survey (reducir compresión / controlar
+amplificación / co-evolución) como esquema del related-work.
+
+Refs: TODO-018, `docs/adversarial-evaluation-design.md` §10, CHG-024, CHG-025
+
+---
+
 ## [CHG-025] 2026-07-02 — Verificación del reframing adversarial: ADOPTAR CON CLAIMS AJUSTADOS
 
 Resultado de TODO-017 (deep research: 103 agentes, 21 fuentes primarias, 22 claims 3-0, 3
